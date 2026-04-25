@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { api } from './lib/api';
 import { formatBytes, formatConfidence } from './lib/format';
-import type { Integration, Library as MediaLibrary, ProviderHealth, Recommendation, ScanResult } from './types';
+import type { CatalogItem, Integration, Library as MediaLibrary, ProviderHealth, Recommendation, ScanResult } from './types';
 
 type View = 'dashboard' | 'libraries' | 'catalog' | 'recommendations' | 'integrations' | 'settings';
 
@@ -28,6 +28,7 @@ export function App() {
   const [view, setView] = useState<View>('dashboard');
   const [libraries, setLibraries] = useState<MediaLibrary[]>([]);
   const [scans, setScans] = useState<ScanResult[]>([]);
+  const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [providers, setProviders] = useState<ProviderHealth[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
@@ -37,9 +38,10 @@ export function App() {
 
   async function refresh() {
     try {
-      const [health, libs, scanRows, recs, providerRows, integrationRows] = await Promise.all([
+      const [health, libs, catalogRows, scanRows, recs, providerRows, integrationRows] = await Promise.all([
         api.health(),
         api.libraries(),
+        api.catalog(),
         api.scans(),
         api.recommendations(),
         api.providers(),
@@ -47,6 +49,7 @@ export function App() {
       ]);
       setStatus(health.status);
       setLibraries(libs);
+      setCatalog(catalogRows);
       setScans(scanRows);
       setRecommendations(recs);
       setProviders(providerRows);
@@ -67,6 +70,7 @@ export function App() {
       const result = await api.startScan();
       setScans((current) => [...current, ...result.scans]);
       setRecommendations(result.recommendations);
+      setCatalog(result.scans.flatMap((scan) => scan.items).map(toCatalogItem));
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Scan failed');
@@ -87,7 +91,7 @@ export function App() {
     }
   }
 
-  const catalogItems = useMemo(() => scans.flatMap((scan) => scan.items), [scans]);
+  const catalogItems = useMemo(() => catalog, [catalog]);
   const totalFiles = catalogItems.length;
   const totalSize = catalogItems.reduce((sum, item) => sum + item.sizeBytes, 0);
   const recoverable = recommendations.reduce((sum, rec) => sum + rec.spaceSavedBytes, 0);
@@ -232,7 +236,7 @@ function Libraries({ libraries, scans }: { libraries: MediaLibrary[]; scans: Sca
   );
 }
 
-function Catalog({ items }: { items: ScanResult['items'] }) {
+function Catalog({ items }: { items: CatalogItem[] }) {
   return (
     <section className="table-panel">
       <table>
@@ -249,9 +253,9 @@ function Catalog({ items }: { items: ScanResult['items'] }) {
         <tbody>
           {items.map((item) => (
             <tr key={item.id}>
-              <td>{item.parsed.title}</td>
-              <td>{item.parsed.kind}</td>
-              <td>{item.parsed.quality || 'unknown'}</td>
+              <td>{item.title}</td>
+              <td>{item.kind}</td>
+              <td>{item.quality || 'unknown'}</td>
               <td>{formatBytes(item.sizeBytes)}</td>
               <td>{item.subtitles.length}</td>
               <td className="path-cell">{item.path}</td>
@@ -412,4 +416,21 @@ function titleFor(view: View): string {
     integrations: 'Integrations',
     settings: 'Settings',
   }[view];
+}
+
+function toCatalogItem(item: ScanResult['items'][number]): CatalogItem {
+  return {
+    id: item.id,
+    libraryId: '',
+    path: item.path,
+    canonicalKey: item.parsed.canonicalKey,
+    title: item.parsed.title,
+    kind: item.parsed.kind,
+    sizeBytes: item.sizeBytes,
+    quality: item.parsed.quality,
+    fingerprint: '',
+    subtitles: item.subtitles,
+    modifiedAt: '',
+    scannedAt: new Date().toISOString(),
+  };
 }

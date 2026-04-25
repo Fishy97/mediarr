@@ -1,4 +1,4 @@
-import type { Integration, Library, ProviderHealth, Recommendation, ScanResult } from '../types';
+import type { CatalogItem, Integration, Library, ProviderHealth, Recommendation, ScanResult } from '../types';
 
 type Envelope<T> = { data: T };
 
@@ -26,6 +26,9 @@ export const api = {
   async scans(): Promise<ScanResult[]> {
     return (await request<Envelope<ScanResult[]>>('/api/v1/scans')).data;
   },
+  async catalog(): Promise<CatalogItem[]> {
+    return (await request<Envelope<CatalogItem[]>>('/api/v1/catalog')).data;
+  },
   async startScan(): Promise<{ scans: ScanResult[]; recommendations: Recommendation[] }> {
     return (await request<Envelope<{ scans: ScanResult[]; recommendations: Recommendation[] }>>('/api/v1/scans', {
       method: 'POST',
@@ -44,4 +47,3 @@ export const api = {
     return (await request<Envelope<{ path: string }>>('/api/v1/backups', { method: 'POST' })).data;
   },
 };
-

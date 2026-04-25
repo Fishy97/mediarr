@@ -15,3 +15,10 @@ Media mounts are read-only by default:
 
 Durable application state is stored in `./config`, mounted at `/config` in the container.
 
+The container runs as `PUID:PGID` from `.env`, defaulting to `1000:1000`.
+On Linux hosts, make sure the config folder is writable by that user:
+
+```bash
+mkdir -p config
+chown -R 1000:1000 config
+```

@@ -4,6 +4,7 @@ services:
     image: media-steward:local
     container_name: media-steward
     restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
     ports:
       - "8080:8080"
     environment:
@@ -15,6 +16,12 @@ services:
       - ${MOVIES_DIR:-./fixtures/media/movies}:/media/movies:ro
       - ${SERIES_DIR:-./fixtures/media/series}:/media/series:ro
       - ${ANIME_DIR:-./fixtures/media/anime}:/media/anime:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
   ollama:
     image: ollama/ollama:latest
     container_name: media-steward-ollama

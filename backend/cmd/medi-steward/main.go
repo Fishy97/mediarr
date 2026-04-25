@@ -44,6 +44,7 @@ func main() {
 		Audit:       auditLog,
 		Scanner:     filescan.Scanner{Probe: true},
 		Engine:      recommendations.Engine{OversizedThresholdBytes: cfg.OversizedBytes},
+		Store:       store,
 	})
 	handler := auth.Middleware{AdminToken: cfg.AdminToken}.Wrap(server)
 

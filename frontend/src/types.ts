@@ -56,3 +56,17 @@ export type ScanResult = {
   }>;
 };
 
+export type CatalogItem = {
+  id: string;
+  libraryId: string;
+  path: string;
+  canonicalKey: string;
+  title: string;
+  kind: string;
+  sizeBytes: number;
+  quality?: string;
+  fingerprint: string;
+  subtitles: string[];
+  modifiedAt: string;
+  scannedAt: string;
+};

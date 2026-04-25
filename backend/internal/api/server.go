@@ -27,6 +27,7 @@ type Deps struct {
 	Audit           *audit.Logger
 	Scanner         filescan.Scanner
 	Engine          recommendations.Engine
+	Store           *database.Store
 }
 
 type Server struct {
@@ -42,6 +43,7 @@ type Server struct {
 	audit           *audit.Logger
 	scanner         filescan.Scanner
 	engine          recommendations.Engine
+	store           *database.Store
 }
 
 func NewServer(deps Deps) *Server {
@@ -56,6 +58,7 @@ func NewServer(deps Deps) *Server {
 		audit:           deps.Audit,
 		scanner:         deps.Scanner,
 		engine:          deps.Engine,
+		store:           deps.Store,
 	}
 	if server.providers == nil {
 		server.providers = metadata.Defaults()
@@ -74,6 +77,7 @@ func (server *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (server *Server) routes() {
 	server.mux.HandleFunc("/api/v1/health", server.health)
 	server.mux.HandleFunc("/api/v1/libraries", server.librariesHandler)
+	server.mux.HandleFunc("/api/v1/catalog", server.catalogHandler)
 	server.mux.HandleFunc("/api/v1/scans", server.scansHandler)
 	server.mux.HandleFunc("/api/v1/recommendations", server.recommendationsHandler)
 	server.mux.HandleFunc("/api/v1/providers", server.providersHandler)
@@ -136,6 +140,29 @@ func (server *Server) scansHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (server *Server) catalogHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.store != nil {
+		items, err := server.store.ListCatalog()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, envelope{Data: items})
+		return
+	}
+	server.mu.RLock()
+	defer server.mu.RUnlock()
+	var items []filescan.Item
+	for _, scan := range server.scans {
+		items = append(items, scan.Items...)
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: items})
+}
+
 func (server *Server) scanAll() ([]filescan.Result, []recommendations.Recommendation, error) {
 	server.mu.RLock()
 	libraries := append([]filescan.Library(nil), server.libraries...)
@@ -149,6 +176,11 @@ func (server *Server) scanAll() ([]filescan.Result, []recommendations.Recommenda
 			return nil, nil, err
 		}
 		results = append(results, result)
+		if server.store != nil {
+			if err := server.store.SaveScan(result); err != nil {
+				return nil, nil, err
+			}
+		}
 		for _, item := range result.Items {
 			files = append(files, recommendations.MediaFile{
 				ID:           item.ID,
@@ -160,6 +192,11 @@ func (server *Server) scanAll() ([]filescan.Result, []recommendations.Recommenda
 		}
 	}
 	recs := server.engine.Generate(files)
+	if server.store != nil {
+		if err := server.store.ReplaceRecommendations(recs); err != nil {
+			return nil, nil, err
+		}
+	}
 
 	server.mu.Lock()
 	server.scans = append(server.scans, results...)
@@ -172,6 +209,15 @@ func (server *Server) scanAll() ([]filescan.Result, []recommendations.Recommenda
 func (server *Server) recommendationsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w, r)
+		return
+	}
+	if server.store != nil {
+		recs, err := server.store.ListRecommendations()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, envelope{Data: recs})
 		return
 	}
 	server.mu.RLock()
