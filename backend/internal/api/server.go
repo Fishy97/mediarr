@@ -248,7 +248,7 @@ func (server *Server) librariesHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		server.mu.RLock()
 		defer server.mu.RUnlock()
-		writeJSON(w, http.StatusOK, envelope{Data: server.libraries})
+		writeJSON(w, http.StatusOK, envelope{Data: emptyIfNil(server.libraries)})
 	case http.MethodPost:
 		var library filescan.Library
 		if err := json.NewDecoder(r.Body).Decode(&library); err != nil {
@@ -274,14 +274,14 @@ func (server *Server) scansHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		server.mu.RLock()
 		defer server.mu.RUnlock()
-		writeJSON(w, http.StatusOK, envelope{Data: server.scans})
+		writeJSON(w, http.StatusOK, envelope{Data: emptyIfNil(server.scans)})
 	case http.MethodPost:
 		results, recs, err := server.scanAll(r.Context())
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, http.StatusAccepted, envelope{Data: map[string]any{"scans": results, "recommendations": recs}})
+		writeJSON(w, http.StatusAccepted, envelope{Data: map[string]any{"scans": emptyIfNil(results), "recommendations": emptyIfNil(recs)}})
 	default:
 		methodNotAllowed(w, r)
 	}
@@ -427,7 +427,7 @@ func (server *Server) recommendationsHandler(w http.ResponseWriter, r *http.Requ
 	}
 	server.mu.RLock()
 	defer server.mu.RUnlock()
-	writeJSON(w, http.StatusOK, envelope{Data: server.recommendations})
+	writeJSON(w, http.StatusOK, envelope{Data: emptyIfNil(server.recommendations)})
 }
 
 func (server *Server) recommendationActionHandler(w http.ResponseWriter, r *http.Request) {
@@ -1128,4 +1128,11 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func emptyIfNil[T any](items []T) []T {
+	if items == nil {
+		return []T{}
+	}
+	return items
 }
