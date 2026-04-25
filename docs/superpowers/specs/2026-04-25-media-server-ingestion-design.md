@@ -80,6 +80,16 @@ Initial endpoints:
 
 Plex activity ingestion must be paginated and incremental because playback history can be large.
 
+## Privacy And Data Controls
+
+Activity data can reveal household behavior. Mediarr should collect only what it needs for recommendations and should make the privacy posture visible:
+
+- Store external user IDs and display names by default, but allow anonymized display names in API/UI responses.
+- Never store media-server tokens in audit events, sync errors, or frontend responses.
+- Keep raw provider payloads out of normal tables. If raw payload capture is added for debugging, it must be opt-in, size-limited, redacted, and stored under `/config/debug`.
+- Allow activity-based recommendations to be disabled per integration while still allowing inventory sync.
+- Make favorites and pinned/user-protected items suppress cleanup recommendations.
+
 ## Normalized Data Model
 
 The database will add provider-neutral tables:
@@ -92,6 +102,7 @@ The database will add provider-neutral tables:
 - `media_activity_events`: provider activity events such as playback start/completion/history rows when available.
 - `media_activity_rollups`: per-item and per-file rollups containing last played date, play count, unique users, favorite count, watched user count, and stale/cold flags.
 - `integration_path_mappings`: explicit path prefix mappings from server paths to Mediarr-visible paths, for example `/media/movies` to `/media/movies` or `/mnt/media` to `/media`.
+- `media_sync_jobs`: sync status, progress counters, last successful cursor, last failure, started/completed timestamps, and provider rate-limit hints.
 
 Existing recommendation persistence should be extended instead of replaced. Recommendation rows should store source server IDs, activity evidence, verification state, and match confidence.
 
@@ -122,6 +133,12 @@ User overrides always win. Ignored recommendations remain ignored across syncs w
 
 Sync jobs must be resumable enough to recover from provider outages and pagination failures without corrupting the previous successful snapshot. A failed sync should preserve old activity data and mark provider health degraded.
 
+Incremental sync must use provider-safe cursors where available:
+
+- Jellyfin inventory sync can be page-based and full-refresh because item user data is compact enough for the first version.
+- Plex history sync should keep the newest imported `viewedAt` timestamp and request only newer rows when possible.
+- Any full resync action should be explicit and audited.
+
 ## Recommendation Rules
 
 Initial activity-aware rules:
@@ -138,6 +155,7 @@ Every recommendation must include:
 
 - affected paths
 - local or server-reported space savings
+- storage verification state: `local_verified`, `path_mapped`, or `server_reported`
 - media server source
 - last played date
 - play count
