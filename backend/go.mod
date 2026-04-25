@@ -1,4 +1,4 @@
-module github.com/media-steward/media-library-manager/backend
+module github.com/Fishy97/mediaar/backend
 
 go 1.23
 

@@ -1,12 +1,12 @@
-# Media Steward
+# Mediaar
 
-Media Steward is a self-hosted control plane for movies, series, and anime that already exist on disk. It scans read-only media mounts, builds a catalog, enriches metadata, syncs with playback servers, and creates safe review recommendations such as duplicate cleanup and oversized-file review.
+Mediaar is a self-hosted control plane for movies, series, and anime that already exist on disk. It scans read-only media mounts, builds a catalog, enriches metadata, syncs with playback servers, and creates safe review recommendations such as duplicate cleanup and oversized-file review.
 
 It deliberately does not search for, download, torrent, index, or acquire media.
 
 ## Project Status
 
-Media Steward is usable today as a Docker-hosted library scanner and review dashboard. It can:
+Mediaar is usable today as a Docker-hosted library scanner and review dashboard. It can:
 
 - scan movie, series, and anime folders mounted read-only
 - parse common movie, series, and anime filename patterns
@@ -54,7 +54,7 @@ curl -X POST http://localhost:8080/api/v1/scans
 
 ## Ubuntu Server Deployment
 
-Most users should run Media Steward on an Ubuntu VM, NAS, or home server with Docker Compose.
+Most users should run Mediaar on an Ubuntu VM, NAS, or home server with Docker Compose.
 
 ### 1. Install Docker Engine
 
@@ -75,8 +75,8 @@ Log out and back in so your shell can use Docker without `sudo`.
 ### 2. Clone And Configure
 
 ```bash
-git clone <repo-url> media-library-manager
-cd media-library-manager
+git clone <repo-url> mediaar
+cd mediaar
 cp .env.example .env
 id -u
 id -g
@@ -90,7 +90,7 @@ PGID=1000
 MOVIES_DIR=/srv/media/movies
 SERIES_DIR=/srv/media/series
 ANIME_DIR=/srv/media/anime
-MEDIA_STEWARD_ADMIN_TOKEN=change-this-long-random-token
+MEDIAAR_ADMIN_TOKEN=change-this-long-random-token
 ```
 
 Create the config directory and make it writable by the configured user:
@@ -109,7 +109,7 @@ docker compose ps
 
 Open `http://<server-ip>:8080`.
 
-The media folders are mounted read-only. Media Steward writes durable state only to `./config`.
+The media folders are mounted read-only. Mediaar writes durable state only to `./config`.
 
 ### 4. Upgrade
 
@@ -140,17 +140,17 @@ Backend development requires Go 1.23:
 ```bash
 cd backend
 go test ./...
-go run ./cmd/medi-steward
+go run ./cmd/mediaar
 ```
 
 ## Safety Model
 
-Media Steward does not expose a permanent delete endpoint. Recommendations are review items only. A future quarantine workflow can be added behind explicit write-path configuration, but the default filesystem posture is read-only media and writable `/config`.
+Mediaar does not expose a permanent delete endpoint. Recommendations are review items only. A future quarantine workflow can be added behind explicit write-path configuration, but the default filesystem posture is read-only media and writable `/config`.
 
 Recommended production defaults:
 
 - mount media folders read-only
-- set `MEDIA_STEWARD_ADMIN_TOKEN`
+- set `MEDIAAR_ADMIN_TOKEN`
 - put the app behind a trusted reverse proxy for TLS
 - back up `./config` regularly
 - do not expose port `8080` directly to the public internet

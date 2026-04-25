@@ -9,7 +9,7 @@ import (
 
 func TestBackupIncludesDatabaseSettingsAndAudit(t *testing.T) {
 	configDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(configDir, "media-steward.db"), []byte("db"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(configDir, "mediaar.db"), []byte("db"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(configDir, "settings.json"), []byte("{}"), 0o600); err != nil {
@@ -37,7 +37,7 @@ func TestBackupIncludesDatabaseSettingsAndAudit(t *testing.T) {
 	for _, file := range reader.File {
 		entries[file.Name] = true
 	}
-	for _, want := range []string{"media-steward.db", "settings.json", "audit/events.jsonl"} {
+	for _, want := range []string{"mediaar.db", "settings.json", "audit/events.jsonl"} {
 		if !entries[want] {
 			t.Fatalf("backup missing %s; entries: %#v", want, entries)
 		}

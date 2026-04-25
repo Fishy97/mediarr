@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/media-steward/media-library-manager/backend/internal/recommendations"
+	"github.com/Fishy97/mediaar/backend/internal/recommendations"
 )
 
 func TestServerExposesHealthAndRecommendationAPIs(t *testing.T) {

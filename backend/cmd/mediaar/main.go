@@ -4,13 +4,13 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/media-steward/media-library-manager/backend/internal/api"
-	"github.com/media-steward/media-library-manager/backend/internal/audit"
-	"github.com/media-steward/media-library-manager/backend/internal/auth"
-	"github.com/media-steward/media-library-manager/backend/internal/config"
-	"github.com/media-steward/media-library-manager/backend/internal/database"
-	"github.com/media-steward/media-library-manager/backend/internal/filescan"
-	"github.com/media-steward/media-library-manager/backend/internal/recommendations"
+	"github.com/Fishy97/mediaar/backend/internal/api"
+	"github.com/Fishy97/mediaar/backend/internal/audit"
+	"github.com/Fishy97/mediaar/backend/internal/auth"
+	"github.com/Fishy97/mediaar/backend/internal/config"
+	"github.com/Fishy97/mediaar/backend/internal/database"
+	"github.com/Fishy97/mediaar/backend/internal/filescan"
+	"github.com/Fishy97/mediaar/backend/internal/recommendations"
 )
 
 func main() {
@@ -48,7 +48,7 @@ func main() {
 	})
 	handler := auth.Middleware{AdminToken: cfg.AdminToken}.Wrap(server)
 
-	log.Printf("Media Steward listening on %s", cfg.Addr)
+	log.Printf("Mediaar listening on %s", cfg.Addr)
 	if err := http.ListenAndServe(cfg.Addr, handler); err != nil {
 		log.Fatal(err)
 	}

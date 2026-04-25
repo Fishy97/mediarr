@@ -56,7 +56,7 @@ export function App() {
       setIntegrations(integrationRows);
       setError(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to load Media Steward');
+      setError(caught instanceof Error ? caught.message : 'Unable to load Mediaar');
     }
   }
 
@@ -102,7 +102,7 @@ export function App() {
         <div className="brand">
           <div className="brand-mark"><SearchCheck size={20} /></div>
           <div>
-            <strong>Media Steward</strong>
+            <strong>Mediaar</strong>
             <span>Library control plane</span>
           </div>
         </div>

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/media-steward/media-library-manager/backend/internal/catalog"
-	"github.com/media-steward/media-library-manager/backend/internal/filescan"
-	"github.com/media-steward/media-library-manager/backend/internal/recommendations"
+	"github.com/Fishy97/mediaar/backend/internal/catalog"
+	"github.com/Fishy97/mediaar/backend/internal/filescan"
+	"github.com/Fishy97/mediaar/backend/internal/recommendations"
 
 	_ "modernc.org/sqlite"
 )
@@ -39,7 +39,11 @@ func Open(configDir string) (*Store, error) {
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", filepath.Join(configDir, "media-steward.db"))
+	path, err := databasePath(configDir)
+	if err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err
 	}
@@ -49,6 +53,20 @@ func Open(configDir string) (*Store, error) {
 		return nil, err
 	}
 	return store, nil
+}
+
+func databasePath(configDir string) (string, error) {
+	current := filepath.Join(configDir, "mediaar.db")
+	legacy := filepath.Join(configDir, "media-steward.db")
+	if _, err := os.Stat(current); err == nil {
+		return current, nil
+	}
+	if _, err := os.Stat(legacy); err == nil {
+		if err := os.Rename(legacy, current); err != nil {
+			return "", err
+		}
+	}
+	return current, nil
 }
 
 func (store *Store) Close() error {

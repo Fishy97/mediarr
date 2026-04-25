@@ -1,16 +1,21 @@
+name: mediaar
+
 services:
-  media-steward:
+  mediaar:
     build: .
-    image: media-steward:local
-    container_name: media-steward
+    image: mediaar:local
+    container_name: mediaar
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"
     ports:
       - "8080:8080"
     environment:
+      MEDIAAR_ADMIN_TOKEN: ${MEDIAAR_ADMIN_TOKEN:-}
+      MEDIAAR_OVERSIZED_BYTES: ${MEDIAAR_OVERSIZED_BYTES:-60000000000}
+      MEDIAAR_OLLAMA_URL: ${MEDIAAR_OLLAMA_URL:-http://ollama:11434}
       MEDIA_STEWARD_ADMIN_TOKEN: ${MEDIA_STEWARD_ADMIN_TOKEN:-}
-      MEDIA_STEWARD_OVERSIZED_BYTES: ${MEDIA_STEWARD_OVERSIZED_BYTES:-60000000000}
-      MEDIA_STEWARD_OLLAMA_URL: ${MEDIA_STEWARD_OLLAMA_URL:-http://ollama:11434}
+      MEDIA_STEWARD_OVERSIZED_BYTES: ${MEDIA_STEWARD_OVERSIZED_BYTES:-}
+      MEDIA_STEWARD_OLLAMA_URL: ${MEDIA_STEWARD_OLLAMA_URL:-}
     volumes:
       - ./config:/config
       - ${MOVIES_DIR:-./fixtures/media/movies}:/media/movies:ro
@@ -24,7 +29,7 @@ services:
       start_period: 15s
   ollama:
     image: ollama/ollama:latest
-    container_name: media-steward-ollama
+    container_name: mediaar-ollama
     restart: unless-stopped
     profiles: ["ai"]
     volumes:

@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/media-steward/media-library-manager/backend/internal/catalog"
-	"github.com/media-steward/media-library-manager/backend/internal/database"
-	"github.com/media-steward/media-library-manager/backend/internal/filescan"
+	"github.com/Fishy97/mediaar/backend/internal/catalog"
+	"github.com/Fishy97/mediaar/backend/internal/database"
+	"github.com/Fishy97/mediaar/backend/internal/filescan"
 )
 
 func TestServerReturnsPersistedCatalog(t *testing.T) {

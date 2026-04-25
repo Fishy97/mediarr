@@ -10,11 +10,10 @@ test-frontend:
 
 build:
 	npm --prefix frontend run build
-	cd backend && go build ./cmd/medi-steward
+	cd backend && go build ./cmd/mediaar
 
 docker-up:
 	docker compose up --build
 
 docker-down:
 	docker compose down
-

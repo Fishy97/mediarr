@@ -1,6 +1,6 @@
 # Contributing
 
-Media Steward is intended to be community-run infrastructure for self-hosters.
+Mediaar is intended to be community-run infrastructure for self-hosters.
 
 ## Development Rules
 
