@@ -545,6 +545,6 @@ git commit -m "docs: document media server ingestion"
 git push
 ```
 
-- [ ] **Step 7: Open or update pull request**
+- [x] **Step 7: Open or update pull request**
 
 Open a pull request from `codex/media-server-ingestion` to `main`, include validation evidence, and keep it ready for review once CI is green.
