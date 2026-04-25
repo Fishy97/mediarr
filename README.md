@@ -44,6 +44,22 @@ docker compose up --build -d
 
 Open [http://localhost:8080](http://localhost:8080).
 
+### Launch Modes
+
+Run Mediarr without the optional local AI sidecar:
+
+```bash
+docker compose up -d
+```
+
+Run Mediarr with the optional AI sidecar:
+
+```bash
+docker compose --profile ai up -d
+```
+
+The AI sidecar is optional. Mediarr remains fully usable without it, and AI output is treated as advisory rather than catalog truth.
+
 Set `MOVIES_DIR`, `SERIES_DIR`, and `ANIME_DIR` in `.env` to point at your media folders. The compose file mounts them read-only.
 
 For a full Ubuntu server walkthrough, see [Docker Compose Deployment Guide](docs/deployment/docker-compose.md).

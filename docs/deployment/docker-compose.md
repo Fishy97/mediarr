@@ -89,6 +89,20 @@ id -g
 
 ## 5. Start Mediarr
 
+Run Mediarr without the optional local AI sidecar:
+
+```bash
+docker compose up -d
+```
+
+Run Mediarr with the optional AI sidecar:
+
+```bash
+docker compose --profile ai up -d
+```
+
+When building directly from a fresh source checkout, add `--build`:
+
 ```bash
 docker compose up --build -d
 ```
@@ -167,10 +181,10 @@ The app stores durable state in `./config`, so rebuilding the image does not rem
 
 ## 9. Optional Local AI
 
-Ollama is included as an optional Compose profile. Start it with:
+Ollama is included as an optional Compose profile. Start Mediarr with local AI enabled:
 
 ```bash
-docker compose --profile ai up --build -d
+docker compose --profile ai up -d
 ```
 
 Mediarr treats local AI as advisory only. Core scanning and recommendations do not require AI.
