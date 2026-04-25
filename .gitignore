@@ -11,3 +11,4 @@ backend/mediarr
 backend/coverage.out
 /config/
 tmp/
+.superpowers/
