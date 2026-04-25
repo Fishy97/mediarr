@@ -1,12 +1,28 @@
-import type { CatalogItem, Integration, Library, ProviderHealth, Recommendation, ScanResult } from '../types';
+import type { AuthResponse, AuthUser, CatalogItem, Integration, Library, ProviderHealth, Recommendation, ScanResult, SetupStatus } from '../types';
 
 type Envelope<T> = { data: T };
 
+const tokenStorageKey = 'mediarr.authToken';
+
+export function getAuthToken(): string | null {
+  return localStorage.getItem(tokenStorageKey);
+}
+
+export function setAuthToken(token: string | null): void {
+  if (token) {
+    localStorage.setItem(tokenStorageKey, token);
+    return;
+  }
+  localStorage.removeItem(tokenStorageKey);
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getAuthToken();
   const response = await fetch(path, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...init?.headers,
     },
   });
@@ -19,6 +35,32 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   async health(): Promise<{ status: string; service: string; timestamp: string }> {
     return request('/api/v1/health');
+  },
+  async setupStatus(): Promise<SetupStatus> {
+    return (await request<Envelope<SetupStatus>>('/api/v1/setup/status')).data;
+  },
+  async setupAdmin(email: string, password: string): Promise<AuthResponse> {
+    const result = (await request<Envelope<AuthResponse>>('/api/v1/setup/admin', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    })).data;
+    setAuthToken(result.token);
+    return result;
+  },
+  async login(email: string, password: string): Promise<AuthResponse> {
+    const result = (await request<Envelope<AuthResponse>>('/api/v1/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    })).data;
+    setAuthToken(result.token);
+    return result;
+  },
+  async logout(): Promise<void> {
+    await request<Envelope<{ ok: boolean }>>('/api/v1/auth/logout', { method: 'POST' });
+    setAuthToken(null);
+  },
+  async me(): Promise<AuthUser> {
+    return (await request<Envelope<AuthUser>>('/api/v1/auth/me')).data;
   },
   async libraries(): Promise<Library[]> {
     return (await request<Envelope<Library[]>>('/api/v1/libraries')).data;

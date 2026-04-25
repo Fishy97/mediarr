@@ -70,3 +70,20 @@ export type CatalogItem = {
   modifiedAt: string;
   scannedAt: string;
 };
+
+export type SetupStatus = {
+  setupRequired: boolean;
+};
+
+export type AuthUser = {
+  id: string;
+  email: string;
+  role: string;
+  createdAt?: string;
+};
+
+export type AuthResponse = {
+  user: AuthUser;
+  token: string;
+  expiresAt?: string;
+};

@@ -27,6 +27,43 @@ button {
   grid-template-columns: 260px minmax(0, 1fr);
 }
 
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-panel {
+  width: min(100%, 420px);
+  display: grid;
+  gap: 14px;
+  padding: 24px;
+  background: #ffffff;
+  border: 1px solid #dfe6e1;
+  border-radius: 8px;
+}
+
+.auth-panel h1 {
+  font-size: 1.35rem;
+}
+
+.auth-panel label {
+  display: grid;
+  gap: 6px;
+  color: #33413b;
+  font-weight: 700;
+}
+
+.auth-panel input {
+  min-height: 42px;
+  border: 1px solid #cbd5cf;
+  border-radius: 8px;
+  padding: 0 12px;
+  color: #1c2421;
+  font: inherit;
+}
+
 .sidebar {
   background: #17211d;
   color: #f5f8f3;
@@ -134,6 +171,19 @@ h2 {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.user-chip {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid #dfe6e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #44514b;
+  font-size: 0.82rem;
 }
 
 .icon-button,
@@ -446,4 +496,3 @@ code {
     display: none;
   }
 }
-

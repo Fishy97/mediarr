@@ -73,6 +73,7 @@ Recommended Ubuntu server values:
 MEDIARR_ADMIN_TOKEN=change-this-to-a-long-random-token
 MEDIARR_OVERSIZED_BYTES=60000000000
 MEDIARR_OLLAMA_URL=http://ollama:11434
+MEDIARR_AI_MODEL=qwen3:0.6b
 PUID=1000
 PGID=1000
 MOVIES_DIR=/srv/media/movies
@@ -186,6 +187,13 @@ Ollama is included as an optional Compose profile. Start Mediarr with local AI e
 ```bash
 docker compose --profile ai up -d
 ```
+
+The AI profile starts two additional services:
+
+- `ollama`, the local model runtime
+- `mediarr-ai-init`, a one-shot initializer that waits for Ollama and pulls `MEDIARR_AI_MODEL`
+
+The default model is `qwen3:0.6b`. Change `MEDIARR_AI_MODEL` in `.env` if you want a different local Ollama model.
 
 Mediarr treats local AI as advisory only. Core scanning and recommendations do not require AI.
 

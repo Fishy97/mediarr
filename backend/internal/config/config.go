@@ -12,6 +12,7 @@ type Config struct {
 	FrontendDir      string
 	AdminToken       string
 	OllamaURL        string
+	AIModel          string
 	OversizedBytes   int64
 	DefaultLibraries []LibraryConfig
 }
@@ -30,6 +31,7 @@ func Load() Config {
 		FrontendDir:    envAny("./web", "MEDIARR_FRONTEND_DIR", "MEDIAAR_FRONTEND_DIR", "MEDIA_STEWARD_FRONTEND_DIR"),
 		AdminToken:     envAny("", "MEDIARR_ADMIN_TOKEN", "MEDIAAR_ADMIN_TOKEN", "MEDIA_STEWARD_ADMIN_TOKEN"),
 		OllamaURL:      envAny("http://ollama:11434", "MEDIARR_OLLAMA_URL", "MEDIAAR_OLLAMA_URL", "MEDIA_STEWARD_OLLAMA_URL"),
+		AIModel:        envAny("qwen3:0.6b", "MEDIARR_AI_MODEL", "MEDIAAR_AI_MODEL", "MEDIA_STEWARD_AI_MODEL"),
 		OversizedBytes: envInt64Any(60_000_000_000, "MEDIARR_OVERSIZED_BYTES", "MEDIAAR_OVERSIZED_BYTES", "MEDIA_STEWARD_OVERSIZED_BYTES"),
 	}
 	cfg.DefaultLibraries = []LibraryConfig{

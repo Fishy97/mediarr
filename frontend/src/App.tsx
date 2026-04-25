@@ -10,6 +10,7 @@ import {
   HardDrive,
   HeartPulse,
   Library,
+  LogOut,
   PlayCircle,
   RefreshCw,
   SearchCheck,
@@ -17,10 +18,11 @@ import {
   Settings,
   ShieldCheck,
   Trash2,
+  UserRound,
 } from 'lucide-react';
-import { api } from './lib/api';
+import { api, getAuthToken } from './lib/api';
 import { formatBytes, formatConfidence } from './lib/format';
-import type { CatalogItem, Integration, Library as MediaLibrary, ProviderHealth, Recommendation, ScanResult } from './types';
+import type { AuthUser, CatalogItem, Integration, Library as MediaLibrary, ProviderHealth, Recommendation, ScanResult } from './types';
 
 type View = 'dashboard' | 'libraries' | 'catalog' | 'recommendations' | 'integrations' | 'settings';
 
@@ -35,6 +37,9 @@ export function App() {
   const [status, setStatus] = useState('Loading');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [setupRequired, setSetupRequired] = useState(false);
+  const [user, setUser] = useState<AuthUser | null>(null);
 
   async function refresh() {
     try {
@@ -61,8 +66,30 @@ export function App() {
   }
 
   useEffect(() => {
-    void refresh();
+    void bootstrap();
   }, []);
+
+  async function bootstrap() {
+    try {
+      const setup = await api.setupStatus();
+      setSetupRequired(setup.setupRequired);
+      if (setup.setupRequired) {
+        setAuthChecked(true);
+        return;
+      }
+      if (getAuthToken()) {
+        const currentUser = await api.me();
+        setUser(currentUser);
+        setAuthChecked(true);
+        await refresh();
+        return;
+      }
+      setAuthChecked(true);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to load Mediarr');
+      setAuthChecked(true);
+    }
+  }
 
   async function startScan() {
     setBusy(true);
@@ -96,6 +123,30 @@ export function App() {
   const totalSize = catalogItems.reduce((sum, item) => sum + item.sizeBytes, 0);
   const recoverable = recommendations.reduce((sum, rec) => sum + rec.spaceSavedBytes, 0);
 
+  if (!authChecked) {
+    return <LoadingScreen />;
+  }
+
+  if (setupRequired) {
+    return <AuthScreen mode="setup" onAuthenticated={(nextUser) => {
+      setUser(nextUser);
+      setSetupRequired(false);
+      void refresh();
+    }} />;
+  }
+
+  if (!user) {
+    return <AuthScreen mode="login" onAuthenticated={(nextUser) => {
+      setUser(nextUser);
+      void refresh();
+    }} />;
+  }
+
+  async function logout() {
+    await api.logout();
+    setUser(null);
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -123,8 +174,12 @@ export function App() {
             <h1>{titleFor(view)}</h1>
           </div>
           <div className="actions">
+            <span className="user-chip"><UserRound size={16} />{user.email}</span>
             <button className="icon-button" onClick={() => void refresh()} title="Refresh data" aria-label="Refresh data">
               <RefreshCw size={18} />
+            </button>
+            <button className="icon-button" onClick={() => void logout()} title="Log out" aria-label="Log out">
+              <LogOut size={18} />
             </button>
             <button className="primary-button" onClick={() => void startScan()} disabled={busy}>
               <Activity size={18} />
@@ -153,6 +208,64 @@ export function App() {
         {view === 'settings' && <SettingsView onBackup={() => void createBackup()} busy={busy} />}
       </main>
     </div>
+  );
+}
+
+function LoadingScreen() {
+  return (
+    <main className="auth-shell">
+      <section className="auth-panel">
+        <div className="brand-mark"><SearchCheck size={20} /></div>
+        <h1>Mediarr</h1>
+        <p>Loading local control plane.</p>
+      </section>
+    </main>
+  );
+}
+
+function AuthScreen({ mode, onAuthenticated }: { mode: 'setup' | 'login'; onAuthenticated: (user: AuthUser) => void }) {
+  const [email, setEmail] = useState('admin@mediarr.local');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const result = mode === 'setup'
+        ? await api.setupAdmin(email, password)
+        : await api.login(email, password);
+      setError(null);
+      onAuthenticated(result.user);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Authentication failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="auth-shell">
+      <form className="auth-panel" onSubmit={(event) => void submit(event)}>
+        <div className="brand-mark"><SearchCheck size={20} /></div>
+        <p className="eyebrow">{mode === 'setup' ? 'First run setup' : 'Admin sign in'}</p>
+        <h1>{mode === 'setup' ? 'Create the local admin account' : 'Welcome back'}</h1>
+        <label>
+          Email
+          <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" autoComplete="username" required />
+        </label>
+        <label>
+          Password
+          <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete={mode === 'setup' ? 'new-password' : 'current-password'} minLength={12} required />
+        </label>
+        {error && <div className="notice error">{error}</div>}
+        <button className="primary-button" disabled={busy} type="submit">
+          <ShieldCheck size={18} />
+          {busy ? 'Working' : mode === 'setup' ? 'Create admin' : 'Sign in'}
+        </button>
+      </form>
+    </main>
   );
 }
 

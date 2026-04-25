@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Fishy97/mediarr/backend/internal/audit"
+	"github.com/Fishy97/mediarr/backend/internal/auth"
 	"github.com/Fishy97/mediarr/backend/internal/database"
 	"github.com/Fishy97/mediarr/backend/internal/filescan"
 	"github.com/Fishy97/mediarr/backend/internal/integrations"
@@ -25,6 +26,7 @@ type Deps struct {
 	Providers       []metadata.Provider
 	Integrations    []integrations.Target
 	Audit           *audit.Logger
+	Auth            *auth.Service
 	Scanner         filescan.Scanner
 	Engine          recommendations.Engine
 	Store           *database.Store
@@ -41,6 +43,7 @@ type Server struct {
 	providers       []metadata.Provider
 	integrations    []integrations.Target
 	audit           *audit.Logger
+	auth            *auth.Service
 	scanner         filescan.Scanner
 	engine          recommendations.Engine
 	store           *database.Store
@@ -56,6 +59,7 @@ func NewServer(deps Deps) *Server {
 		providers:       deps.Providers,
 		integrations:    deps.Integrations,
 		audit:           deps.Audit,
+		auth:            deps.Auth,
 		scanner:         deps.Scanner,
 		engine:          deps.Engine,
 		store:           deps.Store,
@@ -76,6 +80,11 @@ func (server *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (server *Server) routes() {
 	server.mux.HandleFunc("/api/v1/health", server.health)
+	server.mux.HandleFunc("/api/v1/setup/status", server.setupStatusHandler)
+	server.mux.HandleFunc("/api/v1/setup/admin", server.setupAdminHandler)
+	server.mux.HandleFunc("/api/v1/auth/login", server.loginHandler)
+	server.mux.HandleFunc("/api/v1/auth/logout", server.logoutHandler)
+	server.mux.HandleFunc("/api/v1/auth/me", server.meHandler)
 	server.mux.HandleFunc("/api/v1/libraries", server.librariesHandler)
 	server.mux.HandleFunc("/api/v1/catalog", server.catalogHandler)
 	server.mux.HandleFunc("/api/v1/scans", server.scansHandler)
@@ -86,6 +95,111 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("/api/v1/audit", server.auditHandler)
 	server.mux.HandleFunc("/api/v1/media/files/", methodNotAllowed)
 	server.mux.HandleFunc("/", server.frontend)
+}
+
+func (server *Server) setupStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.auth == nil {
+		writeJSON(w, http.StatusOK, envelope{Data: map[string]bool{"setupRequired": false}})
+		return
+	}
+	required, err := server.auth.SetupRequired()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: map[string]bool{"setupRequired": required}})
+}
+
+func (server *Server) setupAdminHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.auth == nil {
+		http.Error(w, "authentication is not configured", http.StatusBadRequest)
+		return
+	}
+	var request credentialsRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	user, session, err := server.auth.CreateAdmin(request.Email, request.Password)
+	if err != nil {
+		status := http.StatusBadRequest
+		if err == auth.ErrSetupComplete {
+			status = http.StatusConflict
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	server.setSessionCookie(w, session)
+	server.record("auth.admin_created", "Initial admin account created", map[string]any{"email": user.Email})
+	writeJSON(w, http.StatusCreated, envelope{Data: authResponse{User: user, Token: session.Token, ExpiresAt: session.ExpiresAt}})
+}
+
+func (server *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.auth == nil {
+		http.Error(w, "authentication is not configured", http.StatusBadRequest)
+		return
+	}
+	var request credentialsRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	user, session, err := server.auth.Login(request.Email, request.Password)
+	if err != nil {
+		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		return
+	}
+	server.setSessionCookie(w, session)
+	server.record("auth.login", "Admin logged in", map[string]any{"email": user.Email})
+	writeJSON(w, http.StatusOK, envelope{Data: authResponse{User: user, Token: session.Token, ExpiresAt: session.ExpiresAt}})
+}
+
+func (server *Server) logoutHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.auth != nil {
+		_ = server.auth.Logout(requestToken(r))
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     auth.SessionCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	writeJSON(w, http.StatusOK, envelope{Data: map[string]bool{"ok": true}})
+}
+
+func (server *Server) meHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.auth == nil {
+		http.Error(w, "authentication is not configured", http.StatusBadRequest)
+		return
+	}
+	user, err := server.auth.UserForToken(requestToken(r))
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: user})
 }
 
 func (server *Server) health(w http.ResponseWriter, _ *http.Request) {
@@ -308,6 +422,39 @@ func (server *Server) record(kind string, message string, fields map[string]any)
 		return
 	}
 	_ = server.audit.Record(audit.Event{Type: kind, Message: message, Fields: fields})
+}
+
+func (server *Server) setSessionCookie(w http.ResponseWriter, session auth.Session) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     auth.SessionCookieName,
+		Value:    session.Token,
+		Path:     "/",
+		Expires:  session.ExpiresAt,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func requestToken(r *http.Request) string {
+	header := strings.TrimSpace(r.Header.Get("Authorization"))
+	if strings.HasPrefix(strings.ToLower(header), "bearer ") {
+		return strings.TrimSpace(header[7:])
+	}
+	if cookie, err := r.Cookie(auth.SessionCookieName); err == nil {
+		return cookie.Value
+	}
+	return ""
+}
+
+type credentialsRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type authResponse struct {
+	User      database.User `json:"user"`
+	Token     string        `json:"token"`
+	ExpiresAt time.Time     `json:"expiresAt"`
 }
 
 type envelope struct {

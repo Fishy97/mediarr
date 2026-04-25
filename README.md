@@ -13,14 +13,14 @@ Mediarr is usable today as a Docker-hosted library scanner and review dashboard.
 - persist catalog rows, subtitle sidecars, and review recommendations in SQLite
 - detect duplicate catalog items and estimate recoverable space
 - create `/config` backups
+- protect the API with first-run admin setup, password login, sessions, and bearer-token automation
 - expose a web UI and REST API
 
 The current codebase is a production-grade foundation, not a complete public release. These pieces are intentionally scaffolded but not fully connected yet:
 
 - live TMDb, AniList, TheTVDB, and OpenSubtitles provider calls
 - Jellyfin, Plex, and Emby metadata sync
-- optional Ollama-backed local AI suggestions
-- real authentication setup flow beyond optional bearer-token protection
+- optional Ollama-backed local AI suggestions beyond sidecar/model initialization
 - broader filename/edition handling for large mixed libraries
 
 ## Current Capabilities
@@ -58,7 +58,7 @@ Run Mediarr with the optional AI sidecar:
 docker compose --profile ai up -d
 ```
 
-The AI sidecar is optional. Mediarr remains fully usable without it, and AI output is treated as advisory rather than catalog truth.
+The AI sidecar is optional. When enabled, Compose starts Ollama and a one-shot model initializer that pulls `MEDIARR_AI_MODEL` into the Docker volume. Mediarr remains fully usable without it, and AI output is treated as advisory rather than catalog truth.
 
 Set `MOVIES_DIR`, `SERIES_DIR`, and `ANIME_DIR` in `.env` to point at your media folders. The compose file mounts them read-only.
 

@@ -1,7 +1,9 @@
 package database
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -18,6 +20,14 @@ import (
 
 type Store struct {
 	DB *sql.DB
+}
+
+type User struct {
+	ID           string    `json:"id"`
+	Email        string    `json:"email"`
+	Role         string    `json:"role"`
+	PasswordHash string    `json:"-"`
+	CreatedAt    time.Time `json:"createdAt"`
 }
 
 type CatalogItem struct {
@@ -133,6 +143,26 @@ func (store *Store) migrate() error {
 			created_at TEXT NOT NULL,
 			last_used_at TEXT
 		)`,
+		`CREATE TABLE IF NOT EXISTS users (
+			id TEXT PRIMARY KEY,
+			email TEXT NOT NULL UNIQUE,
+			password_hash TEXT NOT NULL,
+			role TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS sessions (
+			token_hash TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			expires_at TEXT NOT NULL,
+			last_used_at TEXT,
+			FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS settings (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
 	}
 	for _, statement := range statements {
 		if _, err := store.DB.Exec(statement); err != nil {
@@ -143,6 +173,135 @@ func (store *Store) migrate() error {
 		return err
 	}
 	return nil
+}
+
+func (store *Store) AdminUserExists() (bool, error) {
+	if store == nil || store.DB == nil {
+		return false, errors.New("nil database store")
+	}
+	var count int
+	if err := store.DB.QueryRow(`SELECT COUNT(1) FROM users WHERE role = 'admin'`).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (store *Store) CreateAdminUser(email string, passwordHash string) (User, error) {
+	if store == nil || store.DB == nil {
+		return User{}, errors.New("nil database store")
+	}
+	email = normalizeEmail(email)
+	if email == "" {
+		return User{}, errors.New("email is required")
+	}
+	if strings.TrimSpace(passwordHash) == "" {
+		return User{}, errors.New("password hash is required")
+	}
+	exists, err := store.AdminUserExists()
+	if err != nil {
+		return User{}, err
+	}
+	if exists {
+		return User{}, errors.New("admin user already exists")
+	}
+	user := User{
+		ID:           randomID("usr"),
+		Email:        email,
+		Role:         "admin",
+		PasswordHash: passwordHash,
+		CreatedAt:    time.Now().UTC(),
+	}
+	_, err = store.DB.Exec(
+		`INSERT INTO users (id, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)`,
+		user.ID,
+		user.Email,
+		user.PasswordHash,
+		user.Role,
+		user.CreatedAt.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return User{}, err
+	}
+	return user, nil
+}
+
+func (store *Store) UserByEmail(email string) (User, error) {
+	return store.userFromQuery(`SELECT id, email, password_hash, role, created_at FROM users WHERE email = ?`, normalizeEmail(email))
+}
+
+func (store *Store) UserByID(id string) (User, error) {
+	return store.userFromQuery(`SELECT id, email, password_hash, role, created_at FROM users WHERE id = ?`, id)
+}
+
+func (store *Store) CreateSession(tokenHash string, userID string, expiresAt time.Time) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	if tokenHash == "" || userID == "" {
+		return errors.New("token hash and user id are required")
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := store.DB.Exec(
+		`INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)`,
+		tokenHash,
+		userID,
+		now,
+		expiresAt.UTC().Format(time.RFC3339Nano),
+	)
+	return err
+}
+
+func (store *Store) UserBySessionHash(tokenHash string, now time.Time) (User, error) {
+	if store == nil || store.DB == nil {
+		return User{}, errors.New("nil database store")
+	}
+	user, err := store.userFromQuery(
+		`SELECT users.id, users.email, users.password_hash, users.role, users.created_at
+		FROM sessions
+		JOIN users ON users.id = sessions.user_id
+		WHERE sessions.token_hash = ? AND sessions.expires_at > ?`,
+		tokenHash,
+		now.UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return User{}, err
+	}
+	_, _ = store.DB.Exec(`UPDATE sessions SET last_used_at = ? WHERE token_hash = ?`, now.UTC().Format(time.RFC3339Nano), tokenHash)
+	return user, nil
+}
+
+func (store *Store) DeleteSession(tokenHash string) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	_, err := store.DB.Exec(`DELETE FROM sessions WHERE token_hash = ?`, tokenHash)
+	return err
+}
+
+func (store *Store) userFromQuery(query string, args ...any) (User, error) {
+	if store == nil || store.DB == nil {
+		return User{}, errors.New("nil database store")
+	}
+	var user User
+	var createdAt string
+	err := store.DB.QueryRow(query, args...).Scan(&user.ID, &user.Email, &user.PasswordHash, &user.Role, &createdAt)
+	if err != nil {
+		return User{}, err
+	}
+	user.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	return user, nil
+}
+
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+func randomID(prefix string) string {
+	var bytes [16]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		panic(err)
+	}
+	return prefix + "_" + hex.EncodeToString(bytes[:])
 }
 
 func (store *Store) ensureColumn(table string, column string, definition string) error {

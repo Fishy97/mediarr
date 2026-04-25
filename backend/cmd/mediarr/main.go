@@ -37,16 +37,19 @@ func main() {
 		})
 	}
 
+	authService := auth.Service{Store: store}
+
 	server := api.NewServer(api.Deps{
 		ConfigDir:   cfg.ConfigDir,
 		FrontendDir: cfg.FrontendDir,
 		Libraries:   libraries,
 		Audit:       auditLog,
+		Auth:        &authService,
 		Scanner:     filescan.Scanner{Probe: true},
 		Engine:      recommendations.Engine{OversizedThresholdBytes: cfg.OversizedBytes},
 		Store:       store,
 	})
-	handler := auth.Middleware{AdminToken: cfg.AdminToken}.Wrap(server)
+	handler := auth.Middleware{AdminToken: cfg.AdminToken, Service: &authService}.Wrap(server)
 
 	log.Printf("Mediarr listening on %s", cfg.Addr)
 	if err := http.ListenAndServe(cfg.Addr, handler); err != nil {

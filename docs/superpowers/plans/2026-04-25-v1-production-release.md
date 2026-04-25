@@ -27,13 +27,13 @@
 
 ## Commit Track 1: Release Packaging And Auth
 
-- [ ] Write failing Go tests for admin setup, password login, session validation, bearer-token fallback, and unauthenticated API rejection.
-- [ ] Add users, sessions, settings, and API token tables with idempotent migrations.
-- [ ] Implement bcrypt password hashing, session token generation, token hashing-at-rest, setup status, admin creation, login, logout, and `me` routes.
-- [ ] Protect all mutating and private API routes while keeping health/setup/login public.
-- [ ] Add frontend first-run setup and login screens.
-- [ ] Add Docker AI model-init service, `MEDIARR_AI_MODEL`, pinned defaults where feasible, and docs for no-AI vs AI startup.
-- [ ] Run `go test ./...`, `go vet ./...`, `npm --prefix frontend run build`, `npm --prefix frontend run test -- --run`, `docker compose config --quiet`, `docker compose --profile ai config --quiet`, `docker compose build mediarr`.
+- [x] Write failing Go tests for admin setup, password login, session validation, bearer-token fallback, and unauthenticated API rejection.
+- [x] Add users, sessions, settings, and API token tables with idempotent migrations.
+- [x] Implement bcrypt password hashing, session token generation, token hashing-at-rest, setup status, admin creation, login, logout, and `me` routes.
+- [x] Protect all mutating and private API routes while keeping health/setup/login public.
+- [x] Add frontend first-run setup and login screens.
+- [x] Add Docker AI model-init service, `MEDIARR_AI_MODEL`, pinned defaults where feasible, and docs for no-AI vs AI startup.
+- [x] Run `go test ./...`, `go vet ./...`, `npm --prefix frontend run build`, `npm --prefix frontend run test -- --run`, `docker compose config --quiet`, `docker compose --profile ai config --quiet`, `docker compose build mediarr`.
 - [ ] Commit as `feat: add v1 setup auth and ai packaging` and push `codex/v1-production-release`.
 
 ## Commit Track 2: Scanner, Catalog, And Metadata Providers
