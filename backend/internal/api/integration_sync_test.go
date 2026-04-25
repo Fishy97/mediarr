@@ -9,6 +9,7 @@ import (
 	"github.com/Fishy97/mediarr/backend/internal/auth"
 	"github.com/Fishy97/mediarr/backend/internal/database"
 	"github.com/Fishy97/mediarr/backend/internal/integrations"
+	"github.com/Fishy97/mediarr/backend/internal/recommendations"
 )
 
 func TestJellyfinSyncRoutePersistsNormalizedActivity(t *testing.T) {
@@ -104,5 +105,80 @@ func TestJellyfinSyncRoutePersistsNormalizedActivity(t *testing.T) {
 	}
 	if len(rollupBody.Data) != 1 || rollupBody.Data[0].PlayCount != 1 {
 		t.Fatalf("rollups = %#v", rollupBody.Data)
+	}
+}
+
+func TestJellyfinSyncCreatesActivityRecommendations(t *testing.T) {
+	jellyfin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Emby-Token") != "jellyfin-key" {
+			http.Error(w, "missing token", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/System/Info":
+			_, _ = w.Write([]byte(`{"ServerName":"Jellyfin Test"}`))
+		case "/Users":
+			_, _ = w.Write([]byte(`[{"Id":"user_1","Name":"Alex"}]`))
+		case "/Items":
+			_, _ = w.Write([]byte(`{
+				"Items": [{
+					"Id": "item_cold",
+					"Name": "Cold Movie",
+					"Type": "Movie",
+					"ProductionYear": 2020,
+					"Path": "/media/movies/Cold Movie (2020).mkv",
+					"ProviderIds": {"Tmdb":"1"},
+					"DateCreated": "2020-01-01T00:00:00Z",
+					"MediaSources": [{"Path":"/media/movies/Cold Movie (2020).mkv","Size":64000000000,"Container":"mkv"}],
+					"UserData": {"PlayCount":0,"Played":false,"IsFavorite":false}
+				}],
+				"TotalRecordCount": 1
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer jellyfin.Close()
+
+	store, err := database.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	server := NewServer(Deps{
+		Store: store,
+		IntegrationOptions: integrations.Options{
+			JellyfinURL: jellyfin.URL,
+			JellyfinKey: "jellyfin-key",
+		},
+	})
+
+	res := httptest.NewRecorder()
+	server.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/api/v1/integrations/jellyfin/sync", nil))
+	if res.Code != http.StatusAccepted {
+		t.Fatalf("sync status = %d, want 202: %s", res.Code, res.Body.String())
+	}
+
+	res = httptest.NewRecorder()
+	server.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/api/v1/recommendations", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("recommendations status = %d, want 200: %s", res.Code, res.Body.String())
+	}
+	var body struct {
+		Data []recommendations.Recommendation `json:"data"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Data) != 1 {
+		t.Fatalf("recommendations = %#v, want one activity recommendation", body.Data)
+	}
+	if body.Data[0].Action != recommendations.ActionReviewNeverWatchedMovie || body.Data[0].ServerID != "jellyfin" {
+		t.Fatalf("recommendation = %#v", body.Data[0])
+	}
+	if body.Data[0].Destructive {
+		t.Fatal("activity recommendation must be non-destructive")
 	}
 }

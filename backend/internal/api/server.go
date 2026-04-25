@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -387,7 +388,10 @@ func (server *Server) scanAll(ctx context.Context) ([]filescan.Result, []recomme
 		}
 		files = recommendationFilesFromCatalog(items)
 	}
-	recs := server.enrichRecommendationsWithAI(ctx, server.engine.Generate(files))
+	recs, err := server.generateRecommendations(ctx, files)
+	if err != nil {
+		return nil, nil, err
+	}
 	if server.store != nil {
 		if err := server.store.ReplaceRecommendations(recs); err != nil {
 			return nil, nil, err
@@ -881,7 +885,10 @@ func (server *Server) regenerateRecommendationsFromCatalog() error {
 	if err != nil {
 		return err
 	}
-	recs := server.enrichRecommendationsWithAI(context.Background(), server.engine.Generate(recommendationFilesFromCatalog(items)))
+	recs, err := server.generateRecommendations(context.Background(), recommendationFilesFromCatalog(items))
+	if err != nil {
+		return err
+	}
 	if err := server.store.ReplaceRecommendations(recs); err != nil {
 		return err
 	}
@@ -889,6 +896,24 @@ func (server *Server) regenerateRecommendationsFromCatalog() error {
 	server.recommendations = recs
 	server.mu.Unlock()
 	return nil
+}
+
+func (server *Server) generateRecommendations(ctx context.Context, files []recommendations.MediaFile) ([]recommendations.Recommendation, error) {
+	recs := server.engine.Generate(files)
+	if server.store != nil {
+		activityMedia, err := server.store.ListActivityRecommendationMedia()
+		if err != nil {
+			return nil, err
+		}
+		recs = append(recs, server.engine.GenerateActivity(activityMedia, time.Now().UTC())...)
+	}
+	sort.Slice(recs, func(i, j int) bool {
+		if recs[i].SpaceSavedBytes == recs[j].SpaceSavedBytes {
+			return recs[i].ID < recs[j].ID
+		}
+		return recs[i].SpaceSavedBytes > recs[j].SpaceSavedBytes
+	})
+	return server.enrichRecommendationsWithAI(ctx, recs), nil
 }
 
 func (server *Server) enrichRecommendationsWithAI(ctx context.Context, recs []recommendations.Recommendation) []recommendations.Recommendation {

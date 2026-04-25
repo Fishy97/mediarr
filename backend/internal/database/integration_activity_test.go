@@ -3,6 +3,8 @@ package database
 import (
 	"testing"
 	"time"
+
+	"github.com/Fishy97/mediarr/backend/internal/recommendations"
 )
 
 func TestMediaServerSnapshotPersistsNormalizedActivity(t *testing.T) {
@@ -159,6 +161,55 @@ func TestPathMappingsCanBeUpsertedListedAndDeleted(t *testing.T) {
 	}
 	if len(mappings) != 0 {
 		t.Fatalf("mappings after delete = %#v", mappings)
+	}
+}
+
+func TestActivityRecommendationEvidencePersists(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	rec := recommendations.Recommendation{
+		ID:              "rec_activity",
+		Action:          recommendations.ActionReviewInactiveMovie,
+		Title:           "Review inactive movie",
+		Explanation:     "No one has watched this movie recently.",
+		SpaceSavedBytes: 42_000_000_000,
+		Confidence:      0.86,
+		Source:          "rule:activity-inactive-movie",
+		AffectedPaths:   []string{"/media/movies/Arrival (2016).mkv"},
+		Destructive:     false,
+		ServerID:        "jellyfin",
+		ExternalItemID:  "item_1",
+		LastPlayedAt:    parseIntegrationTestTime("2025-01-02T03:04:05Z"),
+		PlayCount:       2,
+		UniqueUsers:     1,
+		FavoriteCount:   0,
+		Verification:    "path_mapped",
+		Evidence:        map[string]string{"inactiveDays": "600", "thresholdDays": "540"},
+	}
+	if err := store.ReplaceRecommendations([]recommendations.Recommendation{rec}); err != nil {
+		t.Fatal(err)
+	}
+
+	recs, err := store.ListRecommendations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("recommendations = %d, want 1", len(recs))
+	}
+	got := recs[0]
+	if got.ServerID != "jellyfin" || got.ExternalItemID != "item_1" || got.PlayCount != 2 || got.UniqueUsers != 1 {
+		t.Fatalf("activity evidence = %#v", got)
+	}
+	if got.Verification != "path_mapped" || got.Evidence["inactiveDays"] != "600" {
+		t.Fatalf("evidence = %#v", got.Evidence)
+	}
+	if got.LastPlayedAt.Format(time.RFC3339) != "2025-01-02T03:04:05Z" {
+		t.Fatalf("last played = %s", got.LastPlayedAt.Format(time.RFC3339))
 	}
 }
 

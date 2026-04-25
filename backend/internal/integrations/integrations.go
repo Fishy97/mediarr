@@ -680,6 +680,9 @@ func applyPathMappings(serverID string, path string, mappings []database.PathMap
 	if path == "" {
 		return "", "server_reported", 0.4
 	}
+	if path == "/media" || strings.HasPrefix(path, "/media/") {
+		return path, "local_verified", 0.92
+	}
 	for _, mapping := range mappings {
 		if mapping.ServerID != "" && mapping.ServerID != serverID {
 			continue

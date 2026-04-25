@@ -4,14 +4,21 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"sort"
+	"strconv"
+	"time"
 )
 
 type Action string
 
 const (
-	ActionReviewDuplicate        Action = "review_duplicate"
-	ActionReviewOversized        Action = "review_oversized"
-	ActionReviewMissingSubtitles Action = "review_missing_subtitles"
+	ActionReviewDuplicate          Action = "review_duplicate"
+	ActionReviewOversized          Action = "review_oversized"
+	ActionReviewMissingSubtitles   Action = "review_missing_subtitles"
+	ActionReviewInactiveMovie      Action = "review_inactive_movie"
+	ActionReviewNeverWatchedMovie  Action = "review_never_watched_movie"
+	ActionReviewInactiveSeries     Action = "review_inactive_series"
+	ActionReviewAbandonedSeries    Action = "review_abandoned_series"
+	ActionReviewUnwatchedDuplicate Action = "review_unwatched_duplicate"
 )
 
 type MediaFile struct {
@@ -24,24 +31,50 @@ type MediaFile struct {
 	WantsSubtitles bool   `json:"wantsSubtitles"`
 }
 
+type ActivityMedia struct {
+	ServerID        string
+	ExternalItemID  string
+	Kind            string
+	Title           string
+	Path            string
+	SizeBytes       int64
+	AddedAt         time.Time
+	LastPlayedAt    time.Time
+	PlayCount       int
+	UniqueUsers     int
+	FavoriteCount   int
+	Verification    string
+	MatchConfidence float64
+}
+
 type Recommendation struct {
-	ID              string   `json:"id"`
-	Action          Action   `json:"action"`
-	Title           string   `json:"title"`
-	Explanation     string   `json:"explanation"`
-	SpaceSavedBytes int64    `json:"spaceSavedBytes"`
-	Confidence      float64  `json:"confidence"`
-	Source          string   `json:"source"`
-	AffectedPaths   []string `json:"affectedPaths"`
-	Destructive     bool     `json:"destructive"`
-	AIRationale     string   `json:"aiRationale,omitempty"`
-	AITags          []string `json:"aiTags,omitempty"`
-	AIConfidence    float64  `json:"aiConfidence,omitempty"`
-	AISource        string   `json:"aiSource,omitempty"`
+	ID              string            `json:"id"`
+	Action          Action            `json:"action"`
+	Title           string            `json:"title"`
+	Explanation     string            `json:"explanation"`
+	SpaceSavedBytes int64             `json:"spaceSavedBytes"`
+	Confidence      float64           `json:"confidence"`
+	Source          string            `json:"source"`
+	AffectedPaths   []string          `json:"affectedPaths"`
+	Destructive     bool              `json:"destructive"`
+	AIRationale     string            `json:"aiRationale,omitempty"`
+	AITags          []string          `json:"aiTags,omitempty"`
+	AIConfidence    float64           `json:"aiConfidence,omitempty"`
+	AISource        string            `json:"aiSource,omitempty"`
+	ServerID        string            `json:"serverId,omitempty"`
+	ExternalItemID  string            `json:"externalItemId,omitempty"`
+	LastPlayedAt    time.Time         `json:"lastPlayedAt,omitempty"`
+	PlayCount       int               `json:"playCount,omitempty"`
+	UniqueUsers     int               `json:"uniqueUsers,omitempty"`
+	FavoriteCount   int               `json:"favoriteCount,omitempty"`
+	Verification    string            `json:"verification,omitempty"`
+	Evidence        map[string]string `json:"evidence,omitempty"`
 }
 
 type Engine struct {
 	OversizedThresholdBytes int64
+	NeverWatchedDays        int
+	InactiveDays            int
 }
 
 func (engine Engine) Generate(files []MediaFile) []Recommendation {
@@ -122,6 +155,114 @@ func (engine Engine) Generate(files []MediaFile) []Recommendation {
 		return recs[i].SpaceSavedBytes > recs[j].SpaceSavedBytes
 	})
 	return recs
+}
+
+func (engine Engine) GenerateActivity(items []ActivityMedia, now time.Time) []Recommendation {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	neverWatchedDays := engine.NeverWatchedDays
+	if neverWatchedDays == 0 {
+		neverWatchedDays = 180
+	}
+	inactiveDays := engine.InactiveDays
+	if inactiveDays == 0 {
+		inactiveDays = 540
+	}
+
+	var recs []Recommendation
+	for _, item := range items {
+		if item.Kind != "movie" || item.SizeBytes <= 0 || item.Path == "" || item.Title == "" {
+			continue
+		}
+		if item.FavoriteCount > 0 {
+			continue
+		}
+		confidence := activityConfidence(item.MatchConfidence, item.Verification)
+		if confidence < 0.65 {
+			continue
+		}
+		if item.PlayCount == 0 && !item.AddedAt.IsZero() {
+			ageDays := int(now.Sub(item.AddedAt).Hours() / 24)
+			if ageDays >= neverWatchedDays {
+				recs = append(recs, Recommendation{
+					ID:              stableID("activity-never-watched:" + item.ServerID + ":" + item.ExternalItemID + ":" + item.Path),
+					Action:          ActionReviewNeverWatchedMovie,
+					Title:           "Review never-watched movie",
+					Explanation:     item.Title + " has not been watched by any imported media-server user since it was added. Review whether it is still worth keeping before reclaiming storage.",
+					SpaceSavedBytes: item.SizeBytes,
+					Confidence:      confidence,
+					Source:          "rule:activity-never-watched",
+					AffectedPaths:   []string{item.Path},
+					Destructive:     false,
+					ServerID:        item.ServerID,
+					ExternalItemID:  item.ExternalItemID,
+					PlayCount:       item.PlayCount,
+					UniqueUsers:     item.UniqueUsers,
+					FavoriteCount:   item.FavoriteCount,
+					Verification:    item.Verification,
+					Evidence: map[string]string{
+						"ageDays":       strconv.Itoa(ageDays),
+						"thresholdDays": strconv.Itoa(neverWatchedDays),
+					},
+				})
+			}
+			continue
+		}
+		if item.PlayCount > 0 && !item.LastPlayedAt.IsZero() {
+			inactiveForDays := int(now.Sub(item.LastPlayedAt).Hours() / 24)
+			if inactiveForDays >= inactiveDays {
+				recs = append(recs, Recommendation{
+					ID:              stableID("activity-inactive:" + item.ServerID + ":" + item.ExternalItemID + ":" + item.Path),
+					Action:          ActionReviewInactiveMovie,
+					Title:           "Review inactive movie",
+					Explanation:     item.Title + " has not been watched recently by any imported media-server user. Review activity and quality before reclaiming storage.",
+					SpaceSavedBytes: item.SizeBytes,
+					Confidence:      confidence,
+					Source:          "rule:activity-inactive-movie",
+					AffectedPaths:   []string{item.Path},
+					Destructive:     false,
+					ServerID:        item.ServerID,
+					ExternalItemID:  item.ExternalItemID,
+					LastPlayedAt:    item.LastPlayedAt,
+					PlayCount:       item.PlayCount,
+					UniqueUsers:     item.UniqueUsers,
+					FavoriteCount:   item.FavoriteCount,
+					Verification:    item.Verification,
+					Evidence: map[string]string{
+						"inactiveDays":  strconv.Itoa(inactiveForDays),
+						"thresholdDays": strconv.Itoa(inactiveDays),
+					},
+				})
+			}
+		}
+	}
+	sort.Slice(recs, func(i, j int) bool {
+		if recs[i].SpaceSavedBytes == recs[j].SpaceSavedBytes {
+			return recs[i].ID < recs[j].ID
+		}
+		return recs[i].SpaceSavedBytes > recs[j].SpaceSavedBytes
+	})
+	return recs
+}
+
+func activityConfidence(matchConfidence float64, verification string) float64 {
+	if matchConfidence <= 0 {
+		matchConfidence = 0.7
+	}
+	verificationConfidence := 0.72
+	switch verification {
+	case "local_verified":
+		verificationConfidence = 0.92
+	case "path_mapped":
+		verificationConfidence = 0.86
+	case "server_reported":
+		verificationConfidence = 0.72
+	}
+	if matchConfidence < verificationConfidence {
+		return matchConfidence
+	}
+	return verificationConfidence
 }
 
 func stableID(value string) string {

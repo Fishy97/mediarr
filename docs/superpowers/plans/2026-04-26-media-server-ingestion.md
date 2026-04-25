@@ -334,7 +334,7 @@ cd backend && go test ./internal/integrations ./internal/api
 
 Expected: pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/internal/integrations/integrations.go backend/internal/integrations/plex_test.go backend/internal/api/server.go
@@ -350,7 +350,7 @@ git push
 - Modify: `backend/internal/database/store.go`
 - Modify: `backend/internal/api/server.go`
 
-- [ ] **Step 1: Write failing recommendation tests**
+- [x] **Step 1: Write failing recommendation tests**
 
 Add tests for:
 
@@ -359,7 +359,7 @@ Add tests for:
 - favorite suppression.
 - every activity recommendation has `Destructive == false`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 cd backend && go test ./internal/recommendations -run 'Activity|Inactive|Never'
@@ -367,7 +367,7 @@ cd backend && go test ./internal/recommendations -run 'Activity|Inactive|Never'
 
 Expected: fail because activity inputs/actions do not exist.
 
-- [ ] **Step 3: Extend recommendation model and engine**
+- [x] **Step 3: Extend recommendation model and engine**
 
 Add actions:
 
@@ -387,15 +387,15 @@ func (engine Engine) GenerateActivity(items []ActivityMedia, now time.Time) []Re
 
 Use conservative defaults: never-watched age 180 days, inactive threshold 540 days, minimum confidence 0.72, suppress favorites and zero-size items.
 
-- [ ] **Step 4: Persist evidence fields**
+- [x] **Step 4: Persist evidence fields**
 
 Update recommendation insert/list methods for server ID, external item ID, last played, play count, unique users, favorite count, verification, and evidence JSON.
 
-- [ ] **Step 5: Regenerate recommendations from catalog and activity**
+- [x] **Step 5: Regenerate recommendations from catalog and activity**
 
 Update API regeneration paths so catalog rules and activity rules are combined before AI enrichment and persistence.
 
-- [ ] **Step 6: Run tests**
+- [x] **Step 6: Run tests**
 
 ```bash
 cd backend && go test ./internal/recommendations ./internal/database ./internal/api

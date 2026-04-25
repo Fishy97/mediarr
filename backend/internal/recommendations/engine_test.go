@@ -1,6 +1,9 @@
 package recommendations
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestDuplicateRecommendationIncludesSpaceSavedAndAllPaths(t *testing.T) {
 	engine := Engine{}
@@ -57,5 +60,97 @@ func TestEngineCreatesMissingSubtitleRecommendations(t *testing.T) {
 	}
 	if recs[0].Destructive {
 		t.Fatal("missing subtitle recommendations must not delete media")
+	}
+}
+
+func TestEngineCreatesNeverWatchedActivityRecommendation(t *testing.T) {
+	engine := Engine{}
+	now := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)
+
+	recs := engine.GenerateActivity([]ActivityMedia{
+		{
+			ServerID:        "jellyfin",
+			ExternalItemID:  "item_1",
+			Kind:            "movie",
+			Title:           "Arrival",
+			Path:            "/media/movies/Arrival (2016).mkv",
+			SizeBytes:       42_000_000_000,
+			AddedAt:         now.AddDate(0, -8, 0),
+			PlayCount:       0,
+			UniqueUsers:     0,
+			FavoriteCount:   0,
+			Verification:    "path_mapped",
+			MatchConfidence: 0.86,
+		},
+	}, now)
+
+	if len(recs) != 1 {
+		t.Fatalf("recommendations = %d, want 1", len(recs))
+	}
+	if recs[0].Action != ActionReviewNeverWatchedMovie {
+		t.Fatalf("action = %s, want %s", recs[0].Action, ActionReviewNeverWatchedMovie)
+	}
+	if recs[0].SpaceSavedBytes != 42_000_000_000 || recs[0].ServerID != "jellyfin" {
+		t.Fatalf("recommendation evidence = %#v", recs[0])
+	}
+	if recs[0].Destructive {
+		t.Fatal("activity recommendations must be suggest-only")
+	}
+}
+
+func TestEngineCreatesInactiveActivityRecommendation(t *testing.T) {
+	engine := Engine{}
+	now := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)
+
+	recs := engine.GenerateActivity([]ActivityMedia{
+		{
+			ServerID:        "plex",
+			ExternalItemID:  "101",
+			Kind:            "movie",
+			Title:           "Arrival",
+			Path:            "/media/movies/Arrival (2016).mkv",
+			SizeBytes:       42_000_000_000,
+			LastPlayedAt:    now.AddDate(-2, 0, 0),
+			PlayCount:       2,
+			UniqueUsers:     1,
+			FavoriteCount:   0,
+			Verification:    "local_verified",
+			MatchConfidence: 0.95,
+		},
+	}, now)
+
+	if len(recs) != 1 {
+		t.Fatalf("recommendations = %d, want 1", len(recs))
+	}
+	if recs[0].Action != ActionReviewInactiveMovie {
+		t.Fatalf("action = %s, want %s", recs[0].Action, ActionReviewInactiveMovie)
+	}
+	if recs[0].PlayCount != 2 || recs[0].UniqueUsers != 1 || recs[0].Verification != "local_verified" {
+		t.Fatalf("activity evidence = %#v", recs[0])
+	}
+}
+
+func TestEngineSuppressesActivityRecommendationsForFavorites(t *testing.T) {
+	engine := Engine{}
+	now := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)
+
+	recs := engine.GenerateActivity([]ActivityMedia{
+		{
+			ServerID:        "jellyfin",
+			ExternalItemID:  "item_1",
+			Kind:            "movie",
+			Title:           "Protected Favorite",
+			Path:            "/media/movies/Favorite.mkv",
+			SizeBytes:       42_000_000_000,
+			AddedAt:         now.AddDate(-2, 0, 0),
+			PlayCount:       0,
+			FavoriteCount:   1,
+			Verification:    "path_mapped",
+			MatchConfidence: 0.86,
+		},
+	}, now)
+
+	if len(recs) != 0 {
+		t.Fatalf("favorite recommendations = %#v, want none", recs)
 	}
 }

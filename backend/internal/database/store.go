@@ -1079,6 +1079,70 @@ func (store *Store) ListMediaActivityRollups(serverID string) ([]MediaActivityRo
 	return rollups, rows.Err()
 }
 
+func (store *Store) ListActivityRecommendationMedia() ([]recommendations.ActivityMedia, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	rows, err := store.DB.Query(`SELECT
+			items.server_id,
+			items.external_id,
+			items.kind,
+			items.title,
+			COALESCE(NULLIF(files.local_path, ''), files.path),
+			files.size_bytes,
+			items.date_created,
+			rollups.last_played_at,
+			COALESCE(rollups.play_count, 0),
+			COALESCE(rollups.unique_users, 0),
+			COALESCE(rollups.favorite_count, 0),
+			files.verification,
+			CASE
+				WHEN files.match_confidence > 0 AND items.match_confidence > 0 AND files.match_confidence < items.match_confidence THEN files.match_confidence
+				WHEN items.match_confidence > 0 THEN items.match_confidence
+				ELSE files.match_confidence
+			END
+		FROM media_server_items AS items
+		JOIN media_server_files AS files
+			ON files.server_id = items.server_id
+			AND files.item_external_id = items.external_id
+		LEFT JOIN media_activity_rollups AS rollups
+			ON rollups.server_id = items.server_id
+			AND rollups.item_external_id = items.external_id
+		ORDER BY items.title, files.path`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	media := []recommendations.ActivityMedia{}
+	for rows.Next() {
+		var item recommendations.ActivityMedia
+		var addedAt sql.NullString
+		var lastPlayedAt sql.NullString
+		if err := rows.Scan(
+			&item.ServerID,
+			&item.ExternalItemID,
+			&item.Kind,
+			&item.Title,
+			&item.Path,
+			&item.SizeBytes,
+			&addedAt,
+			&lastPlayedAt,
+			&item.PlayCount,
+			&item.UniqueUsers,
+			&item.FavoriteCount,
+			&item.Verification,
+			&item.MatchConfidence,
+		); err != nil {
+			return nil, err
+		}
+		item.AddedAt = parseSQLTime(addedAt)
+		item.LastPlayedAt = parseSQLTime(lastPlayedAt)
+		media = append(media, item)
+	}
+	return media, rows.Err()
+}
+
 func (store *Store) LatestMediaSyncJob(serverID string) (MediaSyncJob, error) {
 	if store == nil || store.DB == nil {
 		return MediaSyncJob{}, errors.New("nil database store")
@@ -1199,8 +1263,10 @@ func (store *Store) ReplaceRecommendations(recs []recommendations.Recommendation
 		return err
 	}
 	stmt, err := tx.Prepare(`INSERT INTO recommendations (
-		id, action, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive, ai_rationale, ai_tags, ai_confidence, ai_source
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		id, action, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive,
+		ai_rationale, ai_tags, ai_confidence, ai_source,
+		server_id, external_item_id, last_played_at, play_count, unique_users, favorite_count, verification, evidence
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
@@ -1216,6 +1282,14 @@ func (store *Store) ReplaceRecommendations(recs []recommendations.Recommendation
 			tags = []string{}
 		}
 		aiTags, err := json.Marshal(tags)
+		if err != nil {
+			return err
+		}
+		evidence := rec.Evidence
+		if evidence == nil {
+			evidence = map[string]string{}
+		}
+		evidenceJSON, err := json.Marshal(evidence)
 		if err != nil {
 			return err
 		}
@@ -1237,6 +1311,14 @@ func (store *Store) ReplaceRecommendations(recs []recommendations.Recommendation
 			string(aiTags),
 			rec.AIConfidence,
 			rec.AISource,
+			rec.ServerID,
+			rec.ExternalItemID,
+			formatOptionalTime(rec.LastPlayedAt),
+			rec.PlayCount,
+			rec.UniqueUsers,
+			rec.FavoriteCount,
+			rec.Verification,
+			string(evidenceJSON),
 		); err != nil {
 			return err
 		}
@@ -1248,7 +1330,9 @@ func (store *Store) ListRecommendations() ([]recommendations.Recommendation, err
 	if store == nil || store.DB == nil {
 		return nil, errors.New("nil database store")
 	}
-	rows, err := store.DB.Query(`SELECT id, action, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive, ai_rationale, ai_tags, ai_confidence, ai_source
+	rows, err := store.DB.Query(`SELECT id, action, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive,
+			ai_rationale, ai_tags, ai_confidence, ai_source,
+			server_id, external_item_id, last_played_at, play_count, unique_users, favorite_count, verification, evidence
 		FROM recommendations
 		WHERE ignored_at IS NULL
 		ORDER BY space_saved_bytes DESC, id`)
@@ -1264,11 +1348,36 @@ func (store *Store) ListRecommendations() ([]recommendations.Recommendation, err
 		var paths string
 		var aiTags string
 		var destructive int
-		if err := rows.Scan(&rec.ID, &action, &rec.Title, &rec.Explanation, &rec.SpaceSavedBytes, &rec.Confidence, &rec.Source, &paths, &destructive, &rec.AIRationale, &aiTags, &rec.AIConfidence, &rec.AISource); err != nil {
+		var lastPlayed sql.NullString
+		var evidence string
+		if err := rows.Scan(
+			&rec.ID,
+			&action,
+			&rec.Title,
+			&rec.Explanation,
+			&rec.SpaceSavedBytes,
+			&rec.Confidence,
+			&rec.Source,
+			&paths,
+			&destructive,
+			&rec.AIRationale,
+			&aiTags,
+			&rec.AIConfidence,
+			&rec.AISource,
+			&rec.ServerID,
+			&rec.ExternalItemID,
+			&lastPlayed,
+			&rec.PlayCount,
+			&rec.UniqueUsers,
+			&rec.FavoriteCount,
+			&rec.Verification,
+			&evidence,
+		); err != nil {
 			return nil, err
 		}
 		rec.Action = recommendations.Action(action)
 		rec.Destructive = destructive == 1
+		rec.LastPlayedAt = parseSQLTime(lastPlayed)
 		if err := json.Unmarshal([]byte(paths), &rec.AffectedPaths); err != nil {
 			return nil, err
 		}
@@ -1277,6 +1386,15 @@ func (store *Store) ListRecommendations() ([]recommendations.Recommendation, err
 		}
 		if rec.AITags == nil {
 			rec.AITags = []string{}
+		}
+		if evidence == "" {
+			evidence = "{}"
+		}
+		if err := json.Unmarshal([]byte(evidence), &rec.Evidence); err != nil {
+			return nil, err
+		}
+		if rec.Evidence == nil {
+			rec.Evidence = map[string]string{}
 		}
 		recs = append(recs, rec)
 	}
