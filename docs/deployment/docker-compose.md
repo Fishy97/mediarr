@@ -156,7 +156,24 @@ Then view the catalog:
 curl http://localhost:8080/api/v1/catalog
 ```
 
-## 7. Backups
+## 7. Sync Jellyfin Or Plex Activity
+
+Configure `MEDIARR_JELLYFIN_URL` and `MEDIARR_JELLYFIN_API_KEY`, or `MEDIARR_PLEX_URL` and `MEDIARR_PLEX_TOKEN`, then use the Integrations screen to run a media-server sync.
+
+From the API:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/integrations/jellyfin/sync
+curl -X POST http://localhost:8080/api/v1/integrations/plex/sync
+```
+
+Mediarr imports media-server inventory, file paths, file sizes, and activity rollups such as play count and last played date. It uses those signals to create suggest-only cleanup recommendations for inactive or never-watched media.
+
+Use path mappings when Jellyfin or Plex sees a different path than the Mediarr container. For example, if Plex reports `/mnt/media/movies` but Mediarr sees `/media/movies`, create a mapping from `/mnt/media` to `/media`. Recommendations label storage savings as `local_verified`, `path_mapped`, or `server_reported` so the user can see how trustworthy the size calculation is.
+
+Activity data can expose household viewing behavior. Keep Mediarr behind authentication, avoid exposing it directly to the public internet, and treat imported activity as local operational data.
+
+## 8. Backups
 
 Backups include the SQLite database, settings, audit log, provider cache, artwork cache, and user review state.
 
@@ -196,7 +213,7 @@ For host-level backups, back up the whole `config` directory:
 tar -czf mediarr-config-$(date +%Y%m%d).tar.gz config
 ```
 
-## 8. Upgrades
+## 9. Upgrades
 
 ```bash
 cd mediarr
@@ -207,7 +224,7 @@ docker compose ps
 
 The app stores durable state in `./config`, so rebuilding the image does not remove catalog data.
 
-## 9. Optional Local AI
+## 10. Optional Local AI
 
 Ollama is included as an optional Compose profile. Start Mediarr with local AI enabled:
 
@@ -234,7 +251,7 @@ docker compose up -d
 docker compose --profile ai up -d
 ```
 
-## 10. Reverse Proxy
+## 11. Reverse Proxy
 
 For a production server, put Mediarr behind a reverse proxy such as Caddy, Nginx Proxy Manager, Traefik, or Nginx. Do not expose port `8080` directly to the public internet.
 
@@ -245,7 +262,7 @@ Minimum reverse proxy expectations:
 - forward to `http://127.0.0.1:8080` or `http://<server-ip>:8080`
 - keep `MEDIARR_ADMIN_TOKEN` set
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 ### Container Is Not Healthy
 

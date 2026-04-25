@@ -16,6 +16,8 @@ Mediarr V1 is a Docker-hosted library scanner, catalog, and review dashboard for
 - protect the API with first-run admin setup, password login, sessions, and bearer-token automation
 - configure provider credentials without returning secrets through the API
 - request Jellyfin, Plex, and Emby library refreshes as sync targets
+- sync Jellyfin and Plex inventory, file evidence, and user activity into a normalized activity model
+- create activity-aware cleanup recommendations for inactive and never-watched media
 - attach optional local AI rationales to deterministic recommendations when the Ollama sidecar is enabled
 - expose a web UI and REST API
 
@@ -29,7 +31,8 @@ Mediarr remains deliberately conservative: it does not delete media, does not do
 - Read-only media mounts by default
 - Suggest-only cleanup recommendations with affected paths, confidence, source, and recoverable storage
 - Provider health and credential surfaces for TMDb, AniList, TheTVDB, OpenSubtitles, and local sidecars
-- Integration status and refresh actions for Jellyfin, Plex, Emby, and optional local Ollama
+- Integration status, refresh actions, and inventory/activity sync for Jellyfin and Plex
+- Path evidence labels that distinguish locally verified, path-mapped, and server-reported savings
 - Catalog correction workflow with user overrides taking precedence over scan guesses
 
 ## Quick Start
@@ -69,6 +72,15 @@ Run a scan from the UI or with:
 ```bash
 curl -X POST http://localhost:8080/api/v1/scans
 ```
+
+Sync a connected Jellyfin or Plex server from the UI Integrations screen, or with:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/integrations/jellyfin/sync
+curl -X POST http://localhost:8080/api/v1/integrations/plex/sync
+```
+
+`refresh` asks the media server to rescan its own libraries. `sync` imports inventory and activity into Mediarr so it can create cleanup suggestions. Activity data can reveal household viewing behavior, so Mediarr stores only the normalized fields needed for recommendations and never returns media-server tokens through the API.
 
 ## Ubuntu Server Deployment
 

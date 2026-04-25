@@ -25,9 +25,19 @@ All API routes are rooted at `/api/v1`.
 | PUT | `/provider-settings/{provider}` | Update provider base URL, API key, or clear stored key |
 | GET | `/integrations` | Media-server and AI integration status |
 | POST | `/integrations/{id}/refresh` | Request a Jellyfin, Plex, or Emby library refresh |
+| POST | `/integrations/{id}/sync` | Import Jellyfin or Plex inventory and activity |
+| GET | `/integrations/{id}/sync` | Latest media-server sync job |
+| GET | `/integrations/{id}/items` | Imported media-server items; supports `?unmapped=true` |
+| GET | `/activity/rollups` | Normalized media activity rollups; supports `?serverId=` |
+| GET | `/path-mappings` | Path prefix mappings used to resolve server paths to Mediarr paths |
+| POST | `/path-mappings` | Create a path mapping |
+| PUT | `/path-mappings/{id}` | Update a path mapping |
+| DELETE | `/path-mappings/{id}` | Delete a path mapping |
 | GET | `/ai/status` | Optional local AI health and model availability |
 | POST | `/backups` | Create a `/config` backup |
 | POST | `/backups/restore` | Inspect or restore a `/config` backup |
 | GET | `/audit` | Audit log lines |
 
 No media file deletion route is provided.
+
+`refresh` and `sync` are intentionally different. `refresh` tells a media server to refresh its own library. `sync` pulls inventory, file paths, file sizes, and activity signals into Mediarr for suggest-only cleanup recommendations.

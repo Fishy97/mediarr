@@ -472,7 +472,7 @@ npm --prefix frontend run build
 
 Expected: pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add frontend/src/types.ts frontend/src/lib/api.ts frontend/src/lib/api.test.ts frontend/src/App.tsx frontend/src/styles/app.css
@@ -488,7 +488,7 @@ git push
 - Modify: `docs/deployment/docker-compose.md`
 - Modify: `docs/superpowers/plans/2026-04-26-media-server-ingestion.md`
 
-- [ ] **Step 1: Update docs**
+- [x] **Step 1: Update docs**
 
 Document:
 
@@ -499,7 +499,7 @@ Document:
 - Server-reported versus locally verified savings.
 - No-delete safety rule.
 
-- [ ] **Step 2: Run backend validation**
+- [x] **Step 2: Run backend validation**
 
 ```bash
 cd backend && go test ./...
@@ -508,7 +508,7 @@ cd backend && go vet ./...
 
 Expected: both pass.
 
-- [ ] **Step 3: Run frontend validation**
+- [x] **Step 3: Run frontend validation**
 
 ```bash
 npm --prefix frontend run test -- --run
@@ -517,7 +517,7 @@ npm --prefix frontend run build
 
 Expected: both pass.
 
-- [ ] **Step 4: Run Compose validation**
+- [x] **Step 4: Run Compose validation**
 
 ```bash
 docker compose config --quiet
@@ -527,7 +527,7 @@ docker compose build mediarr
 
 Expected: all pass.
 
-- [ ] **Step 5: Clean local artifacts**
+- [x] **Step 5: Clean local artifacts**
 
 Run:
 
@@ -537,7 +537,7 @@ git status --short
 
 Expected: only intentional source/docs changes before the final commit. `.superpowers/` must remain ignored.
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add README.md docs/api/rest.md docs/deployment/docker-compose.md docs/superpowers/plans/2026-04-26-media-server-ingestion.md
