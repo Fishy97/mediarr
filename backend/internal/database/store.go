@@ -175,6 +175,11 @@ type MediaSyncJob struct {
 	ID              string    `json:"id"`
 	ServerID        string    `json:"serverId"`
 	Status          string    `json:"status"`
+	Phase           string    `json:"phase,omitempty"`
+	Message         string    `json:"message,omitempty"`
+	CurrentLabel    string    `json:"currentLabel,omitempty"`
+	Processed       int       `json:"processed,omitempty"`
+	Total           int       `json:"total,omitempty"`
 	ItemsImported   int       `json:"itemsImported"`
 	RollupsImported int       `json:"rollupsImported"`
 	UnmappedItems   int       `json:"unmappedItems"`

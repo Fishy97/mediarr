@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -107,9 +108,12 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("/api/v1/auth/logout", server.logoutHandler)
 	server.mux.HandleFunc("/api/v1/auth/me", server.meHandler)
 	server.mux.HandleFunc("/api/v1/libraries", server.librariesHandler)
+	server.mux.HandleFunc("/api/v1/jobs", server.jobsHandler)
+	server.mux.HandleFunc("/api/v1/jobs/", server.jobHandler)
 	server.mux.HandleFunc("/api/v1/catalog", server.catalogHandler)
 	server.mux.HandleFunc("/api/v1/catalog/", server.catalogCorrectionHandler)
 	server.mux.HandleFunc("/api/v1/scans", server.scansHandler)
+	server.mux.HandleFunc("/api/v1/scans/active", server.activeScanHandler)
 	server.mux.HandleFunc("/api/v1/recommendations", server.recommendationsHandler)
 	server.mux.HandleFunc("/api/v1/recommendations/", server.recommendationActionHandler)
 	server.mux.HandleFunc("/api/v1/providers", server.providersHandler)
@@ -269,6 +273,62 @@ func (server *Server) librariesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+type jobDetail struct {
+	database.Job
+	Events []database.JobEvent `json:"events"`
+}
+
+func (server *Server) jobsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.store == nil {
+		http.Error(w, "job store is not configured", http.StatusBadRequest)
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	jobs, err := server.store.ListJobs(database.JobFilter{
+		Kind:     r.URL.Query().Get("kind"),
+		TargetID: r.URL.Query().Get("targetId"),
+		Status:   r.URL.Query().Get("status"),
+		Active:   r.URL.Query().Get("active") == "true",
+		Limit:    limit,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: jobs})
+}
+
+func (server *Server) jobHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.store == nil {
+		http.Error(w, "job store is not configured", http.StatusBadRequest)
+		return
+	}
+	id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/jobs/"), "/")
+	if id == "" {
+		http.NotFound(w, r)
+		return
+	}
+	job, err := server.store.GetJob(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	events, err := server.store.ListJobEvents(id, 30)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: jobDetail{Job: job, Events: events}})
+}
+
 func (server *Server) scansHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -276,7 +336,22 @@ func (server *Server) scansHandler(w http.ResponseWriter, r *http.Request) {
 		defer server.mu.RUnlock()
 		writeJSON(w, http.StatusOK, envelope{Data: emptyIfNil(server.scans)})
 	case http.MethodPost:
-		results, recs, err := server.scanAll(r.Context())
+		if server.store != nil {
+			job, err := server.store.CreateJob(database.JobInput{
+				Kind:     "filesystem_scan",
+				TargetID: "all",
+				Phase:    "queued",
+				Message:  "Filesystem scan queued",
+			})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			go server.runScanJob(job.ID)
+			writeJSON(w, http.StatusAccepted, envelope{Data: job})
+			return
+		}
+		results, recs, err := server.scanAll(r.Context(), nil)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -354,15 +429,66 @@ func (server *Server) catalogCorrectionHandler(w http.ResponseWriter, r *http.Re
 	}
 }
 
-func (server *Server) scanAll(ctx context.Context) ([]filescan.Result, []recommendations.Recommendation, error) {
+func (server *Server) activeScanHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.store == nil {
+		http.Error(w, "job store is not configured", http.StatusBadRequest)
+		return
+	}
+	jobs, err := server.store.ListJobs(database.JobFilter{Kind: "filesystem_scan", TargetID: "all", Active: true, Limit: 1})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: jobs})
+}
+
+func (server *Server) runScanJob(jobID string) {
+	reporter := jobReporter{store: server.store, jobID: jobID}
+	reporter.update(database.JobUpdate{Status: "running", Phase: "starting", Message: "Starting filesystem scan"}, true)
+	ctx, cancel := context.WithTimeout(context.Background(), 24*time.Hour)
+	defer cancel()
+	if _, _, err := server.scanAll(ctx, &reporter); err != nil {
+		reporter.update(database.JobUpdate{Status: "failed", Phase: "failed", Message: "Filesystem scan failed", Error: err.Error(), Completed: true}, true)
+		server.record("scan.failed", "Library scan failed", map[string]any{"jobId": jobID, "error": err.Error()})
+		return
+	}
+	reporter.update(database.JobUpdate{Status: "completed", Phase: "complete", Message: "Filesystem scan completed", Completed: true}, true)
+}
+
+func (server *Server) scanAll(ctx context.Context, reporter *jobReporter) ([]filescan.Result, []recommendations.Recommendation, error) {
 	server.mu.RLock()
 	libraries := append([]filescan.Library(nil), server.libraries...)
 	server.mu.RUnlock()
 
 	var results []filescan.Result
 	var files []recommendations.MediaFile
-	for _, library := range libraries {
-		result, err := server.scanner.Scan(library)
+	for libraryIndex, library := range libraries {
+		if reporter != nil {
+			reporter.update(database.JobUpdate{
+				Phase:        "discovering",
+				Message:      "Discovering files in " + displayLibraryName(library),
+				CurrentLabel: displayLibraryName(library),
+				Processed:    intPtr(libraryIndex),
+				Total:        intPtr(len(libraries)),
+			}, true)
+		}
+		scanner := server.scanner
+		if reporter != nil {
+			scanner.Progress = func(progress filescan.Progress) {
+				reporter.update(database.JobUpdate{
+					Phase:        progress.Phase,
+					Message:      displayLibraryName(library) + ": " + progress.Message,
+					CurrentLabel: progress.CurrentLabel,
+					Processed:    intPtr(progress.Processed),
+					Total:        intPtr(progress.Total),
+				}, progress.Phase != "processing" || progress.Processed == 0 || progress.Processed == progress.Total)
+			}
+		}
+		result, err := scanner.Scan(library)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -387,11 +513,17 @@ func (server *Server) scanAll(ctx context.Context) ([]filescan.Result, []recomme
 		}
 	}
 	if server.store != nil {
+		if reporter != nil {
+			reporter.update(database.JobUpdate{Phase: "catalog", Message: "Loading catalog for recommendations"}, true)
+		}
 		items, err := server.store.ListCatalog()
 		if err != nil {
 			return nil, nil, err
 		}
 		files = recommendationFilesFromCatalog(items)
+	}
+	if reporter != nil {
+		reporter.update(database.JobUpdate{Phase: "recommendations", Message: "Generating cleanup recommendations"}, true)
 	}
 	recs, err := server.generateRecommendations(ctx, files)
 	if err != nil {
@@ -642,6 +774,10 @@ func (server *Server) integrationSyncHandler(w http.ResponseWriter, r *http.Requ
 	}
 	switch r.Method {
 	case http.MethodGet:
+		if jobs, err := server.store.ListJobs(database.JobFilter{Kind: integrationJobKind(targetID), TargetID: targetID, Active: true, Limit: 1}); err == nil && len(jobs) > 0 {
+			writeJSON(w, http.StatusOK, envelope{Data: mediaSyncJobFromJob(jobs[0])})
+			return
+		}
 		job, err := server.store.LatestMediaSyncJob(targetID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
@@ -649,34 +785,109 @@ func (server *Server) integrationSyncHandler(w http.ResponseWriter, r *http.Requ
 		}
 		writeJSON(w, http.StatusOK, envelope{Data: job})
 	case http.MethodPost:
-		if err := server.refreshIntegrationOptionsFromStore(); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		jobKind := integrationJobKind(targetID)
+		if jobKind == "" {
+			http.Error(w, "integration sync is not supported for this target", http.StatusBadRequest)
 			return
 		}
-		mappings, err := server.store.ListPathMappings()
+		job, err := server.store.CreateJob(database.JobInput{
+			Kind:     jobKind,
+			TargetID: targetID,
+			Phase:    "queued",
+			Message:  "Media-server sync queued",
+		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
-		defer cancel()
-		snapshot, err := syncIntegrationSnapshot(ctx, server.integrationOptions, targetID, mappings)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if err := server.store.ReplaceMediaServerSnapshot(snapshot); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if err := server.regenerateRecommendationsFromCatalog(); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		server.record("integration.sync_completed", "Media-server inventory and activity sync completed", map[string]any{"targetId": targetID, "items": snapshot.Job.ItemsImported, "rollups": snapshot.Job.RollupsImported})
-		writeJSON(w, http.StatusAccepted, envelope{Data: snapshot.Job})
+		go server.runIntegrationSyncJob(job.ID, targetID)
+		writeJSON(w, http.StatusAccepted, envelope{Data: mediaSyncJobFromJob(job)})
 	default:
 		methodNotAllowed(w, r)
+	}
+}
+
+func (server *Server) runIntegrationSyncJob(jobID string, targetID string) {
+	reporter := jobReporter{store: server.store, jobID: jobID}
+	reporter.update(database.JobUpdate{Status: "running", Phase: "connecting", Message: "Starting " + targetID + " sync"}, true)
+	ctx, cancel := context.WithTimeout(context.Background(), 24*time.Hour)
+	defer cancel()
+
+	if err := server.refreshIntegrationOptionsFromStore(); err != nil {
+		reporter.update(database.JobUpdate{Status: "failed", Phase: "failed", Message: "Unable to load integration settings", Error: err.Error(), Completed: true}, true)
+		return
+	}
+	mappings, err := server.store.ListPathMappings()
+	if err != nil {
+		reporter.update(database.JobUpdate{Status: "failed", Phase: "failed", Message: "Unable to load path mappings", Error: err.Error(), Completed: true}, true)
+		return
+	}
+	options := server.integrationOptions
+	options.Progress = func(progress integrations.Progress) {
+		reporter.update(database.JobUpdate{
+			Phase:           progress.Phase,
+			Message:         progress.Message,
+			CurrentLabel:    progress.CurrentLabel,
+			Processed:       intPtr(progress.Processed),
+			Total:           intPtr(progress.Total),
+			ItemsImported:   intPtr(progress.ItemsImported),
+			RollupsImported: intPtr(progress.RollupsImported),
+			UnmappedItems:   intPtr(progress.UnmappedItems),
+		}, progress.Phase != "items" || progress.Processed == 0 || progress.Processed == progress.Total)
+	}
+	snapshot, err := syncIntegrationSnapshot(ctx, options, targetID, mappings)
+	if err != nil {
+		reporter.update(database.JobUpdate{Status: "failed", Phase: "failed", Message: "Media-server sync failed", Error: err.Error(), Completed: true}, true)
+		server.record("integration.sync_failed", "Media-server inventory and activity sync failed", map[string]any{"targetId": targetID, "error": err.Error()})
+		return
+	}
+	if err := server.store.ReplaceMediaServerSnapshot(snapshot); err != nil {
+		reporter.update(database.JobUpdate{Status: "failed", Phase: "failed", Message: "Unable to persist media-server snapshot", Error: err.Error(), Completed: true}, true)
+		return
+	}
+	if err := server.regenerateRecommendationsFromCatalog(); err != nil {
+		reporter.update(database.JobUpdate{Status: "failed", Phase: "failed", Message: "Unable to regenerate recommendations", Error: err.Error(), Completed: true}, true)
+		return
+	}
+	reporter.update(database.JobUpdate{
+		Status:          "completed",
+		Phase:           "complete",
+		Message:         "Media-server sync completed",
+		ItemsImported:   intPtr(snapshot.Job.ItemsImported),
+		RollupsImported: intPtr(snapshot.Job.RollupsImported),
+		UnmappedItems:   intPtr(snapshot.Job.UnmappedItems),
+		Completed:       true,
+	}, true)
+	server.record("integration.sync_completed", "Media-server inventory and activity sync completed", map[string]any{"targetId": targetID, "items": snapshot.Job.ItemsImported, "rollups": snapshot.Job.RollupsImported})
+}
+
+func integrationJobKind(targetID string) string {
+	switch strings.ToLower(strings.TrimSpace(targetID)) {
+	case "jellyfin":
+		return "jellyfin_sync"
+	case "plex":
+		return "plex_sync"
+	default:
+		return ""
+	}
+}
+
+func mediaSyncJobFromJob(job database.Job) database.MediaSyncJob {
+	return database.MediaSyncJob{
+		ID:              job.ID,
+		ServerID:        job.TargetID,
+		Status:          job.Status,
+		Phase:           job.Phase,
+		Message:         job.Message,
+		CurrentLabel:    job.CurrentLabel,
+		Processed:       job.Processed,
+		Total:           job.Total,
+		ItemsImported:   job.ItemsImported,
+		RollupsImported: job.RollupsImported,
+		UnmappedItems:   job.UnmappedItems,
+		Error:           job.Error,
+		StartedAt:       job.StartedAt,
+		CompletedAt:     job.CompletedAt,
 	}
 }
 
@@ -1128,6 +1339,51 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+type jobReporter struct {
+	store *database.Store
+	jobID string
+}
+
+func (reporter jobReporter) update(update database.JobUpdate, event bool) database.Job {
+	if reporter.store == nil || reporter.jobID == "" {
+		return database.Job{}
+	}
+	job, err := reporter.store.UpdateJob(reporter.jobID, update)
+	if err != nil {
+		return database.Job{}
+	}
+	if event {
+		level := "info"
+		if job.Status == "failed" {
+			level = "error"
+		}
+		_, _ = reporter.store.AddJobEvent(database.JobEventInput{
+			JobID:        reporter.jobID,
+			Level:        level,
+			Phase:        job.Phase,
+			Message:      job.Message,
+			CurrentLabel: job.CurrentLabel,
+			Processed:    job.Processed,
+			Total:        job.Total,
+		})
+	}
+	return job
+}
+
+func intPtr(value int) *int {
+	return &value
+}
+
+func displayLibraryName(library filescan.Library) string {
+	if strings.TrimSpace(library.Name) != "" {
+		return strings.TrimSpace(library.Name)
+	}
+	if strings.TrimSpace(library.ID) != "" {
+		return strings.TrimSpace(library.ID)
+	}
+	return "library"
 }
 
 func emptyIfNil[T any](items []T) []T {

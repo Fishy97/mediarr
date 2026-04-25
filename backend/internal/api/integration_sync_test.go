@@ -78,8 +78,12 @@ func TestJellyfinSyncRoutePersistsNormalizedActivity(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&syncBody); err != nil {
 		t.Fatal(err)
 	}
-	if syncBody.Data.Status != "completed" || syncBody.Data.ItemsImported != 1 {
+	if syncBody.Data.Status != "queued" || syncBody.Data.ID == "" {
 		t.Fatalf("sync body = %#v", syncBody.Data)
+	}
+	job := waitForJobStatus(t, store, syncBody.Data.ID, "completed")
+	if job.ItemsImported != 1 {
+		t.Fatalf("completed sync job = %#v", job)
 	}
 
 	items, err := store.ListMediaServerItems(database.MediaServerItemFilter{ServerID: "jellyfin"})
@@ -160,6 +164,13 @@ func TestJellyfinSyncCreatesActivityRecommendations(t *testing.T) {
 	if res.Code != http.StatusAccepted {
 		t.Fatalf("sync status = %d, want 202: %s", res.Code, res.Body.String())
 	}
+	var syncBody struct {
+		Data database.MediaSyncJob `json:"data"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&syncBody); err != nil {
+		t.Fatal(err)
+	}
+	waitForJobStatus(t, store, syncBody.Data.ID, "completed")
 
 	res = httptest.NewRecorder()
 	server.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/api/v1/recommendations", nil))
