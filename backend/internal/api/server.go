@@ -25,6 +25,7 @@ type Deps struct {
 	Libraries       []filescan.Library
 	Recommendations []recommendations.Recommendation
 	Providers       []metadata.Provider
+	ProviderOptions metadata.Options
 	Integrations    []integrations.Target
 	Audit           *audit.Logger
 	Auth            *auth.Service
@@ -43,6 +44,8 @@ type Server struct {
 	scans           []filescan.Result
 	recommendations []recommendations.Recommendation
 	providers       []metadata.Provider
+	providerBase    metadata.Options
+	providerOptions metadata.Options
 	integrations    []integrations.Target
 	audit           *audit.Logger
 	auth            *auth.Service
@@ -60,6 +63,8 @@ func NewServer(deps Deps) *Server {
 		libraries:       deps.Libraries,
 		recommendations: deps.Recommendations,
 		providers:       deps.Providers,
+		providerBase:    deps.ProviderOptions,
+		providerOptions: deps.ProviderOptions,
 		integrations:    deps.Integrations,
 		audit:           deps.Audit,
 		auth:            deps.Auth,
@@ -68,8 +73,11 @@ func NewServer(deps Deps) *Server {
 		engine:          deps.Engine,
 		store:           deps.Store,
 	}
+	if server.store != nil {
+		_ = server.refreshProviderOptionsFromStore()
+	}
 	if server.providers == nil {
-		server.providers = metadata.Defaults()
+		server.providers = metadata.DefaultsWithOptions(server.providerOptions)
 	}
 	if server.integrations == nil {
 		server.integrations = integrations.Defaults()
@@ -91,10 +99,13 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("/api/v1/auth/me", server.meHandler)
 	server.mux.HandleFunc("/api/v1/libraries", server.librariesHandler)
 	server.mux.HandleFunc("/api/v1/catalog", server.catalogHandler)
+	server.mux.HandleFunc("/api/v1/catalog/", server.catalogCorrectionHandler)
 	server.mux.HandleFunc("/api/v1/scans", server.scansHandler)
 	server.mux.HandleFunc("/api/v1/recommendations", server.recommendationsHandler)
 	server.mux.HandleFunc("/api/v1/recommendations/", server.recommendationActionHandler)
 	server.mux.HandleFunc("/api/v1/providers", server.providersHandler)
+	server.mux.HandleFunc("/api/v1/provider-settings", server.providerSettingsHandler)
+	server.mux.HandleFunc("/api/v1/provider-settings/", server.providerSettingHandler)
 	server.mux.HandleFunc("/api/v1/integrations", server.integrationsHandler)
 	server.mux.HandleFunc("/api/v1/ai/status", server.aiStatusHandler)
 	server.mux.HandleFunc("/api/v1/backups", server.backupsHandler)
@@ -284,6 +295,50 @@ func (server *Server) catalogHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, envelope{Data: items})
 }
 
+func (server *Server) catalogCorrectionHandler(w http.ResponseWriter, r *http.Request) {
+	if server.store == nil {
+		http.Error(w, "catalog store is not configured", http.StatusBadRequest)
+		return
+	}
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/catalog/"), "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] != "correction" {
+		http.NotFound(w, r)
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var request database.CatalogCorrectionInput
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		correction, err := server.store.UpsertCatalogCorrection(parts[0], request)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := server.regenerateRecommendationsFromCatalog(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		server.record("catalog.corrected", "Catalog metadata correction applied", map[string]any{"mediaFileId": parts[0], "provider": correction.Provider, "providerId": correction.ProviderID})
+		writeJSON(w, http.StatusOK, envelope{Data: correction})
+	case http.MethodDelete:
+		if err := server.store.ClearCatalogCorrection(parts[0]); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := server.regenerateRecommendationsFromCatalog(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		server.record("catalog.correction_cleared", "Catalog metadata correction cleared", map[string]any{"mediaFileId": parts[0]})
+		writeJSON(w, http.StatusOK, envelope{Data: map[string]bool{"ok": true}})
+	default:
+		methodNotAllowed(w, r)
+	}
+}
+
 func (server *Server) scanAll() ([]filescan.Result, []recommendations.Recommendation, error) {
 	server.mu.RLock()
 	libraries := append([]filescan.Library(nil), server.libraries...)
@@ -302,19 +357,26 @@ func (server *Server) scanAll() ([]filescan.Result, []recommendations.Recommenda
 				return nil, nil, err
 			}
 		}
-		for _, item := range result.Items {
-			files = append(files, recommendations.MediaFile{
-				ID:           item.ID,
-				CanonicalKey: item.Parsed.CanonicalKey,
-				Path:         item.Path,
-				SizeBytes:    item.SizeBytes,
-				Quality:      item.Parsed.Quality,
-				HasSubtitles: len(item.Subtitles) > 0,
-				WantsSubtitles: string(item.Parsed.Kind) == "movie" ||
-					string(item.Parsed.Kind) == "series" ||
-					string(item.Parsed.Kind) == "anime",
-			})
+		if server.store == nil {
+			for _, item := range result.Items {
+				files = append(files, recommendations.MediaFile{
+					ID:             item.ID,
+					CanonicalKey:   item.Parsed.CanonicalKey,
+					Path:           item.Path,
+					SizeBytes:      item.SizeBytes,
+					Quality:        item.Parsed.Quality,
+					HasSubtitles:   len(item.Subtitles) > 0,
+					WantsSubtitles: wantsSubtitles(string(item.Parsed.Kind)),
+				})
+			}
 		}
+	}
+	if server.store != nil {
+		items, err := server.store.ListCatalog()
+		if err != nil {
+			return nil, nil, err
+		}
+		files = recommendationFilesFromCatalog(items)
 	}
 	recs := server.engine.Generate(files)
 	if server.store != nil {
@@ -389,11 +451,67 @@ func (server *Server) providersHandler(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, r)
 		return
 	}
-	health := make([]metadata.Health, 0, len(server.providers))
-	for _, provider := range server.providers {
+	server.mu.RLock()
+	providers := append([]metadata.Provider(nil), server.providers...)
+	server.mu.RUnlock()
+	health := make([]metadata.Health, 0, len(providers))
+	for _, provider := range providers {
 		health = append(health, provider.Health(r.Context()))
 	}
 	writeJSON(w, http.StatusOK, envelope{Data: health})
+}
+
+func (server *Server) providerSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.store == nil {
+		http.Error(w, "provider settings store is not configured", http.StatusBadRequest)
+		return
+	}
+	settings, err := server.store.ListProviderSettings()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: settings})
+}
+
+func (server *Server) providerSettingHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.store == nil {
+		http.Error(w, "provider settings store is not configured", http.StatusBadRequest)
+		return
+	}
+	provider := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/provider-settings/"), "/")
+	if provider == "" {
+		http.NotFound(w, r)
+		return
+	}
+	var request database.ProviderSettingInput
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	request.Provider = provider
+	setting, err := server.store.UpsertProviderSetting(request)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := server.refreshProviderOptionsFromStore(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	server.mu.Lock()
+	server.providers = metadata.DefaultsWithOptions(server.providerOptions)
+	server.mu.Unlock()
+	server.record("provider.updated", "Metadata provider settings updated", map[string]any{"provider": setting.Provider, "apiKeyConfigured": setting.APIKeyConfigured})
+	writeJSON(w, http.StatusOK, envelope{Data: setting})
 }
 
 func (server *Server) integrationsHandler(w http.ResponseWriter, r *http.Request) {
@@ -518,6 +636,84 @@ func (server *Server) record(kind string, message string, fields map[string]any)
 		return
 	}
 	_ = server.audit.Record(audit.Event{Type: kind, Message: message, Fields: fields})
+}
+
+func (server *Server) refreshProviderOptionsFromStore() error {
+	if server.store == nil {
+		return nil
+	}
+	settings, err := server.store.ListProviderSettingSecrets()
+	if err != nil {
+		return err
+	}
+	server.providerOptions = mergeProviderSettings(server.providerBase, settings)
+	return nil
+}
+
+func mergeProviderSettings(options metadata.Options, settings []database.ProviderSetting) metadata.Options {
+	for _, setting := range settings {
+		switch setting.Provider {
+		case "tmdb":
+			options.TMDbToken = setting.APIKey
+			if setting.BaseURL != "" {
+				options.TMDbBaseURL = setting.BaseURL
+			}
+		case "thetvdb":
+			options.TheTVDBAPIKey = setting.APIKey
+			if setting.BaseURL != "" {
+				options.TheTVDBBaseURL = setting.BaseURL
+			}
+		case "opensubtitles":
+			options.OpenSubtitlesAPIKey = setting.APIKey
+			if setting.BaseURL != "" {
+				options.OpenSubtitlesURL = setting.BaseURL
+			}
+		}
+	}
+	return options
+}
+
+func (server *Server) regenerateRecommendationsFromCatalog() error {
+	if server.store == nil {
+		return nil
+	}
+	items, err := server.store.ListCatalog()
+	if err != nil {
+		return err
+	}
+	recs := server.engine.Generate(recommendationFilesFromCatalog(items))
+	if err := server.store.ReplaceRecommendations(recs); err != nil {
+		return err
+	}
+	server.mu.Lock()
+	server.recommendations = recs
+	server.mu.Unlock()
+	return nil
+}
+
+func recommendationFilesFromCatalog(items []database.CatalogItem) []recommendations.MediaFile {
+	files := make([]recommendations.MediaFile, 0, len(items))
+	for _, item := range items {
+		files = append(files, recommendations.MediaFile{
+			ID:             item.ID,
+			CanonicalKey:   item.CanonicalKey,
+			Path:           item.Path,
+			SizeBytes:      item.SizeBytes,
+			Quality:        item.Quality,
+			HasSubtitles:   len(item.Subtitles) > 0,
+			WantsSubtitles: wantsSubtitles(string(item.Kind)),
+		})
+	}
+	return files
+}
+
+func wantsSubtitles(kind string) bool {
+	switch kind {
+	case "movie", "series", "anime":
+		return true
+	default:
+		return false
+	}
 }
 
 func (server *Server) setSessionCookie(w http.ResponseWriter, session auth.Session) {

@@ -220,6 +220,9 @@ h2 {
 
 .secondary-button {
   min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   border: 1px solid #cbd5cf;
   border-radius: 8px;
   padding: 0 12px;
@@ -324,7 +327,7 @@ h2 {
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 760px;
+  min-width: 980px;
 }
 
 th,
@@ -452,6 +455,52 @@ code {
   color: #4d5a55;
 }
 
+.form-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.form-panel label {
+  display: grid;
+  gap: 6px;
+  color: #33413b;
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+
+.form-panel input,
+.form-panel select {
+  min-height: 40px;
+  border: 1px solid #cbd5cf;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #1c2421;
+  background: #ffffff;
+  font: inherit;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.button-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.secondary-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.provider-settings {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .empty-state {
   min-height: 160px;
   display: grid;
@@ -479,7 +528,9 @@ code {
 
   .stat-strip,
   .split,
-  .recommendation-card {
+  .recommendation-card,
+  .provider-settings,
+  .form-grid {
     grid-template-columns: 1fr;
   }
 

@@ -44,7 +44,7 @@
 - [ ] Add real provider clients for TMDb, AniList, TheTVDB, OpenSubtitles, and local sidecars behind a common interface.
 - [ ] Add provider config storage, cache with expiry, `Retry-After` handling, attribution, and health surfaces.
 - [ ] Add metadata match persistence with confidence, provider IDs, candidate lists, and user override precedence.
-- [ ] Add frontend provider settings and catalog metadata correction flow.
+- [x] Add frontend provider settings and catalog metadata correction flow.
 - [ ] Run the full validation suite and commit as `feat: add v1 scanner metadata providers`.
 
 ## Commit Track 3: Recommendations, AI, And Integrations

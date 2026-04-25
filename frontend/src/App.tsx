@@ -4,15 +4,20 @@ import {
   Activity,
   Archive,
   Bot,
+  Check,
   Database,
   FolderOpen,
   Gauge,
   HardDrive,
   HeartPulse,
+  KeyRound,
   Library,
   LogOut,
+  Pencil,
   PlayCircle,
   RefreshCw,
+  RotateCcw,
+  Save,
   SearchCheck,
   Server,
   Settings,
@@ -22,7 +27,19 @@ import {
 } from 'lucide-react';
 import { api, getAuthToken } from './lib/api';
 import { formatBytes, formatConfidence } from './lib/format';
-import type { AIStatus, AuthUser, CatalogItem, Integration, Library as MediaLibrary, ProviderHealth, Recommendation, ScanResult } from './types';
+import type {
+  AIStatus,
+  AuthUser,
+  CatalogCorrectionInput,
+  CatalogItem,
+  Integration,
+  Library as MediaLibrary,
+  ProviderHealth,
+  ProviderSetting,
+  ProviderSettingInput,
+  Recommendation,
+  ScanResult,
+} from './types';
 
 type View = 'dashboard' | 'libraries' | 'catalog' | 'recommendations' | 'integrations' | 'settings';
 
@@ -33,6 +50,7 @@ export function App() {
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [providers, setProviders] = useState<ProviderHealth[]>([]);
+  const [providerSettings, setProviderSettings] = useState<ProviderSetting[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [aiStatus, setAIStatus] = useState<AIStatus | null>(null);
   const [status, setStatus] = useState('Loading');
@@ -44,13 +62,14 @@ export function App() {
 
   async function refresh() {
     try {
-      const [health, libs, catalogRows, scanRows, recs, providerRows, integrationRows, ai] = await Promise.all([
+      const [health, libs, catalogRows, scanRows, recs, providerRows, providerSettingRows, integrationRows, ai] = await Promise.all([
         api.health(),
         api.libraries(),
         api.catalog(),
         api.scans(),
         api.recommendations(),
         api.providers(),
+        api.providerSettings(),
         api.integrations(),
         api.aiStatus(),
       ]);
@@ -60,6 +79,7 @@ export function App() {
       setScans(scanRows);
       setRecommendations(recs);
       setProviders(providerRows);
+      setProviderSettings(providerSettingRows);
       setIntegrations(integrationRows);
       setAIStatus(ai);
       setError(null);
@@ -129,6 +149,51 @@ export function App() {
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to ignore recommendation');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateProviderSetting(provider: string, setting: ProviderSettingInput) {
+    setBusy(true);
+    try {
+      await api.updateProviderSetting(provider, setting);
+      const [settings, health] = await Promise.all([api.providerSettings(), api.providers()]);
+      setProviderSettings(settings);
+      setProviders(health);
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to update provider settings');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function correctCatalogItem(id: string, correction: CatalogCorrectionInput) {
+    setBusy(true);
+    try {
+      await api.correctCatalogItem(id, correction);
+      const [items, recs] = await Promise.all([api.catalog(), api.recommendations()]);
+      setCatalog(items);
+      setRecommendations(recs);
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to save catalog correction');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clearCatalogCorrection(id: string) {
+    setBusy(true);
+    try {
+      await api.clearCatalogCorrection(id);
+      const [items, recs] = await Promise.all([api.catalog(), api.recommendations()]);
+      setCatalog(items);
+      setRecommendations(recs);
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to clear catalog correction');
     } finally {
       setBusy(false);
     }
@@ -218,9 +283,18 @@ export function App() {
           />
         )}
         {view === 'libraries' && <Libraries libraries={libraries} scans={scans} />}
-        {view === 'catalog' && <Catalog items={catalogItems} />}
+        {view === 'catalog' && <Catalog items={catalogItems} onCorrect={(id, correction) => void correctCatalogItem(id, correction)} onClear={(id) => void clearCatalogCorrection(id)} busy={busy} />}
         {view === 'recommendations' && <RecommendationQueue recommendations={recommendations} onIgnore={(id) => void ignoreRecommendation(id)} busy={busy} />}
-        {view === 'integrations' && <Integrations providers={providers} integrations={integrations} aiStatus={aiStatus} />}
+        {view === 'integrations' && (
+          <Integrations
+            providers={providers}
+            providerSettings={providerSettings}
+            integrations={integrations}
+            aiStatus={aiStatus}
+            onProviderUpdate={(provider, setting) => void updateProviderSetting(provider, setting)}
+            busy={busy}
+          />
+        )}
         {view === 'settings' && <SettingsView onBackup={() => void createBackup()} busy={busy} />}
       </main>
     </div>
@@ -365,35 +439,177 @@ function Libraries({ libraries, scans }: { libraries: MediaLibrary[]; scans: Sca
   );
 }
 
-function Catalog({ items }: { items: CatalogItem[] }) {
+function Catalog({
+  items,
+  onCorrect,
+  onClear,
+  busy,
+}: {
+  items: CatalogItem[];
+  onCorrect: (id: string, correction: CatalogCorrectionInput) => void;
+  onClear: (id: string) => void;
+  busy: boolean;
+}) {
+  const [selected, setSelected] = useState<CatalogItem | null>(null);
   return (
-    <section className="table-panel">
-      <table>
-        <thead>
-          <tr>
-            <th>Title</th>
-            <th>Kind</th>
-            <th>Quality</th>
-            <th>Size</th>
-            <th>Subtitles</th>
-            <th>Path</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((item) => (
-            <tr key={item.id}>
-              <td>{item.title}</td>
-              <td>{item.kind}</td>
-              <td>{item.quality || 'unknown'}</td>
-              <td>{formatBytes(item.sizeBytes)}</td>
-              <td>{item.subtitles.length}</td>
-              <td className="path-cell">{item.path}</td>
+    <section className="view-grid">
+      <section className="table-panel">
+        <table>
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Kind</th>
+              <th>Year</th>
+              <th>Quality</th>
+              <th>Size</th>
+              <th>Subtitles</th>
+              <th>Metadata</th>
+              <th>Path</th>
+              <th>Actions</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-      {items.length === 0 && <EmptyState icon={<PlayCircle />} text="Run a scan to populate the catalog." />}
+          </thead>
+          <tbody>
+            {items.map((item) => (
+              <tr key={item.id}>
+                <td>{item.title}</td>
+                <td>{item.kind}</td>
+                <td>{item.year || 'unknown'}</td>
+                <td>{item.quality || 'unknown'}</td>
+                <td>{formatBytes(item.sizeBytes)}</td>
+                <td>{item.subtitles.length}</td>
+                <td>{item.metadataCorrected ? `${item.metadataProvider || 'manual'} ${item.metadataProviderId || ''}`.trim() : 'scan'}</td>
+                <td className="path-cell">{item.path}</td>
+                <td>
+                  <button className="icon-button" title="Correct metadata" aria-label="Correct metadata" onClick={() => setSelected(item)}>
+                    <Pencil size={16} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {items.length === 0 && <EmptyState icon={<PlayCircle />} text="Run a scan to populate the catalog." />}
+      </section>
+      {selected && (
+        <CatalogCorrectionPanel
+          item={selected}
+          busy={busy}
+          onClose={() => setSelected(null)}
+          onCorrect={(correction) => {
+            onCorrect(selected.id, correction);
+            setSelected(null);
+          }}
+          onClear={() => {
+            onClear(selected.id);
+            setSelected(null);
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+function CatalogCorrectionPanel({
+  item,
+  busy,
+  onCorrect,
+  onClear,
+  onClose,
+}: {
+  item: CatalogItem;
+  busy: boolean;
+  onCorrect: (correction: CatalogCorrectionInput) => void;
+  onClear: () => void;
+  onClose: () => void;
+}) {
+  const [title, setTitle] = useState(item.title);
+  const [kind, setKind] = useState(item.kind);
+  const [year, setYear] = useState(item.year ? String(item.year) : '');
+  const [provider, setProvider] = useState(item.metadataProvider || '');
+  const [providerId, setProviderID] = useState(item.metadataProviderId || '');
+  const [confidence, setConfidence] = useState(item.metadataConfidence ? String(item.metadataConfidence) : '1');
+
+  useEffect(() => {
+    setTitle(item.title);
+    setKind(item.kind);
+    setYear(item.year ? String(item.year) : '');
+    setProvider(item.metadataProvider || '');
+    setProviderID(item.metadataProviderId || '');
+    setConfidence(item.metadataConfidence ? String(item.metadataConfidence) : '1');
+  }, [item]);
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    const parsedYear = Number.parseInt(year, 10);
+    const parsedConfidence = Number.parseFloat(confidence);
+    onCorrect({
+      title,
+      kind,
+      ...(Number.isFinite(parsedYear) && parsedYear > 0 ? { year: parsedYear } : {}),
+      ...(provider.trim() ? { provider: provider.trim() } : {}),
+      ...(providerId.trim() ? { providerId: providerId.trim() } : {}),
+      confidence: Number.isFinite(parsedConfidence) ? parsedConfidence : 1,
+    });
+  }
+
+  return (
+    <form className="panel form-panel" onSubmit={(event) => void submit(event)}>
+      <div className="panel-heading">
+        <h2>{item.path}</h2>
+        <button className="icon-button" type="button" onClick={onClose} title="Close" aria-label="Close">
+          <Check size={16} />
+        </button>
+      </div>
+      <div className="form-grid">
+        <label>
+          Title
+          <input value={title} onChange={(event) => setTitle(event.target.value)} required />
+        </label>
+        <label>
+          Kind
+          <select value={kind} onChange={(event) => setKind(event.target.value)}>
+            <option value="movie">movie</option>
+            <option value="series">series</option>
+            <option value="anime">anime</option>
+            <option value="unknown">unknown</option>
+          </select>
+        </label>
+        <label>
+          Year
+          <input value={year} onChange={(event) => setYear(event.target.value)} inputMode="numeric" />
+        </label>
+        <label>
+          Provider
+          <select value={provider} onChange={(event) => setProvider(event.target.value)}>
+            <option value="">manual</option>
+            <option value="tmdb">tmdb</option>
+            <option value="thetvdb">thetvdb</option>
+            <option value="anilist">anilist</option>
+            <option value="local-sidecar">local-sidecar</option>
+          </select>
+        </label>
+        <label>
+          Provider ID
+          <input value={providerId} onChange={(event) => setProviderID(event.target.value)} />
+        </label>
+        <label>
+          Confidence
+          <input value={confidence} onChange={(event) => setConfidence(event.target.value)} inputMode="decimal" />
+        </label>
+      </div>
+      <div className="button-row">
+        <button className="primary-button" type="submit" disabled={busy}>
+          <Save size={18} />
+          Save correction
+        </button>
+        {item.metadataCorrected && (
+          <button className="secondary-button" type="button" disabled={busy} onClick={onClear}>
+            <RotateCcw size={16} />
+            Clear correction
+          </button>
+        )}
+      </div>
+    </form>
   );
 }
 
@@ -424,7 +640,21 @@ function RecommendationQueue({ recommendations, onIgnore, busy }: { recommendati
   );
 }
 
-function Integrations({ providers, integrations, aiStatus }: { providers: ProviderHealth[]; integrations: Integration[]; aiStatus: AIStatus | null }) {
+function Integrations({
+  providers,
+  providerSettings,
+  integrations,
+  aiStatus,
+  onProviderUpdate,
+  busy,
+}: {
+  providers: ProviderHealth[];
+  providerSettings: ProviderSetting[];
+  integrations: Integration[];
+  aiStatus: AIStatus | null;
+  onProviderUpdate: (provider: string, setting: ProviderSettingInput) => void;
+  busy: boolean;
+}) {
   return (
     <section className="view-grid">
       <div className="grid-list">
@@ -471,7 +701,90 @@ function Integrations({ providers, integrations, aiStatus }: { providers: Provid
           </tbody>
         </table>
       </section>
+      <ProviderSettingsPanel settings={providerSettings} busy={busy} onUpdate={onProviderUpdate} />
     </section>
+  );
+}
+
+function ProviderSettingsPanel({
+  settings,
+  busy,
+  onUpdate,
+}: {
+  settings: ProviderSetting[];
+  busy: boolean;
+  onUpdate: (provider: string, setting: ProviderSettingInput) => void;
+}) {
+  const byProvider = new Map(settings.map((setting) => [setting.provider, setting]));
+  return (
+    <section className="settings-layout provider-settings">
+      {['tmdb', 'thetvdb', 'opensubtitles'].map((provider) => (
+        <ProviderSettingForm
+          key={provider}
+          provider={provider}
+          setting={byProvider.get(provider)}
+          busy={busy}
+          onUpdate={(input) => onUpdate(provider, input)}
+        />
+      ))}
+    </section>
+  );
+}
+
+function ProviderSettingForm({
+  provider,
+  setting,
+  busy,
+  onUpdate,
+}: {
+  provider: string;
+  setting?: ProviderSetting;
+  busy: boolean;
+  onUpdate: (setting: ProviderSettingInput) => void;
+}) {
+  const [baseUrl, setBaseURL] = useState(setting?.baseUrl || '');
+  const [apiKey, setAPIKey] = useState('');
+
+  useEffect(() => {
+    setBaseURL(setting?.baseUrl || '');
+    setAPIKey('');
+  }, [setting]);
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    onUpdate({
+      ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
+      ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+    });
+  }
+
+  return (
+    <form className="panel form-panel" onSubmit={(event) => void submit(event)}>
+      <div className="panel-heading">
+        <h2>{provider}</h2>
+        <span>{setting?.apiKeyConfigured ? `key ends ${setting.apiKeyLast4 || 'set'}` : 'not configured'}</span>
+      </div>
+      <label>
+        Base URL
+        <input value={baseUrl} onChange={(event) => setBaseURL(event.target.value)} placeholder="provider default" />
+      </label>
+      <label>
+        API key
+        <input value={apiKey} onChange={(event) => setAPIKey(event.target.value)} type="password" autoComplete="off" placeholder={setting?.apiKeyConfigured ? 'configured' : ''} />
+      </label>
+      <div className="button-row">
+        <button className="primary-button" type="submit" disabled={busy}>
+          <KeyRound size={18} />
+          Save
+        </button>
+        {setting?.apiKeyConfigured && (
+          <button className="secondary-button" type="button" disabled={busy} onClick={() => onUpdate({ clearApiKey: true })}>
+            <RotateCcw size={16} />
+            Clear key
+          </button>
+        )}
+      </div>
+    </form>
   );
 }
 
@@ -566,10 +879,12 @@ function toCatalogItem(item: ScanResult['items'][number]): CatalogItem {
     canonicalKey: item.parsed.canonicalKey,
     title: item.parsed.title,
     kind: item.parsed.kind,
+    year: item.parsed.year,
     sizeBytes: item.sizeBytes,
     quality: item.parsed.quality,
     fingerprint: '',
     subtitles: item.subtitles,
+    metadataCorrected: false,
     modifiedAt: '',
     scannedAt: new Date().toISOString(),
   };

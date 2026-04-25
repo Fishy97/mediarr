@@ -44,6 +44,36 @@ describe('api auth helpers', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/recommendations/rec_1/ignore', expect.objectContaining({ method: 'POST' }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/recommendations/rec_1/restore', expect.objectContaining({ method: 'POST' }));
   });
+
+  test('provider settings calls redactable settings endpoints', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ data: [{ provider: 'tmdb', apiKeyConfigured: true, apiKeyLast4: 'abcd' }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: { provider: 'tmdb', apiKeyConfigured: true, apiKeyLast4: 'abcd' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.providerSettings()).resolves.toHaveLength(1);
+    await api.updateProviderSetting('tmdb', { apiKey: 'secret-token-abcd' });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/provider-settings', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/provider-settings/tmdb', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ apiKey: 'secret-token-abcd' }),
+    }));
+  });
+
+  test('catalog correction calls item correction endpoints', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ data: { ok: true } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.correctCatalogItem('file_1', { title: 'Arrival', kind: 'movie', year: 2016 });
+    await api.clearCatalogCorrection('file_1');
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/catalog/file_1/correction', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ title: 'Arrival', kind: 'movie', year: 2016 }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/catalog/file_1/correction', expect.objectContaining({ method: 'DELETE' }));
+  });
 });
 
 function jsonResponse(body: unknown): Response {

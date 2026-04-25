@@ -1,4 +1,18 @@
-import type { AIStatus, AuthResponse, AuthUser, CatalogItem, Integration, Library, ProviderHealth, Recommendation, ScanResult, SetupStatus } from '../types';
+import type {
+  AIStatus,
+  AuthResponse,
+  AuthUser,
+  CatalogCorrectionInput,
+  CatalogItem,
+  Integration,
+  Library,
+  ProviderHealth,
+  ProviderSetting,
+  ProviderSettingInput,
+  Recommendation,
+  ScanResult,
+  SetupStatus,
+} from '../types';
 
 type Envelope<T> = { data: T };
 
@@ -71,6 +85,15 @@ export const api = {
   async catalog(): Promise<CatalogItem[]> {
     return (await request<Envelope<CatalogItem[]>>('/api/v1/catalog')).data;
   },
+  async correctCatalogItem(id: string, correction: CatalogCorrectionInput): Promise<void> {
+    await request<Envelope<unknown>>(`/api/v1/catalog/${encodeURIComponent(id)}/correction`, {
+      method: 'PUT',
+      body: JSON.stringify(correction),
+    });
+  },
+  async clearCatalogCorrection(id: string): Promise<void> {
+    await request<Envelope<{ ok: boolean }>>(`/api/v1/catalog/${encodeURIComponent(id)}/correction`, { method: 'DELETE' });
+  },
   async startScan(): Promise<{ scans: ScanResult[]; recommendations: Recommendation[] }> {
     return (await request<Envelope<{ scans: ScanResult[]; recommendations: Recommendation[] }>>('/api/v1/scans', {
       method: 'POST',
@@ -87,6 +110,15 @@ export const api = {
   },
   async providers(): Promise<ProviderHealth[]> {
     return (await request<Envelope<ProviderHealth[]>>('/api/v1/providers')).data;
+  },
+  async providerSettings(): Promise<ProviderSetting[]> {
+    return (await request<Envelope<ProviderSetting[]>>('/api/v1/provider-settings')).data;
+  },
+  async updateProviderSetting(provider: string, setting: ProviderSettingInput): Promise<ProviderSetting> {
+    return (await request<Envelope<ProviderSetting>>(`/api/v1/provider-settings/${encodeURIComponent(provider)}`, {
+      method: 'PUT',
+      body: JSON.stringify(setting),
+    })).data;
   },
   async aiStatus(): Promise<AIStatus> {
     return (await request<Envelope<AIStatus>>('/api/v1/ai/status')).data;

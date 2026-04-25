@@ -330,3 +330,180 @@ func TestStoreIgnoresAndRestoresRecommendations(t *testing.T) {
 		t.Fatalf("restored recommendations = %d, want 1", len(recs))
 	}
 }
+
+func TestStorePersistsProviderSettingsWithRedactedSecrets(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	setting, err := store.UpsertProviderSetting(ProviderSettingInput{
+		Provider: "tmdb",
+		BaseURL:  "https://metadata.example.test",
+		APIKey:   "secret-token-abcd",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !setting.APIKeyConfigured || setting.APIKeyLast4 != "abcd" {
+		t.Fatalf("redacted setting = %#v", setting)
+	}
+
+	settings, err := store.ListProviderSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(settings) != 1 || settings[0].APIKeyLast4 != "abcd" {
+		t.Fatalf("settings = %#v", settings)
+	}
+	if settings[0].APIKey == "secret-token-abcd" {
+		t.Fatal("provider API secret must not be returned by ListProviderSettings")
+	}
+
+	secrets, err := store.ListProviderSettingSecrets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(secrets) != 1 || secrets[0].APIKey != "secret-token-abcd" {
+		t.Fatalf("provider setting secret not retained for runtime use: %#v", secrets)
+	}
+
+	setting, err = store.UpsertProviderSetting(ProviderSettingInput{Provider: "tmdb", ClearAPIKey: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if setting.APIKeyConfigured || setting.APIKeyLast4 != "" {
+		t.Fatalf("cleared setting = %#v", setting)
+	}
+}
+
+func TestStoreAppliesAndClearsCatalogCorrections(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC()
+	if err := store.SaveScan(filescan.Result{
+		LibraryID:   "movies",
+		CompletedAt: now,
+		Items: []filescan.Item{
+			{
+				ID:          "file_correct",
+				LibraryID:   "movies",
+				Path:        "/media/movies/Arrivall.2016.mkv",
+				Fingerprint: "fingerprint_correct",
+				ModifiedAt:  now,
+				Parsed: catalog.ParsedMedia{
+					Kind:         catalog.KindMovie,
+					Title:        "Arrivall",
+					Year:         2016,
+					CanonicalKey: "movie:arrivall:2016",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	correction, err := store.UpsertCatalogCorrection("file_correct", CatalogCorrectionInput{
+		Title:      "Arrival",
+		Kind:       catalog.KindMovie,
+		Year:       2016,
+		Provider:   "tmdb",
+		ProviderID: "329865",
+		Confidence: 0.97,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if correction.CanonicalKey != "movie:arrival:2016" {
+		t.Fatalf("canonical key = %q", correction.CanonicalKey)
+	}
+
+	items, err := store.ListCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %d, want 1", len(items))
+	}
+	if items[0].Title != "Arrival" || items[0].CanonicalKey != "movie:arrival:2016" {
+		t.Fatalf("correction not applied to catalog: %#v", items[0])
+	}
+	if !items[0].MetadataCorrected || items[0].MetadataProvider != "tmdb" || items[0].MetadataProviderID != "329865" {
+		t.Fatalf("correction metadata missing: %#v", items[0])
+	}
+
+	if err := store.ClearCatalogCorrection("file_correct"); err != nil {
+		t.Fatal(err)
+	}
+	items, err = store.ListCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items[0].Title != "Arrivall" || items[0].MetadataCorrected {
+		t.Fatalf("correction should be cleared: %#v", items[0])
+	}
+}
+
+func TestCatalogCorrectionSurvivesSamePathRescan(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC()
+	path := "/media/movies/Arrivall.2016.mkv"
+	first := filescan.Result{
+		LibraryID:   "movies",
+		CompletedAt: now,
+		Items: []filescan.Item{
+			{
+				ID:          "file_original",
+				LibraryID:   "movies",
+				Path:        path,
+				Fingerprint: "fingerprint_original",
+				ModifiedAt:  now,
+				Parsed: catalog.ParsedMedia{
+					Kind:         catalog.KindMovie,
+					Title:        "Arrivall",
+					Year:         2016,
+					CanonicalKey: "movie:arrivall:2016",
+				},
+			},
+		},
+	}
+	if err := store.SaveScan(first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertCatalogCorrection("file_original", CatalogCorrectionInput{
+		Title:      "Arrival",
+		Kind:       catalog.KindMovie,
+		Year:       2016,
+		Confidence: 0.97,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	second := first
+	second.Items = []filescan.Item{first.Items[0]}
+	second.Items[0].ID = "file_after_rescan"
+	second.Items[0].Fingerprint = "fingerprint_after_rescan"
+	second.Items[0].ModifiedAt = now.Add(time.Hour)
+	second.CompletedAt = now.Add(time.Hour)
+	if err := store.SaveScan(second); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := store.ListCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ID != "file_original" || items[0].Title != "Arrival" || !items[0].MetadataCorrected {
+		t.Fatalf("correction should survive same-path rescan: %#v", items)
+	}
+}

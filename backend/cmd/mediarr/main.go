@@ -42,19 +42,20 @@ func main() {
 
 	authService := auth.Service{Store: store}
 	aiClient := ai.OllamaClient{BaseURL: cfg.OllamaURL, Model: cfg.AIModel}
+	providerOptions := metadata.Options{
+		TMDbToken:           cfg.TMDbToken,
+		TheTVDBAPIKey:       cfg.TheTVDBAPIKey,
+		OpenSubtitlesAPIKey: cfg.OpenSubtitlesKey,
+	}
 
 	server := api.NewServer(api.Deps{
-		ConfigDir:   cfg.ConfigDir,
-		FrontendDir: cfg.FrontendDir,
-		Libraries:   libraries,
-		Audit:       auditLog,
-		Auth:        &authService,
-		AI:          &aiClient,
-		Providers: metadata.DefaultsWithOptions(metadata.Options{
-			TMDbToken:           cfg.TMDbToken,
-			TheTVDBAPIKey:       cfg.TheTVDBAPIKey,
-			OpenSubtitlesAPIKey: cfg.OpenSubtitlesKey,
-		}),
+		ConfigDir:       cfg.ConfigDir,
+		FrontendDir:     cfg.FrontendDir,
+		Libraries:       libraries,
+		Audit:           auditLog,
+		Auth:            &authService,
+		AI:              &aiClient,
+		ProviderOptions: providerOptions,
 		Integrations: integrations.DefaultsWithOptions(integrations.Options{
 			JellyfinURL: cfg.JellyfinURL,
 			JellyfinKey: cfg.JellyfinAPIKey,

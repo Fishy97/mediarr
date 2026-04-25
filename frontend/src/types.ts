@@ -25,6 +25,31 @@ export type ProviderHealth = {
   checkedAt: string;
 };
 
+export type ProviderSetting = {
+  provider: string;
+  baseUrl?: string;
+  apiKeyConfigured: boolean;
+  apiKeyLast4?: string;
+  updatedAt?: string;
+};
+
+export type ProviderSettingInput = {
+  baseUrl?: string;
+  apiKey?: string;
+  clearApiKey?: boolean;
+  clearBaseUrl?: boolean;
+};
+
+export type CatalogCorrectionInput = {
+  title: string;
+  kind: string;
+  year?: number;
+  canonicalKey?: string;
+  provider?: string;
+  providerId?: string;
+  confidence?: number;
+};
+
 export type Integration = {
   id: string;
   name: string;
@@ -47,6 +72,7 @@ export type ScanResult = {
       kind: string;
       title: string;
       canonicalKey: string;
+      year?: number;
       quality?: string;
       season?: number;
       episode?: number;
@@ -63,10 +89,15 @@ export type CatalogItem = {
   canonicalKey: string;
   title: string;
   kind: string;
+  year?: number;
   sizeBytes: number;
   quality?: string;
   fingerprint: string;
   subtitles: string[];
+  metadataProvider?: string;
+  metadataProviderId?: string;
+  metadataConfidence?: number;
+  metadataCorrected: boolean;
   modifiedAt: string;
   scannedAt: string;
 };
