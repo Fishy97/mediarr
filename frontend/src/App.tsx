@@ -29,11 +29,15 @@ import { api, getAuthToken } from './lib/api';
 import { formatBytes, formatConfidence } from './lib/format';
 import type {
   AIStatus,
+  ActivityRollup,
   AuthUser,
   CatalogCorrectionInput,
   CatalogItem,
   Integration,
+  IntegrationSyncJob,
   Library as MediaLibrary,
+  MediaServerItem,
+  PathMapping,
   ProviderHealth,
   ProviderSetting,
   ProviderSettingInput,
@@ -52,6 +56,10 @@ export function App() {
   const [providers, setProviders] = useState<ProviderHealth[]>([]);
   const [providerSettings, setProviderSettings] = useState<ProviderSetting[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
+  const [syncJobs, setSyncJobs] = useState<Record<string, IntegrationSyncJob | null>>({});
+  const [integrationItems, setIntegrationItems] = useState<MediaServerItem[]>([]);
+  const [activityRollups, setActivityRollups] = useState<ActivityRollup[]>([]);
+  const [pathMappings, setPathMappings] = useState<PathMapping[]>([]);
   const [aiStatus, setAIStatus] = useState<AIStatus | null>(null);
   const [status, setStatus] = useState('Loading');
   const [error, setError] = useState<string | null>(null);
@@ -83,10 +91,28 @@ export function App() {
       setProviderSettings(providerSettingRows);
       setIntegrations(integrationRows);
       setAIStatus(ai);
+      await refreshIntegrationActivity(integrationRows);
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to load Mediarr');
     }
+  }
+
+  async function refreshIntegrationActivity(integrationRows = integrations) {
+    const mediaServers = integrationRows.filter((integration) => integration.kind === 'media_server');
+    const [rollupRows, mappingRows, itemRows, jobRows] = await Promise.all([
+      api.activityRollups().catch(() => [] as ActivityRollup[]),
+      api.pathMappings().catch(() => [] as PathMapping[]),
+      Promise.all(mediaServers.map((integration) => api.integrationItems(integration.id).catch(() => [] as MediaServerItem[]))),
+      Promise.all(mediaServers.map(async (integration) => {
+        const job = await api.integrationSyncStatus(integration.id).catch(() => null);
+        return [integration.id, job] as const;
+      })),
+    ]);
+    setActivityRollups(rollupRows);
+    setPathMappings(mappingRows);
+    setIntegrationItems(itemRows.flat());
+    setSyncJobs(Object.fromEntries(jobRows));
   }
 
   useEffect(() => {
@@ -231,6 +257,27 @@ export function App() {
     }
   }
 
+  async function syncIntegration(id: string) {
+    setBusy(true);
+    try {
+      const job = await api.syncIntegration(id);
+      setSyncJobs((current) => ({ ...current, [id]: job }));
+      const [items, rollups, recs] = await Promise.all([
+        api.integrationItems(id),
+        api.activityRollups(),
+        api.recommendations(),
+      ]);
+      setIntegrationItems((current) => [...current.filter((item) => item.serverId !== id), ...items]);
+      setActivityRollups(rollups);
+      setRecommendations(recs);
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to sync integration');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const catalogItems = useMemo(() => catalog, [catalog]);
   const totalFiles = catalogItems.length;
   const totalSize = catalogItems.reduce((sum, item) => sum + item.sizeBytes, 0);
@@ -312,6 +359,7 @@ export function App() {
             recoverable={recoverable}
             recommendations={recommendations}
             scans={scans}
+            activityRollups={activityRollups}
           />
         )}
         {view === 'libraries' && <Libraries libraries={libraries} scans={scans} />}
@@ -323,8 +371,13 @@ export function App() {
             providerSettings={providerSettings}
             integrations={integrations}
             aiStatus={aiStatus}
+            syncJobs={syncJobs}
+            integrationItems={integrationItems}
+            activityRollups={activityRollups}
+            pathMappings={pathMappings}
             onProviderUpdate={(provider, setting) => void updateProviderSetting(provider, setting)}
             onIntegrationRefresh={(id) => void refreshIntegration(id)}
+            onIntegrationSync={(id) => void syncIntegration(id)}
             busy={busy}
           />
         )}
@@ -400,6 +453,7 @@ function Dashboard({
   recoverable,
   recommendations,
   scans,
+  activityRollups,
 }: {
   status: string;
   libraries: MediaLibrary[];
@@ -408,8 +462,14 @@ function Dashboard({
   recoverable: number;
   recommendations: Recommendation[];
   scans: ScanResult[];
+  activityRollups: ActivityRollup[];
 }) {
   const lastScan = scans.at(-1);
+  const activityRecommendations = recommendations.filter((rec) => rec.serverId);
+  const neverWatched = recommendations.filter((rec) => rec.action === 'review_never_watched_movie').length;
+  const verifiedSavings = recommendations
+    .filter((rec) => rec.verification === 'local_verified' || rec.verification === 'path_mapped')
+    .reduce((sum, rec) => sum + rec.spaceSavedBytes, 0);
   return (
     <section className="view-grid">
       <div className="stat-strip">
@@ -418,6 +478,13 @@ function Dashboard({
         <Stat icon={<Database />} label="Indexed Files" value={String(totalFiles)} />
         <Stat icon={<HardDrive />} label="Indexed Size" value={formatBytes(totalSize)} />
         <Stat icon={<Archive />} label="Review Savings" value={formatBytes(recoverable)} />
+      </div>
+      <div className="stat-strip activity-strip">
+        <Stat icon={<Server />} label="Activity Items" value={String(activityRollups.length)} />
+        <Stat icon={<Trash2 />} label="Cold Suggestions" value={String(activityRecommendations.length)} />
+        <Stat icon={<PlayCircle />} label="Never Watched" value={String(neverWatched)} />
+        <Stat icon={<ShieldCheck />} label="Verified Savings" value={formatBytes(verifiedSavings)} />
+        <Stat icon={<Bot />} label="AI Mode" value="Advisory" />
       </div>
       <div className="split">
         <section className="panel">
@@ -659,6 +726,15 @@ function RecommendationQueue({ recommendations, onIgnore, busy }: { recommendati
               <div className="path-list">
                 {rec.affectedPaths.map((path) => <code key={path}>{path}</code>)}
               </div>
+              {rec.serverId && (
+                <div className="rec-evidence">
+                  <Signal label="Source" value={rec.serverId} />
+                  <Signal label="Last Played" value={rec.lastPlayedAt ? formatDateTime(rec.lastPlayedAt) : 'Never'} />
+                  <Signal label="Plays" value={String(rec.playCount ?? 0)} />
+                  <Signal label="Users" value={String(rec.uniqueUsers ?? 0)} />
+                  <Signal label="Evidence" value={formatVerification(rec.verification)} />
+                </div>
+              )}
               {rec.aiRationale && (
                 <div className="ai-note">
                   <Bot size={16} />
@@ -684,36 +760,47 @@ function Integrations({
   providerSettings,
   integrations,
   aiStatus,
+  syncJobs,
+  integrationItems,
+  activityRollups,
+  pathMappings,
   onProviderUpdate,
   onIntegrationRefresh,
+  onIntegrationSync,
   busy,
 }: {
   providers: ProviderHealth[];
   providerSettings: ProviderSetting[];
   integrations: Integration[];
   aiStatus: AIStatus | null;
+  syncJobs: Record<string, IntegrationSyncJob | null>;
+  integrationItems: MediaServerItem[];
+  activityRollups: ActivityRollup[];
+  pathMappings: PathMapping[];
   onProviderUpdate: (provider: string, setting: ProviderSettingInput) => void;
   onIntegrationRefresh: (id: string) => void;
+  onIntegrationSync: (id: string) => void;
   busy: boolean;
 }) {
+  const mediaServers = integrations.filter((integration) => integration.kind === 'media_server');
   return (
     <section className="view-grid">
-      <div className="grid-list">
-        {integrations.map((integration) => (
-          <article className="status-card" key={integration.id}>
-            <Bot size={20} />
-            <div>
-              <h2>{integration.name}</h2>
-              <p>{integration.description}</p>
-            </div>
-            <span>{integration.status}</span>
-            {integration.kind === 'media_server' && (
-              <button className="icon-button" onClick={() => onIntegrationRefresh(integration.id)} disabled={busy} title="Refresh media server" aria-label={`Refresh ${integration.name}`}>
-                <RefreshCw size={16} />
-              </button>
-            )}
-          </article>
+      <div className="integration-grid">
+        {mediaServers.map((integration) => (
+          <MediaServerCard
+            key={integration.id}
+            integration={integration}
+            job={syncJobs[integration.id] ?? null}
+            importedItems={integrationItems.filter((item) => item.serverId === integration.id).length}
+            activityCount={activityRollups.filter((rollup) => rollup.serverId === integration.id).length}
+            pathMappingCount={pathMappings.filter((mapping) => !mapping.serverId || mapping.serverId === integration.id).length}
+            busy={busy}
+            onRefresh={onIntegrationRefresh}
+            onSync={onIntegrationSync}
+          />
         ))}
+      </div>
+      <div className="grid-list">
         {aiStatus && (
           <article className="status-card">
             <Bot size={20} />
@@ -749,6 +836,69 @@ function Integrations({
       </section>
       <ProviderSettingsPanel settings={providerSettings} busy={busy} onUpdate={onProviderUpdate} />
     </section>
+  );
+}
+
+function MediaServerCard({
+  integration,
+  job,
+  importedItems,
+  activityCount,
+  pathMappingCount,
+  busy,
+  onRefresh,
+  onSync,
+}: {
+  integration: Integration;
+  job: IntegrationSyncJob | null;
+  importedItems: number;
+  activityCount: number;
+  pathMappingCount: number;
+  busy: boolean;
+  onRefresh: (id: string) => void;
+  onSync: (id: string) => void;
+}) {
+  return (
+    <article className="media-server-card">
+      <div className="server-mark"><Server size={22} /></div>
+      <div className="server-card-main">
+        <div className="panel-heading">
+          <div>
+            <h2>{integration.name}</h2>
+            <p>{integration.description}</p>
+          </div>
+          <span className="status-pill">{integration.status}</span>
+        </div>
+        <div className="signal-grid">
+          <Signal label="Imported" value={String(job?.itemsImported ?? importedItems)} />
+          <Signal label="Activity" value={String(job?.rollupsImported ?? activityCount)} />
+          <Signal label="Unmapped" value={String(job?.unmappedItems ?? 0)} />
+          <Signal label="Mappings" value={String(pathMappingCount)} />
+        </div>
+        <div className="server-sync-row">
+          <span>{job?.completedAt ? `Last sync ${formatDateTime(job.completedAt)}` : 'No inventory sync yet'}</span>
+          <div className="button-row">
+            <button className="secondary-button" onClick={() => onRefresh(integration.id)} disabled={busy}>
+              <RefreshCw size={16} />
+              Refresh
+            </button>
+            <button className="primary-button" onClick={() => onSync(integration.id)} disabled={busy}>
+              <Database size={16} />
+              Sync
+            </button>
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function Signal({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="signal">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   );
 }
 
@@ -930,6 +1080,27 @@ function EmptyState({ icon, text }: { icon: React.ReactNode; text: string }) {
       <span>{text}</span>
     </div>
   );
+}
+
+function formatDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return 'Unknown';
+  }
+  return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function formatVerification(value?: string): string {
+  switch (value) {
+    case 'local_verified':
+      return 'Local';
+    case 'path_mapped':
+      return 'Mapped';
+    case 'server_reported':
+      return 'Server';
+    default:
+      return 'Unknown';
+  }
 }
 
 function titleFor(view: View): string {

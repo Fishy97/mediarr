@@ -7,7 +7,15 @@ export type Library = {
 
 export type Recommendation = {
   id: string;
-  action: 'review_duplicate' | 'review_oversized' | 'review_missing_subtitles';
+  action:
+    | 'review_duplicate'
+    | 'review_oversized'
+    | 'review_missing_subtitles'
+    | 'review_inactive_movie'
+    | 'review_never_watched_movie'
+    | 'review_inactive_series'
+    | 'review_abandoned_series'
+    | 'review_unwatched_duplicate';
   title: string;
   explanation: string;
   spaceSavedBytes: number;
@@ -19,6 +27,14 @@ export type Recommendation = {
   aiTags?: string[];
   aiConfidence?: number;
   aiSource?: string;
+  serverId?: string;
+  externalItemId?: string;
+  lastPlayedAt?: string;
+  playCount?: number;
+  uniqueUsers?: number;
+  favoriteCount?: number;
+  verification?: string;
+  evidence?: Record<string, string>;
 };
 
 export type ProviderHealth = {
@@ -68,6 +84,55 @@ export type IntegrationRefreshResult = {
   status: string;
   message: string;
   requestedAt: string;
+};
+
+export type IntegrationSyncJob = {
+  id: string;
+  serverId: string;
+  status: string;
+  itemsImported: number;
+  rollupsImported: number;
+  unmappedItems: number;
+  cursor?: string;
+  error?: string;
+  startedAt: string;
+  completedAt?: string;
+};
+
+export type MediaServerItem = {
+  serverId: string;
+  externalId: string;
+  libraryExternalId?: string;
+  parentExternalId?: string;
+  kind: string;
+  title: string;
+  year?: number;
+  path?: string;
+  providerIds?: Record<string, string>;
+  runtimeSeconds?: number;
+  dateCreated?: string;
+  matchConfidence: number;
+  updatedAt?: string;
+};
+
+export type ActivityRollup = {
+  serverId: string;
+  itemExternalId: string;
+  playCount: number;
+  uniqueUsers: number;
+  watchedUsers: number;
+  favoriteCount: number;
+  lastPlayedAt?: string;
+  updatedAt?: string;
+};
+
+export type PathMapping = {
+  id: string;
+  serverId?: string;
+  serverPathPrefix: string;
+  localPathPrefix: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type BackupRestoreResult = {

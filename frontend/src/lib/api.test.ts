@@ -84,6 +84,25 @@ describe('api auth helpers', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/integrations/jellyfin/refresh', expect.objectContaining({ method: 'POST' }));
   });
 
+  test('media server ingestion calls sync activity and mapping endpoints', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ data: { serverId: 'jellyfin', status: 'completed', itemsImported: 1 } }))
+      .mockResolvedValueOnce(jsonResponse({ data: [{ serverId: 'jellyfin', externalId: 'item_1', title: 'Arrival' }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: [{ serverId: 'jellyfin', itemExternalId: 'item_1', playCount: 2 }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: [{ id: 'map_1', serverPathPrefix: '/mnt/media', localPathPrefix: '/media' }] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.syncIntegration('jellyfin')).resolves.toMatchObject({ serverId: 'jellyfin', status: 'completed' });
+    await expect(api.integrationItems('jellyfin')).resolves.toHaveLength(1);
+    await expect(api.activityRollups()).resolves.toHaveLength(1);
+    await expect(api.pathMappings()).resolves.toHaveLength(1);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/integrations/jellyfin/sync', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/integrations/jellyfin/items', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/v1/activity/rollups', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/v1/path-mappings', expect.any(Object));
+  });
+
   test('backup restore can inspect and restore a config archive', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ data: { entries: ['mediarr.db'] } }))

@@ -403,7 +403,7 @@ cd backend && go test ./internal/recommendations ./internal/database ./internal/
 
 Expected: pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/internal/recommendations/engine.go backend/internal/recommendations/engine_test.go backend/internal/database/store.go backend/internal/api/server.go backend/internal/database/integration_activity_test.go backend/internal/api/integration_sync_test.go
@@ -420,11 +420,11 @@ git push
 - Modify: `frontend/src/App.tsx`
 - Modify: `frontend/src/styles/app.css`
 
-- [ ] **Step 1: Write failing frontend API tests**
+- [x] **Step 1: Write failing frontend API tests**
 
 Add tests for `api.syncIntegration("jellyfin")`, `api.activityRollups()`, `api.pathMappings()`, and `api.integrationItems("jellyfin")`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 npm --prefix frontend run test -- --run
@@ -432,11 +432,11 @@ npm --prefix frontend run test -- --run
 
 Expected: fail because API methods are missing.
 
-- [ ] **Step 3: Implement frontend API types and methods**
+- [x] **Step 3: Implement frontend API types and methods**
 
 Add TypeScript interfaces matching backend JSON fields and API methods for sync, rollups, integration items, and path mappings.
 
-- [ ] **Step 4: Update UI**
+- [x] **Step 4: Update UI**
 
 Update the integrations view to show Jellyfin/Plex sync cards with:
 
@@ -459,11 +459,11 @@ Update recommendation cards with:
 
 Add dashboard panels for cold storage, never watched, inactive media, and locally verified savings.
 
-- [ ] **Step 5: Apply MediaGlass theme**
+- [x] **Step 5: Apply MediaGlass theme**
 
 Use dark cinematic surfaces, translucent panels, cyan/magenta/yellow accents, and readable typography. Keep controls compact and data-dense. Do not add a landing page.
 
-- [ ] **Step 6: Run frontend validation**
+- [x] **Step 6: Run frontend validation**
 
 ```bash
 npm --prefix frontend run test -- --run

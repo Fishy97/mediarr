@@ -1,5 +1,6 @@
 import type {
   AIStatus,
+  ActivityRollup,
   AuthResponse,
   AuthUser,
   BackupRestoreResult,
@@ -7,7 +8,10 @@ import type {
   CatalogItem,
   Integration,
   IntegrationRefreshResult,
+  IntegrationSyncJob,
   Library,
+  MediaServerItem,
+  PathMapping,
   ProviderHealth,
   ProviderSetting,
   ProviderSettingInput,
@@ -130,6 +134,23 @@ export const api = {
   },
   async refreshIntegration(id: string): Promise<IntegrationRefreshResult> {
     return (await request<Envelope<IntegrationRefreshResult>>(`/api/v1/integrations/${encodeURIComponent(id)}/refresh`, { method: 'POST' })).data;
+  },
+  async syncIntegration(id: string): Promise<IntegrationSyncJob> {
+    return (await request<Envelope<IntegrationSyncJob>>(`/api/v1/integrations/${encodeURIComponent(id)}/sync`, { method: 'POST' })).data;
+  },
+  async integrationSyncStatus(id: string): Promise<IntegrationSyncJob> {
+    return (await request<Envelope<IntegrationSyncJob>>(`/api/v1/integrations/${encodeURIComponent(id)}/sync`)).data;
+  },
+  async integrationItems(id: string, unmapped = false): Promise<MediaServerItem[]> {
+    const suffix = unmapped ? '?unmapped=true' : '';
+    return (await request<Envelope<MediaServerItem[]>>(`/api/v1/integrations/${encodeURIComponent(id)}/items${suffix}`)).data;
+  },
+  async activityRollups(serverId?: string): Promise<ActivityRollup[]> {
+    const suffix = serverId ? `?serverId=${encodeURIComponent(serverId)}` : '';
+    return (await request<Envelope<ActivityRollup[]>>(`/api/v1/activity/rollups${suffix}`)).data;
+  },
+  async pathMappings(): Promise<PathMapping[]> {
+    return (await request<Envelope<PathMapping[]>>('/api/v1/path-mappings')).data;
   },
   async createBackup(): Promise<{ path: string }> {
     return (await request<Envelope<{ path: string }>>('/api/v1/backups', { method: 'POST' })).data;
