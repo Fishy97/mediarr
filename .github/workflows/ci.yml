@@ -41,4 +41,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - run: docker build .
+      - run: docker compose config --quiet
+      - run: docker compose --profile ai config --quiet
+      - run: docker compose build mediarr
+      - run: docker compose up -d mediarr
+      - run: |
+          for attempt in $(seq 1 20); do
+            if curl -fsS http://localhost:8080/api/v1/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs mediarr
+          exit 1
+      - run: curl -fsS http://localhost:8080/api/v1/setup/status
+      - run: test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/v1/catalog)" = "401"
+      - if: always()
+        run: docker compose down -v

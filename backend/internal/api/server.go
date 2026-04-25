@@ -98,6 +98,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("/api/v1/integrations", server.integrationsHandler)
 	server.mux.HandleFunc("/api/v1/ai/status", server.aiStatusHandler)
 	server.mux.HandleFunc("/api/v1/backups", server.backupsHandler)
+	server.mux.HandleFunc("/api/v1/backups/restore", server.backupRestoreHandler)
 	server.mux.HandleFunc("/api/v1/audit", server.auditHandler)
 	server.mux.HandleFunc("/api/v1/media/files/", methodNotAllowed)
 	server.mux.HandleFunc("/", server.frontend)
@@ -431,6 +432,45 @@ func (server *Server) backupsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	server.record("backup.created", "Backup created", map[string]any{"path": path})
 	writeJSON(w, http.StatusCreated, envelope{Data: map[string]string{"path": path}})
+}
+
+func (server *Server) backupRestoreHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.configDir == "" {
+		http.Error(w, "config directory not configured", http.StatusBadRequest)
+		return
+	}
+	var request struct {
+		Path   string `json:"path"`
+		DryRun bool   `json:"dryRun"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if request.Path == "" {
+		http.Error(w, "backup path is required", http.StatusBadRequest)
+		return
+	}
+	if request.DryRun {
+		entries, err := database.InspectBackup(request.Path)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, http.StatusOK, envelope{Data: map[string]any{"entries": entries}})
+		return
+	}
+	result, err := database.RestoreBackup(server.configDir, request.Path, filepath.Join(server.configDir, "backups"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	server.record("backup.restored", "Backup restored", map[string]any{"path": request.Path, "preRestoreBackup": result.PreRestoreBackup})
+	writeJSON(w, http.StatusOK, envelope{Data: result})
 }
 
 func (server *Server) auditHandler(w http.ResponseWriter, r *http.Request) {

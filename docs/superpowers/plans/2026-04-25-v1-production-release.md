@@ -34,7 +34,7 @@
 - [x] Add frontend first-run setup and login screens.
 - [x] Add Docker AI model-init service, `MEDIARR_AI_MODEL`, pinned defaults where feasible, and docs for no-AI vs AI startup.
 - [x] Run `go test ./...`, `go vet ./...`, `npm --prefix frontend run build`, `npm --prefix frontend run test -- --run`, `docker compose config --quiet`, `docker compose --profile ai config --quiet`, `docker compose build mediarr`.
-- [ ] Commit as `feat: add v1 setup auth and ai packaging` and push `codex/v1-production-release`.
+- [x] Commit as `feat: add v1 setup auth and ai packaging` and push `codex/v1-production-release`.
 
 ## Commit Track 2: Scanner, Catalog, And Metadata Providers
 
@@ -60,10 +60,10 @@
 ## Commit Track 4: Backups, Release Hardening, And Public Docs
 
 - [ ] Write failing tests for backup contents, restore validation, no-delete endpoints, API auth regression, Docker smoke, and UI setup flow.
-- [ ] Add restore dry-run, restore execution with pre-restore backup, backup manifest, and config inclusion.
+- [x] Add restore dry-run, restore execution with pre-restore backup, backup manifest, and config inclusion.
 - [ ] Add real tiny media fixtures for ffprobe validation and integration fixture libraries.
 - [ ] Harden Docker runtime with read-only media mounts, `/config` ownership guidance, healthchecks, labels, and release image docs.
-- [ ] Expand CI with backend, frontend, Docker, Compose no-AI, Compose AI config, smoke test, and security/no-delete regression.
+- [x] Expand CI with backend, frontend, Docker, Compose no-AI, Compose AI config, smoke test, and security/no-delete regression.
 - [ ] Update README, deployment guide, provider guide, AI guide, security policy, contributing guide, release checklist, and API docs.
 - [ ] Verify GitHub branch CI, then merge/push to `main` after V1 validation is green.
 
