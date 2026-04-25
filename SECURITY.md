@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-The project is pre-1.0. Security fixes target the main development branch until formal release channels exist.
+Security fixes target the latest released branch and the main development branch. Self-hosters should keep Docker images and source checkouts current.
 
 ## Reporting
 
@@ -11,8 +11,8 @@ Please report security issues privately to the maintainers. Do not open public i
 ## Baseline Guarantees
 
 - No permanent media deletion endpoint
-- Optional bearer-token protection for API routes
+- First-run admin setup, session auth, and optional bearer-token automation
 - Read-only media mounts in Docker Compose
 - Config and backups isolated under `/config`
 - Provider keys must not be written to logs
-
+- Backup restore rejects archive entries that escape `/config`

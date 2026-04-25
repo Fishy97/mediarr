@@ -1,12 +1,44 @@
-import type { CatalogItem, Integration, Library, ProviderHealth, Recommendation, ScanResult } from '../types';
+import type {
+  AIStatus,
+  AuthResponse,
+  AuthUser,
+  BackupRestoreResult,
+  CatalogCorrectionInput,
+  CatalogItem,
+  Integration,
+  IntegrationRefreshResult,
+  Library,
+  ProviderHealth,
+  ProviderSetting,
+  ProviderSettingInput,
+  Recommendation,
+  ScanResult,
+  SetupStatus,
+} from '../types';
 
 type Envelope<T> = { data: T };
 
+const tokenStorageKey = 'mediarr.authToken';
+
+export function getAuthToken(): string | null {
+  return localStorage.getItem(tokenStorageKey);
+}
+
+export function setAuthToken(token: string | null): void {
+  if (token) {
+    localStorage.setItem(tokenStorageKey, token);
+    return;
+  }
+  localStorage.removeItem(tokenStorageKey);
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getAuthToken();
   const response = await fetch(path, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...init?.headers,
     },
   });
@@ -20,6 +52,32 @@ export const api = {
   async health(): Promise<{ status: string; service: string; timestamp: string }> {
     return request('/api/v1/health');
   },
+  async setupStatus(): Promise<SetupStatus> {
+    return (await request<Envelope<SetupStatus>>('/api/v1/setup/status')).data;
+  },
+  async setupAdmin(email: string, password: string): Promise<AuthResponse> {
+    const result = (await request<Envelope<AuthResponse>>('/api/v1/setup/admin', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    })).data;
+    setAuthToken(result.token);
+    return result;
+  },
+  async login(email: string, password: string): Promise<AuthResponse> {
+    const result = (await request<Envelope<AuthResponse>>('/api/v1/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    })).data;
+    setAuthToken(result.token);
+    return result;
+  },
+  async logout(): Promise<void> {
+    await request<Envelope<{ ok: boolean }>>('/api/v1/auth/logout', { method: 'POST' });
+    setAuthToken(null);
+  },
+  async me(): Promise<AuthUser> {
+    return (await request<Envelope<AuthUser>>('/api/v1/auth/me')).data;
+  },
   async libraries(): Promise<Library[]> {
     return (await request<Envelope<Library[]>>('/api/v1/libraries')).data;
   },
@@ -29,6 +87,15 @@ export const api = {
   async catalog(): Promise<CatalogItem[]> {
     return (await request<Envelope<CatalogItem[]>>('/api/v1/catalog')).data;
   },
+  async correctCatalogItem(id: string, correction: CatalogCorrectionInput): Promise<void> {
+    await request<Envelope<unknown>>(`/api/v1/catalog/${encodeURIComponent(id)}/correction`, {
+      method: 'PUT',
+      body: JSON.stringify(correction),
+    });
+  },
+  async clearCatalogCorrection(id: string): Promise<void> {
+    await request<Envelope<{ ok: boolean }>>(`/api/v1/catalog/${encodeURIComponent(id)}/correction`, { method: 'DELETE' });
+  },
   async startScan(): Promise<{ scans: ScanResult[]; recommendations: Recommendation[] }> {
     return (await request<Envelope<{ scans: ScanResult[]; recommendations: Recommendation[] }>>('/api/v1/scans', {
       method: 'POST',
@@ -37,13 +104,40 @@ export const api = {
   async recommendations(): Promise<Recommendation[]> {
     return (await request<Envelope<Recommendation[]>>('/api/v1/recommendations')).data;
   },
+  async ignoreRecommendation(id: string): Promise<void> {
+    await request<Envelope<{ ok: boolean }>>(`/api/v1/recommendations/${encodeURIComponent(id)}/ignore`, { method: 'POST' });
+  },
+  async restoreRecommendation(id: string): Promise<void> {
+    await request<Envelope<{ ok: boolean }>>(`/api/v1/recommendations/${encodeURIComponent(id)}/restore`, { method: 'POST' });
+  },
   async providers(): Promise<ProviderHealth[]> {
     return (await request<Envelope<ProviderHealth[]>>('/api/v1/providers')).data;
+  },
+  async providerSettings(): Promise<ProviderSetting[]> {
+    return (await request<Envelope<ProviderSetting[]>>('/api/v1/provider-settings')).data;
+  },
+  async updateProviderSetting(provider: string, setting: ProviderSettingInput): Promise<ProviderSetting> {
+    return (await request<Envelope<ProviderSetting>>(`/api/v1/provider-settings/${encodeURIComponent(provider)}`, {
+      method: 'PUT',
+      body: JSON.stringify(setting),
+    })).data;
+  },
+  async aiStatus(): Promise<AIStatus> {
+    return (await request<Envelope<AIStatus>>('/api/v1/ai/status')).data;
   },
   async integrations(): Promise<Integration[]> {
     return (await request<Envelope<Integration[]>>('/api/v1/integrations')).data;
   },
+  async refreshIntegration(id: string): Promise<IntegrationRefreshResult> {
+    return (await request<Envelope<IntegrationRefreshResult>>(`/api/v1/integrations/${encodeURIComponent(id)}/refresh`, { method: 'POST' })).data;
+  },
   async createBackup(): Promise<{ path: string }> {
     return (await request<Envelope<{ path: string }>>('/api/v1/backups', { method: 'POST' })).data;
+  },
+  async restoreBackup(path: string, dryRun: boolean): Promise<BackupRestoreResult> {
+    return (await request<Envelope<BackupRestoreResult>>('/api/v1/backups/restore', {
+      method: 'POST',
+      body: JSON.stringify({ path, dryRun }),
+    })).data;
   },
 };

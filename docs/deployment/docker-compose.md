@@ -73,6 +73,16 @@ Recommended Ubuntu server values:
 MEDIARR_ADMIN_TOKEN=change-this-to-a-long-random-token
 MEDIARR_OVERSIZED_BYTES=60000000000
 MEDIARR_OLLAMA_URL=http://ollama:11434
+MEDIARR_AI_MODEL=qwen3:0.6b
+MEDIARR_TMDB_TOKEN=
+MEDIARR_THETVDB_API_KEY=
+MEDIARR_OPENSUBTITLES_API_KEY=
+MEDIARR_JELLYFIN_URL=
+MEDIARR_JELLYFIN_API_KEY=
+MEDIARR_PLEX_URL=
+MEDIARR_PLEX_TOKEN=
+MEDIARR_EMBY_URL=
+MEDIARR_EMBY_API_KEY=
 PUID=1000
 PGID=1000
 MOVIES_DIR=/srv/media/movies
@@ -162,6 +172,24 @@ Backups are written to:
 ./config/backups
 ```
 
+Inspect a backup before restoring it:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/backups/restore \
+  -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/config/backups/mediarr-example.zip","dryRun":true}'
+```
+
+Restore creates a fresh pre-restore backup before replacing files under `/config`:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/backups/restore \
+  -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/config/backups/mediarr-example.zip","dryRun":false}'
+```
+
 For host-level backups, back up the whole `config` directory:
 
 ```bash
@@ -187,7 +215,24 @@ Ollama is included as an optional Compose profile. Start Mediarr with local AI e
 docker compose --profile ai up -d
 ```
 
+The AI profile starts two additional services:
+
+- `ollama`, the local model runtime
+- `mediarr-ai-init`, a one-shot initializer that waits for Ollama and pulls `MEDIARR_AI_MODEL`
+
+The default model is `qwen3:0.6b`. Change `MEDIARR_AI_MODEL` in `.env` if you want a different local Ollama model.
+
 Mediarr treats local AI as advisory only. Core scanning and recommendations do not require AI.
+
+The two supported launch modes are:
+
+```bash
+# No AI
+docker compose up -d
+
+# With AI sidecar
+docker compose --profile ai up -d
+```
 
 ## 10. Reverse Proxy
 

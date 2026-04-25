@@ -6,22 +6,20 @@ It deliberately does not search for, download, torrent, index, or acquire media.
 
 ## Project Status
 
-Mediarr is usable today as a Docker-hosted library scanner and review dashboard. It can:
+Mediarr V1 is a Docker-hosted library scanner, catalog, and review dashboard for already-downloaded media. It can:
 
 - scan movie, series, and anime folders mounted read-only
 - parse common movie, series, and anime filename patterns
-- persist catalog rows, subtitle sidecars, and review recommendations in SQLite
+- persist catalog rows, user metadata corrections, subtitle sidecars, and review recommendations in SQLite
 - detect duplicate catalog items and estimate recoverable space
-- create `/config` backups
+- create, inspect, and restore `/config` backups with a pre-restore backup
+- protect the API with first-run admin setup, password login, sessions, and bearer-token automation
+- configure provider credentials without returning secrets through the API
+- request Jellyfin, Plex, and Emby library refreshes as sync targets
+- attach optional local AI rationales to deterministic recommendations when the Ollama sidecar is enabled
 - expose a web UI and REST API
 
-The current codebase is a production-grade foundation, not a complete public release. These pieces are intentionally scaffolded but not fully connected yet:
-
-- live TMDb, AniList, TheTVDB, and OpenSubtitles provider calls
-- Jellyfin, Plex, and Emby metadata sync
-- optional Ollama-backed local AI suggestions
-- real authentication setup flow beyond optional bearer-token protection
-- broader filename/edition handling for large mixed libraries
+Mediarr remains deliberately conservative: it does not delete media, does not download media, and does not treat provider or AI output as catalog truth unless a user applies a correction.
 
 ## Current Capabilities
 
@@ -30,8 +28,9 @@ The current codebase is a production-grade foundation, not a complete public rel
 - React/TypeScript frontend for dashboard, libraries, catalog, review queue, integrations, provider health, settings, and backups
 - Read-only media mounts by default
 - Suggest-only cleanup recommendations with affected paths, confidence, source, and recoverable storage
-- Provider health surfaces for TMDb, AniList, TheTVDB, OpenSubtitles, and local sidecars
-- Integration surfaces for Jellyfin, Plex, Emby, and optional local Ollama
+- Provider health and credential surfaces for TMDb, AniList, TheTVDB, OpenSubtitles, and local sidecars
+- Integration status and refresh actions for Jellyfin, Plex, Emby, and optional local Ollama
+- Catalog correction workflow with user overrides taking precedence over scan guesses
 
 ## Quick Start
 
@@ -58,11 +57,12 @@ Run Mediarr with the optional AI sidecar:
 docker compose --profile ai up -d
 ```
 
-The AI sidecar is optional. Mediarr remains fully usable without it, and AI output is treated as advisory rather than catalog truth.
+The AI sidecar is optional. When enabled, Compose starts Ollama and a one-shot model initializer that pulls `MEDIARR_AI_MODEL` into the Docker volume. Mediarr remains fully usable without it, and AI output is treated as advisory rather than catalog truth.
 
 Set `MOVIES_DIR`, `SERIES_DIR`, and `ANIME_DIR` in `.env` to point at your media folders. The compose file mounts them read-only.
 
 For a full Ubuntu server walkthrough, see [Docker Compose Deployment Guide](docs/deployment/docker-compose.md).
+Provider behavior is documented in [Provider Guide](docs/providers.md), and optional local AI behavior is documented in [Local AI Guide](docs/ai.md).
 
 Run a scan from the UI or with:
 
@@ -146,6 +146,22 @@ curl -X POST http://localhost:8080/api/v1/backups
 
 Backups are written under `./config/backups`.
 
+Restore dry-run:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/backups/restore \
+  -H 'Content-Type: application/json' \
+  -d '{"path":"/config/backups/mediarr-example.zip","dryRun":true}'
+```
+
+Restore execution creates a new pre-restore backup first:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/backups/restore \
+  -H 'Content-Type: application/json' \
+  -d '{"path":"/config/backups/mediarr-example.zip","dryRun":false}'
+```
+
 ## Local Development
 
 ```bash
@@ -171,6 +187,7 @@ Recommended production defaults:
 - set `MEDIARR_ADMIN_TOKEN`
 - put the app behind a trusted reverse proxy for TLS
 - back up `./config` regularly
+- use backup restore dry-run before restoring an archive
 - do not expose port `8080` directly to the public internet
 
 ## License

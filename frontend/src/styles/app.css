@@ -27,6 +27,43 @@ button {
   grid-template-columns: 260px minmax(0, 1fr);
 }
 
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-panel {
+  width: min(100%, 420px);
+  display: grid;
+  gap: 14px;
+  padding: 24px;
+  background: #ffffff;
+  border: 1px solid #dfe6e1;
+  border-radius: 8px;
+}
+
+.auth-panel h1 {
+  font-size: 1.35rem;
+}
+
+.auth-panel label {
+  display: grid;
+  gap: 6px;
+  color: #33413b;
+  font-weight: 700;
+}
+
+.auth-panel input {
+  min-height: 42px;
+  border: 1px solid #cbd5cf;
+  border-radius: 8px;
+  padding: 0 12px;
+  color: #1c2421;
+  font: inherit;
+}
+
 .sidebar {
   background: #17211d;
   color: #f5f8f3;
@@ -136,6 +173,19 @@ h2 {
   gap: 10px;
 }
 
+.user-chip {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid #dfe6e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #44514b;
+  font-size: 0.82rem;
+}
+
 .icon-button,
 .primary-button {
   border: 1px solid #cbd5cf;
@@ -168,6 +218,24 @@ h2 {
   cursor: wait;
 }
 
+.secondary-button {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #cbd5cf;
+  border-radius: 8px;
+  padding: 0 12px;
+  background: #ffffff;
+  color: #24302b;
+  cursor: pointer;
+}
+
+.secondary-button:disabled {
+  opacity: 0.64;
+  cursor: wait;
+}
+
 .notice {
   border-radius: 8px;
   padding: 12px 14px;
@@ -177,6 +245,11 @@ h2 {
 .notice.error {
   background: #ffe7de;
   color: #8f2f16;
+}
+
+.notice.success {
+  background: #e8f5ef;
+  color: #1e6149;
 }
 
 .view-grid {
@@ -259,7 +332,7 @@ h2 {
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 760px;
+  min-width: 980px;
 }
 
 th,
@@ -345,7 +418,7 @@ code {
 
 .status-card {
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) max-content;
+  grid-template-columns: 26px minmax(0, 1fr) max-content max-content;
   align-items: start;
   gap: 12px;
   padding: 14px;
@@ -368,6 +441,23 @@ code {
   font-size: 0.78rem;
 }
 
+.ai-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #eef5f8;
+  color: #284758;
+  line-height: 1.4;
+}
+
+.ai-note svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
 .compact-list {
   display: grid;
   gap: 8px;
@@ -385,6 +475,52 @@ code {
   margin: 0;
   padding-left: 18px;
   color: #4d5a55;
+}
+
+.form-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.form-panel label {
+  display: grid;
+  gap: 6px;
+  color: #33413b;
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+
+.form-panel input,
+.form-panel select {
+  min-height: 40px;
+  border: 1px solid #cbd5cf;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #1c2421;
+  background: #ffffff;
+  font: inherit;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.button-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.secondary-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.provider-settings {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .empty-state {
@@ -414,7 +550,9 @@ code {
 
   .stat-strip,
   .split,
-  .recommendation-card {
+  .recommendation-card,
+  .provider-settings,
+  .form-grid {
     grid-template-columns: 1fr;
   }
 
@@ -446,4 +584,3 @@ code {
     display: none;
   }
 }
-

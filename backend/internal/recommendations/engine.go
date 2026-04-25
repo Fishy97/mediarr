@@ -9,16 +9,19 @@ import (
 type Action string
 
 const (
-	ActionReviewDuplicate Action = "review_duplicate"
-	ActionReviewOversized Action = "review_oversized"
+	ActionReviewDuplicate        Action = "review_duplicate"
+	ActionReviewOversized        Action = "review_oversized"
+	ActionReviewMissingSubtitles Action = "review_missing_subtitles"
 )
 
 type MediaFile struct {
-	ID           string `json:"id"`
-	CanonicalKey string `json:"canonicalKey"`
-	Path         string `json:"path"`
-	SizeBytes    int64  `json:"sizeBytes"`
-	Quality      string `json:"quality,omitempty"`
+	ID             string `json:"id"`
+	CanonicalKey   string `json:"canonicalKey"`
+	Path           string `json:"path"`
+	SizeBytes      int64  `json:"sizeBytes"`
+	Quality        string `json:"quality,omitempty"`
+	HasSubtitles   bool   `json:"hasSubtitles"`
+	WantsSubtitles bool   `json:"wantsSubtitles"`
 }
 
 type Recommendation struct {
@@ -31,6 +34,10 @@ type Recommendation struct {
 	Source          string   `json:"source"`
 	AffectedPaths   []string `json:"affectedPaths"`
 	Destructive     bool     `json:"destructive"`
+	AIRationale     string   `json:"aiRationale,omitempty"`
+	AITags          []string `json:"aiTags,omitempty"`
+	AIConfidence    float64  `json:"aiConfidence,omitempty"`
+	AISource        string   `json:"aiSource,omitempty"`
 }
 
 type Engine struct {
@@ -80,6 +87,19 @@ func (engine Engine) Generate(files []MediaFile) []Recommendation {
 			continue
 		}
 		file := group[0]
+		if file.WantsSubtitles && !file.HasSubtitles {
+			recs = append(recs, Recommendation{
+				ID:              stableID("missing-subtitles:" + file.Path),
+				Action:          ActionReviewMissingSubtitles,
+				Title:           "Review missing subtitles",
+				Explanation:     "No sidecar subtitles were detected for this file. Confirm whether embedded subtitles exist or add a subtitle file if needed.",
+				SpaceSavedBytes: 0,
+				Confidence:      0.74,
+				Source:          "rule:missing-sidecar-subtitles",
+				AffectedPaths:   []string{file.Path},
+				Destructive:     false,
+			})
+		}
 		if file.SizeBytes >= threshold {
 			recs = append(recs, Recommendation{
 				ID:              stableID("oversized:" + file.Path),

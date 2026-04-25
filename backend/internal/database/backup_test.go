@@ -43,3 +43,67 @@ func TestBackupIncludesDatabaseSettingsAndAudit(t *testing.T) {
 		}
 	}
 }
+
+func TestInspectAndRestoreBackup(t *testing.T) {
+	configDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(configDir, "mediarr.db"), []byte("before"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backupPath, err := CreateBackup(configDir, filepath.Join(configDir, "backups"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "mediarr.db"), []byte("after"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := InspectBackup(backupPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) == 0 || entries[0] != "mediarr.db" {
+		t.Fatalf("entries = %#v", entries)
+	}
+
+	result, err := RestoreBackup(configDir, backupPath, filepath.Join(configDir, "backups"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.PreRestoreBackup == "" || len(result.Restored) == 0 {
+		t.Fatalf("unexpected restore result: %#v", result)
+	}
+	data, err := os.ReadFile(filepath.Join(configDir, "mediarr.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "before" {
+		t.Fatalf("database after restore = %q, want before", string(data))
+	}
+}
+
+func TestRestoreRejectsUnsafeArchivePaths(t *testing.T) {
+	configDir := t.TempDir()
+	backupPath := filepath.Join(configDir, "unsafe.zip")
+	file, err := os.Create(backupPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := zip.NewWriter(file)
+	entry, err := writer.Create("../outside.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := entry.Write([]byte("bad")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := RestoreBackup(configDir, backupPath, filepath.Join(configDir, "backups")); err == nil {
+		t.Fatal("unsafe archive path should be rejected")
+	}
+}

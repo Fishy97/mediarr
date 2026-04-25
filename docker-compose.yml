@@ -13,6 +13,16 @@ services:
       MEDIARR_ADMIN_TOKEN: ${MEDIARR_ADMIN_TOKEN:-}
       MEDIARR_OVERSIZED_BYTES: ${MEDIARR_OVERSIZED_BYTES:-60000000000}
       MEDIARR_OLLAMA_URL: ${MEDIARR_OLLAMA_URL:-http://ollama:11434}
+      MEDIARR_AI_MODEL: ${MEDIARR_AI_MODEL:-qwen3:0.6b}
+      MEDIARR_TMDB_TOKEN: ${MEDIARR_TMDB_TOKEN:-}
+      MEDIARR_THETVDB_API_KEY: ${MEDIARR_THETVDB_API_KEY:-}
+      MEDIARR_OPENSUBTITLES_API_KEY: ${MEDIARR_OPENSUBTITLES_API_KEY:-}
+      MEDIARR_JELLYFIN_URL: ${MEDIARR_JELLYFIN_URL:-}
+      MEDIARR_JELLYFIN_API_KEY: ${MEDIARR_JELLYFIN_API_KEY:-}
+      MEDIARR_PLEX_URL: ${MEDIARR_PLEX_URL:-}
+      MEDIARR_PLEX_TOKEN: ${MEDIARR_PLEX_TOKEN:-}
+      MEDIARR_EMBY_URL: ${MEDIARR_EMBY_URL:-}
+      MEDIARR_EMBY_API_KEY: ${MEDIARR_EMBY_API_KEY:-}
       MEDIAAR_ADMIN_TOKEN: ${MEDIAAR_ADMIN_TOKEN:-}
       MEDIAAR_OVERSIZED_BYTES: ${MEDIAAR_OVERSIZED_BYTES:-}
       MEDIAAR_OLLAMA_URL: ${MEDIAAR_OLLAMA_URL:-}
@@ -37,6 +47,22 @@ services:
     profiles: ["ai"]
     volumes:
       - ollama:/root/.ollama
+  mediarr-ai-init:
+    image: ollama/ollama:latest
+    container_name: mediarr-ai-init
+    profiles: ["ai"]
+    depends_on:
+      - ollama
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      MEDIARR_AI_MODEL: ${MEDIARR_AI_MODEL:-qwen3:0.6b}
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      until ollama list >/dev/null 2>&1; do
+        sleep 2
+      done
+      ollama pull "$$MEDIARR_AI_MODEL"
+    restart: "no"
 
 volumes:
   ollama:

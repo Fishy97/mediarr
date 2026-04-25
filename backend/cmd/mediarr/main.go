@@ -4,12 +4,15 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/Fishy97/mediarr/backend/internal/ai"
 	"github.com/Fishy97/mediarr/backend/internal/api"
 	"github.com/Fishy97/mediarr/backend/internal/audit"
 	"github.com/Fishy97/mediarr/backend/internal/auth"
 	"github.com/Fishy97/mediarr/backend/internal/config"
 	"github.com/Fishy97/mediarr/backend/internal/database"
 	"github.com/Fishy97/mediarr/backend/internal/filescan"
+	"github.com/Fishy97/mediarr/backend/internal/integrations"
+	"github.com/Fishy97/mediarr/backend/internal/metadata"
 	"github.com/Fishy97/mediarr/backend/internal/recommendations"
 )
 
@@ -37,16 +40,36 @@ func main() {
 		})
 	}
 
+	authService := auth.Service{Store: store}
+	aiClient := ai.OllamaClient{BaseURL: cfg.OllamaURL, Model: cfg.AIModel}
+	providerOptions := metadata.Options{
+		TMDbToken:           cfg.TMDbToken,
+		TheTVDBAPIKey:       cfg.TheTVDBAPIKey,
+		OpenSubtitlesAPIKey: cfg.OpenSubtitlesKey,
+	}
+	integrationOptions := integrations.Options{
+		JellyfinURL: cfg.JellyfinURL,
+		JellyfinKey: cfg.JellyfinAPIKey,
+		PlexURL:     cfg.PlexURL,
+		PlexToken:   cfg.PlexToken,
+		EmbyURL:     cfg.EmbyURL,
+		EmbyKey:     cfg.EmbyAPIKey,
+	}
+
 	server := api.NewServer(api.Deps{
-		ConfigDir:   cfg.ConfigDir,
-		FrontendDir: cfg.FrontendDir,
-		Libraries:   libraries,
-		Audit:       auditLog,
-		Scanner:     filescan.Scanner{Probe: true},
-		Engine:      recommendations.Engine{OversizedThresholdBytes: cfg.OversizedBytes},
-		Store:       store,
+		ConfigDir:          cfg.ConfigDir,
+		FrontendDir:        cfg.FrontendDir,
+		Libraries:          libraries,
+		Audit:              auditLog,
+		Auth:               &authService,
+		AI:                 &aiClient,
+		ProviderOptions:    providerOptions,
+		IntegrationOptions: integrationOptions,
+		Scanner:            filescan.Scanner{Probe: true},
+		Engine:             recommendations.Engine{OversizedThresholdBytes: cfg.OversizedBytes},
+		Store:              store,
 	})
-	handler := auth.Middleware{AdminToken: cfg.AdminToken}.Wrap(server)
+	handler := auth.Middleware{AdminToken: cfg.AdminToken, Service: &authService}.Wrap(server)
 
 	log.Printf("Mediarr listening on %s", cfg.Addr)
 	if err := http.ListenAndServe(cfg.Addr, handler); err != nil {

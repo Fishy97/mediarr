@@ -42,3 +42,20 @@ func TestOversizedRecommendationIsAdvisory(t *testing.T) {
 		t.Fatal("oversized recommendations must not delete media")
 	}
 }
+
+func TestEngineCreatesMissingSubtitleRecommendations(t *testing.T) {
+	engine := Engine{}
+	recs := engine.Generate([]MediaFile{
+		{ID: "movie_1", CanonicalKey: "movie:arrival:2016", Path: "/media/Arrival.2016.mkv", SizeBytes: 10, Quality: "1080p", WantsSubtitles: true, HasSubtitles: false},
+	})
+
+	if len(recs) != 1 {
+		t.Fatalf("recommendations = %d, want 1", len(recs))
+	}
+	if recs[0].Action != ActionReviewMissingSubtitles {
+		t.Fatalf("action = %s, want %s", recs[0].Action, ActionReviewMissingSubtitles)
+	}
+	if recs[0].Destructive {
+		t.Fatal("missing subtitle recommendations must not delete media")
+	}
+}

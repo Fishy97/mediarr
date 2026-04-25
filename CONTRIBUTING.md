@@ -13,12 +13,13 @@ Mediarr is intended to be community-run infrastructure for self-hosters.
 ## Commands
 
 ```bash
-npm --prefix frontend install
+npm --prefix frontend ci
 npm --prefix frontend run build
+npm --prefix frontend run test -- --run
 cd backend && go test ./...
+cd backend && go vet ./...
 ```
 
 ## Provider Policy
 
 Metadata providers must include attribution, caching, rate limiting, and graceful failure behavior. No provider should be required for catalog integrity.
-

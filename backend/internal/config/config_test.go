@@ -7,6 +7,8 @@ func TestLoadPrefersMediarrEnvironmentNames(t *testing.T) {
 	t.Setenv("MEDIAAR_ADDR", ":8082")
 	t.Setenv("MEDIA_STEWARD_ADDR", ":8081")
 	t.Setenv("MEDIARR_ADMIN_TOKEN", "new-token")
+	t.Setenv("MEDIARR_AI_MODEL", "qwen3:0.6b")
+	t.Setenv("MEDIARR_TMDB_TOKEN", "tmdb-token")
 	t.Setenv("MEDIAAR_ADMIN_TOKEN", "old-mediaar-token")
 	t.Setenv("MEDIA_STEWARD_ADMIN_TOKEN", "old-token")
 
@@ -17,6 +19,12 @@ func TestLoadPrefersMediarrEnvironmentNames(t *testing.T) {
 	}
 	if cfg.AdminToken != "new-token" {
 		t.Fatalf("admin token = %q, want new-token", cfg.AdminToken)
+	}
+	if cfg.AIModel != "qwen3:0.6b" {
+		t.Fatalf("ai model = %q, want qwen3:0.6b", cfg.AIModel)
+	}
+	if cfg.TMDbToken != "tmdb-token" {
+		t.Fatalf("tmdb token = %q, want tmdb-token", cfg.TMDbToken)
 	}
 }
 
