@@ -563,10 +563,6 @@ func (server *Server) recommendationsHandler(w http.ResponseWriter, r *http.Requ
 }
 
 func (server *Server) recommendationActionHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		methodNotAllowed(w, r)
-		return
-	}
 	if server.store == nil {
 		http.Error(w, "recommendation store is not configured", http.StatusBadRequest)
 		return
@@ -574,6 +570,23 @@ func (server *Server) recommendationActionHandler(w http.ResponseWriter, r *http
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/recommendations/"), "/")
 	if len(parts) != 2 || parts[0] == "" {
 		http.NotFound(w, r)
+		return
+	}
+	if parts[1] == "evidence" {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w, r)
+			return
+		}
+		rec, err := server.store.GetRecommendation(parts[0])
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, envelope{Data: recommendations.BuildEvidence(rec)})
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, r)
 		return
 	}
 	switch parts[1] {
@@ -589,6 +602,18 @@ func (server *Server) recommendationActionHandler(w http.ResponseWriter, r *http
 			return
 		}
 		server.record("recommendation.restored", "Recommendation restored", map[string]any{"id": parts[0]})
+	case "protect":
+		if err := server.store.SetRecommendationState(parts[0], recommendations.StateProtected); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		server.record("recommendation.protected", "Recommendation protected", map[string]any{"id": parts[0]})
+	case "accept-manual":
+		if err := server.store.SetRecommendationState(parts[0], recommendations.StateAcceptedForManualAction); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		server.record("recommendation.accepted_for_manual_action", "Recommendation accepted for manual action", map[string]any{"id": parts[0]})
 	default:
 		http.NotFound(w, r)
 		return

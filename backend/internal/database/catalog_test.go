@@ -338,6 +338,82 @@ func TestStoreIgnoresAndRestoresRecommendations(t *testing.T) {
 	}
 }
 
+func TestRecommendationTrustStatesControlOpenQueue(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	recs := []recommendations.Recommendation{
+		{
+			ID:              "rec_protect",
+			Action:          recommendations.ActionReviewInactiveMovie,
+			Title:           "Protected movie",
+			Explanation:     "A cold movie should be protected by the admin.",
+			SpaceSavedBytes: 20,
+			Confidence:      0.88,
+			Source:          "rule:activity-inactive-movie",
+			AffectedPaths:   []string{"/media/protected.mkv"},
+			ServerID:        "jellyfin",
+			ExternalItemID:  "item_protect",
+			Verification:    "path_mapped",
+			Evidence:        map[string]string{"inactiveDays": "900"},
+		},
+		{
+			ID:              "rec_accept",
+			Action:          recommendations.ActionReviewNeverWatchedMovie,
+			Title:           "Accepted movie",
+			Explanation:     "A cold movie accepted for manual review.",
+			SpaceSavedBytes: 30,
+			Confidence:      0.9,
+			Source:          "rule:activity-never-watched",
+			AffectedPaths:   []string{"/media/accepted.mkv"},
+			ServerID:        "plex",
+			ExternalItemID:  "item_accept",
+			Verification:    "local_verified",
+			Evidence:        map[string]string{"ageDays": "600"},
+		},
+	}
+	if err := store.ReplaceRecommendations(recs); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.SetRecommendationState("rec_protect", recommendations.StateProtected); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetRecommendationState("rec_accept", recommendations.StateAcceptedForManualAction); err != nil {
+		t.Fatal(err)
+	}
+
+	open, err := store.ListRecommendations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 1 || open[0].ID != "rec_accept" || open[0].State != recommendations.StateAcceptedForManualAction {
+		t.Fatalf("open recommendations = %#v, want only accepted manual recommendation", open)
+	}
+
+	protected, err := store.GetRecommendation("rec_protect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if protected.State != recommendations.StateProtected || protected.Evidence["inactiveDays"] != "900" {
+		t.Fatalf("protected recommendation = %#v", protected)
+	}
+
+	if err := store.SetRecommendationState("rec_protect", recommendations.StateNew); err != nil {
+		t.Fatal(err)
+	}
+	open, err = store.ListRecommendations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 2 {
+		t.Fatalf("restored protected recommendation count = %d, want 2", len(open))
+	}
+}
+
 func TestStorePersistsProviderSettingsWithRedactedSecrets(t *testing.T) {
 	store, err := Open(t.TempDir())
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 )
 
 type Action string
+type State string
 
 const (
 	ActionReviewDuplicate          Action = "review_duplicate"
@@ -19,6 +20,14 @@ const (
 	ActionReviewInactiveSeries     Action = "review_inactive_series"
 	ActionReviewAbandonedSeries    Action = "review_abandoned_series"
 	ActionReviewUnwatchedDuplicate Action = "review_unwatched_duplicate"
+)
+
+const (
+	StateNew                     State = "new"
+	StateReviewing               State = "reviewing"
+	StateIgnored                 State = "ignored"
+	StateProtected               State = "protected"
+	StateAcceptedForManualAction State = "accepted_for_manual_action"
 )
 
 type MediaFile struct {
@@ -50,6 +59,7 @@ type ActivityMedia struct {
 type Recommendation struct {
 	ID              string            `json:"id"`
 	Action          Action            `json:"action"`
+	State           State             `json:"state"`
 	Title           string            `json:"title"`
 	Explanation     string            `json:"explanation"`
 	SpaceSavedBytes int64             `json:"spaceSavedBytes"`
@@ -69,6 +79,115 @@ type Recommendation struct {
 	FavoriteCount   int               `json:"favoriteCount,omitempty"`
 	Verification    string            `json:"verification,omitempty"`
 	Evidence        map[string]string `json:"evidence,omitempty"`
+}
+
+type Evidence struct {
+	RecommendationID   string            `json:"recommendationId"`
+	State              State             `json:"state"`
+	Title              string            `json:"title"`
+	Explanation        string            `json:"explanation"`
+	Confidence         float64           `json:"confidence"`
+	Destructive        bool              `json:"destructive"`
+	AffectedPaths      []string          `json:"affectedPaths"`
+	SuppressionReasons []string          `json:"suppressionReasons"`
+	Raw                map[string]string `json:"raw"`
+	Storage            StorageEvidence   `json:"storage"`
+	Activity           ActivityEvidence  `json:"activity"`
+	Source             SourceEvidence    `json:"source"`
+	Proof              []ProofPoint      `json:"proof"`
+}
+
+type StorageEvidence struct {
+	SpaceSavedBytes int64  `json:"spaceSavedBytes"`
+	Verification    string `json:"verification"`
+	Risk            string `json:"risk"`
+}
+
+type ActivityEvidence struct {
+	ServerID       string    `json:"serverId,omitempty"`
+	ExternalItemID string    `json:"externalItemId,omitempty"`
+	LastPlayedAt   time.Time `json:"lastPlayedAt,omitempty"`
+	PlayCount      int       `json:"playCount"`
+	UniqueUsers    int       `json:"uniqueUsers"`
+	FavoriteCount  int       `json:"favoriteCount"`
+}
+
+type SourceEvidence struct {
+	Rule         string  `json:"rule"`
+	AI           string  `json:"ai,omitempty"`
+	AIConfidence float64 `json:"aiConfidence,omitempty"`
+}
+
+type ProofPoint struct {
+	Label  string `json:"label"`
+	Value  string `json:"value"`
+	Status string `json:"status"`
+}
+
+func (rec Recommendation) WithDefaults() Recommendation {
+	if rec.State == "" {
+		rec.State = StateNew
+	}
+	if rec.Evidence == nil {
+		rec.Evidence = map[string]string{}
+	}
+	if rec.AffectedPaths == nil {
+		rec.AffectedPaths = []string{}
+	}
+	if rec.AITags == nil {
+		rec.AITags = []string{}
+	}
+	return rec
+}
+
+func BuildEvidence(rec Recommendation) Evidence {
+	rec = rec.WithDefaults()
+	raw := map[string]string{}
+	for key, value := range rec.Evidence {
+		raw[key] = value
+	}
+	storageRisk := storageRisk(rec.Verification, rec.Confidence, rec.Destructive)
+	evidence := Evidence{
+		RecommendationID:   rec.ID,
+		State:              rec.State,
+		Title:              rec.Title,
+		Explanation:        rec.Explanation,
+		Confidence:         rec.Confidence,
+		Destructive:        rec.Destructive,
+		AffectedPaths:      append([]string(nil), rec.AffectedPaths...),
+		SuppressionReasons: suppressionReasons(rec),
+		Raw:                raw,
+		Storage: StorageEvidence{
+			SpaceSavedBytes: rec.SpaceSavedBytes,
+			Verification:    rec.Verification,
+			Risk:            storageRisk,
+		},
+		Activity: ActivityEvidence{
+			ServerID:       rec.ServerID,
+			ExternalItemID: rec.ExternalItemID,
+			LastPlayedAt:   rec.LastPlayedAt,
+			PlayCount:      rec.PlayCount,
+			UniqueUsers:    rec.UniqueUsers,
+			FavoriteCount:  rec.FavoriteCount,
+		},
+		Source: SourceEvidence{
+			Rule:         rec.Source,
+			AI:           rec.AISource,
+			AIConfidence: rec.AIConfidence,
+		},
+	}
+	evidence.Proof = []ProofPoint{
+		{Label: "Deletion mode", Value: "Suggest-only", Status: "safe"},
+		{Label: "Storage proof", Value: verificationLabel(rec.Verification), Status: storageRisk},
+		{Label: "Rule source", Value: rec.Source, Status: "info"},
+	}
+	if rec.ServerID != "" {
+		evidence.Proof = append(evidence.Proof,
+			ProofPoint{Label: "Media server", Value: rec.ServerID, Status: "info"},
+			ProofPoint{Label: "Activity", Value: activityLabel(rec), Status: "info"},
+		)
+	}
+	return evidence
 }
 
 type Engine struct {
@@ -244,6 +363,64 @@ func (engine Engine) GenerateActivity(items []ActivityMedia, now time.Time) []Re
 		return recs[i].SpaceSavedBytes > recs[j].SpaceSavedBytes
 	})
 	return recs
+}
+
+func suppressionReasons(rec Recommendation) []string {
+	reasons := []string{}
+	if rec.FavoriteCount > 0 {
+		reasons = append(reasons, "favorite")
+	}
+	if rec.Confidence < 0.65 {
+		reasons = append(reasons, "low_confidence")
+	}
+	if rec.Verification == "" || rec.Verification == "unmapped" {
+		reasons = append(reasons, "missing_verified_path")
+	}
+	if rec.State == StateProtected {
+		reasons = append(reasons, "user_protected")
+	}
+	return reasons
+}
+
+func storageRisk(verification string, confidence float64, destructive bool) string {
+	if destructive {
+		return "blocked"
+	}
+	switch verification {
+	case "local_verified":
+		if confidence >= 0.85 {
+			return "strong"
+		}
+		return "moderate"
+	case "path_mapped":
+		return "moderate"
+	case "server_reported":
+		return "caution"
+	default:
+		return "unknown"
+	}
+}
+
+func verificationLabel(verification string) string {
+	switch verification {
+	case "local_verified":
+		return "Local file verified"
+	case "path_mapped":
+		return "Path mapped"
+	case "server_reported":
+		return "Server reported"
+	case "unmapped":
+		return "Unmapped"
+	default:
+		return "Unknown"
+	}
+}
+
+func activityLabel(rec Recommendation) string {
+	if rec.PlayCount == 0 {
+		return "Never watched by imported users"
+	}
+	return strconv.Itoa(rec.PlayCount) + " plays across " + strconv.Itoa(rec.UniqueUsers) + " users"
 }
 
 func activityConfidence(matchConfidence float64, verification string) float64 {

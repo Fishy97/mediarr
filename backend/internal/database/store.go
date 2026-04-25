@@ -362,6 +362,7 @@ func (store *Store) migrate() error {
 		`CREATE TABLE IF NOT EXISTS recommendations (
 			id TEXT PRIMARY KEY,
 			action TEXT NOT NULL,
+			state TEXT NOT NULL DEFAULT 'new',
 			title TEXT NOT NULL,
 			explanation TEXT NOT NULL,
 			space_saved_bytes INTEGER NOT NULL,
@@ -562,6 +563,7 @@ func (store *Store) migrate() error {
 		name       string
 		definition string
 	}{
+		{name: "state", definition: "TEXT NOT NULL DEFAULT 'new'"},
 		{name: "ai_rationale", definition: "TEXT NOT NULL DEFAULT ''"},
 		{name: "ai_tags", definition: "TEXT NOT NULL DEFAULT '[]'"},
 		{name: "ai_confidence", definition: "REAL NOT NULL DEFAULT 0"},
@@ -1664,20 +1666,30 @@ func (store *Store) ReplaceRecommendations(recs []recommendations.Recommendation
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`DELETE FROM recommendations WHERE ignored_at IS NULL`); err != nil {
+	existingStates, err := recommendationStates(tx)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM recommendations WHERE ignored_at IS NULL AND state NOT IN ('ignored', 'protected')`); err != nil {
 		return err
 	}
 	stmt, err := tx.Prepare(`INSERT INTO recommendations (
-		id, action, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive,
+		id, action, state, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive,
 		ai_rationale, ai_tags, ai_confidence, ai_source,
 		server_id, external_item_id, last_played_at, play_count, unique_users, favorite_count, verification, evidence
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
 	for _, rec := range recs {
+		rec = rec.WithDefaults()
+		if existingState := existingStates[rec.ID]; existingState == recommendations.StateIgnored || existingState == recommendations.StateProtected {
+			continue
+		} else if existingState != "" {
+			rec.State = existingState
+		}
 		paths, err := json.Marshal(rec.AffectedPaths)
 		if err != nil {
 			return err
@@ -1705,6 +1717,7 @@ func (store *Store) ReplaceRecommendations(recs []recommendations.Recommendation
 		if _, err := stmt.Exec(
 			rec.ID,
 			string(rec.Action),
+			string(normalizeRecommendationState(rec.State)),
 			rec.Title,
 			rec.Explanation,
 			rec.SpaceSavedBytes,
@@ -1735,11 +1748,12 @@ func (store *Store) ListRecommendations() ([]recommendations.Recommendation, err
 	if store == nil || store.DB == nil {
 		return nil, errors.New("nil database store")
 	}
-	rows, err := store.DB.Query(`SELECT id, action, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive,
+	rows, err := store.DB.Query(`SELECT id, action, state, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive,
 			ai_rationale, ai_tags, ai_confidence, ai_source,
 			server_id, external_item_id, last_played_at, play_count, unique_users, favorite_count, verification, evidence
 		FROM recommendations
 		WHERE ignored_at IS NULL
+		AND state NOT IN ('ignored', 'protected')
 		ORDER BY space_saved_bytes DESC, id`)
 	if err != nil {
 		return nil, err
@@ -1748,77 +1762,54 @@ func (store *Store) ListRecommendations() ([]recommendations.Recommendation, err
 
 	recs := []recommendations.Recommendation{}
 	for rows.Next() {
-		var rec recommendations.Recommendation
-		var action string
-		var paths string
-		var aiTags string
-		var destructive int
-		var lastPlayed sql.NullString
-		var evidence string
-		if err := rows.Scan(
-			&rec.ID,
-			&action,
-			&rec.Title,
-			&rec.Explanation,
-			&rec.SpaceSavedBytes,
-			&rec.Confidence,
-			&rec.Source,
-			&paths,
-			&destructive,
-			&rec.AIRationale,
-			&aiTags,
-			&rec.AIConfidence,
-			&rec.AISource,
-			&rec.ServerID,
-			&rec.ExternalItemID,
-			&lastPlayed,
-			&rec.PlayCount,
-			&rec.UniqueUsers,
-			&rec.FavoriteCount,
-			&rec.Verification,
-			&evidence,
-		); err != nil {
+		rec, err := scanRecommendation(rows)
+		if err != nil {
 			return nil, err
 		}
-		rec.Action = recommendations.Action(action)
-		rec.Destructive = destructive == 1
-		rec.LastPlayedAt = parseSQLTime(lastPlayed)
-		if err := json.Unmarshal([]byte(paths), &rec.AffectedPaths); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal([]byte(aiTags), &rec.AITags); err != nil {
-			return nil, err
-		}
-		if rec.AITags == nil {
-			rec.AITags = []string{}
-		}
-		if evidence == "" {
-			evidence = "{}"
-		}
-		if err := json.Unmarshal([]byte(evidence), &rec.Evidence); err != nil {
-			return nil, err
-		}
-		if rec.Evidence == nil {
-			rec.Evidence = map[string]string{}
-		}
-		recs = append(recs, rec)
+		recs = append(recs, rec.WithDefaults())
 	}
 	return recs, rows.Err()
+}
+
+func (store *Store) GetRecommendation(id string) (recommendations.Recommendation, error) {
+	if store == nil || store.DB == nil {
+		return recommendations.Recommendation{}, errors.New("nil database store")
+	}
+	return scanRecommendation(store.DB.QueryRow(`SELECT id, action, state, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive,
+			ai_rationale, ai_tags, ai_confidence, ai_source,
+			server_id, external_item_id, last_played_at, play_count, unique_users, favorite_count, verification, evidence
+		FROM recommendations
+		WHERE id = ?`, strings.TrimSpace(id)))
+}
+
+func (store *Store) SetRecommendationState(id string, state recommendations.State) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	state = normalizeRecommendationState(state)
+	if _, err := store.GetRecommendation(id); err != nil {
+		return err
+	}
+	ignoredAt := sql.NullString{}
+	if state == recommendations.StateIgnored {
+		ignoredAt = sql.NullString{String: time.Now().UTC().Format(time.RFC3339Nano), Valid: true}
+	}
+	_, err := store.DB.Exec(`UPDATE recommendations SET state = ?, ignored_at = ? WHERE id = ?`, string(state), ignoredAt, strings.TrimSpace(id))
+	return err
 }
 
 func (store *Store) IgnoreRecommendation(id string) error {
 	if store == nil || store.DB == nil {
 		return errors.New("nil database store")
 	}
-	_, err := store.DB.Exec(`UPDATE recommendations SET ignored_at = ? WHERE id = ?`, time.Now().UTC().Format(time.RFC3339Nano), id)
-	return err
+	return store.SetRecommendationState(id, recommendations.StateIgnored)
 }
 
 func (store *Store) RestoreRecommendation(id string) error {
 	if store == nil || store.DB == nil {
 		return errors.New("nil database store")
 	}
-	_, err := store.DB.Exec(`UPDATE recommendations SET ignored_at = NULL WHERE id = ?`, id)
+	_, err := store.DB.Exec(`UPDATE recommendations SET state = ?, ignored_at = NULL WHERE id = ?`, string(recommendations.StateNew), strings.TrimSpace(id))
 	return err
 }
 
@@ -2209,6 +2200,21 @@ func knownJobStatus(status string) bool {
 	}
 }
 
+func normalizeRecommendationState(state recommendations.State) recommendations.State {
+	switch recommendations.State(strings.ToLower(strings.TrimSpace(string(state)))) {
+	case recommendations.StateReviewing:
+		return recommendations.StateReviewing
+	case recommendations.StateIgnored:
+		return recommendations.StateIgnored
+	case recommendations.StateProtected:
+		return recommendations.StateProtected
+	case recommendations.StateAcceptedForManualAction:
+		return recommendations.StateAcceptedForManualAction
+	default:
+		return recommendations.StateNew
+	}
+}
+
 func normalizeJobEventLevel(level string) string {
 	switch strings.ToLower(strings.TrimSpace(level)) {
 	case "debug", "warning", "error":
@@ -2271,6 +2277,88 @@ func defaultString(value string, fallback string) string {
 
 type jobScanner interface {
 	Scan(dest ...any) error
+}
+
+type recommendationScanner interface {
+	Scan(dest ...any) error
+}
+
+func recommendationStates(tx *sql.Tx) (map[string]recommendations.State, error) {
+	rows, err := tx.Query(`SELECT id, state FROM recommendations`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	states := map[string]recommendations.State{}
+	for rows.Next() {
+		var id string
+		var state string
+		if err := rows.Scan(&id, &state); err != nil {
+			return nil, err
+		}
+		states[id] = normalizeRecommendationState(recommendations.State(state))
+	}
+	return states, rows.Err()
+}
+
+func scanRecommendation(scanner recommendationScanner) (recommendations.Recommendation, error) {
+	var rec recommendations.Recommendation
+	var action string
+	var state string
+	var paths string
+	var aiTags string
+	var destructive int
+	var lastPlayed sql.NullString
+	var evidence string
+	if err := scanner.Scan(
+		&rec.ID,
+		&action,
+		&state,
+		&rec.Title,
+		&rec.Explanation,
+		&rec.SpaceSavedBytes,
+		&rec.Confidence,
+		&rec.Source,
+		&paths,
+		&destructive,
+		&rec.AIRationale,
+		&aiTags,
+		&rec.AIConfidence,
+		&rec.AISource,
+		&rec.ServerID,
+		&rec.ExternalItemID,
+		&lastPlayed,
+		&rec.PlayCount,
+		&rec.UniqueUsers,
+		&rec.FavoriteCount,
+		&rec.Verification,
+		&evidence,
+	); err != nil {
+		return recommendations.Recommendation{}, err
+	}
+	rec.Action = recommendations.Action(action)
+	rec.State = normalizeRecommendationState(recommendations.State(state))
+	rec.Destructive = destructive == 1
+	rec.LastPlayedAt = parseSQLTime(lastPlayed)
+	if paths == "" {
+		paths = "[]"
+	}
+	if err := json.Unmarshal([]byte(paths), &rec.AffectedPaths); err != nil {
+		return recommendations.Recommendation{}, err
+	}
+	if aiTags == "" {
+		aiTags = "[]"
+	}
+	if err := json.Unmarshal([]byte(aiTags), &rec.AITags); err != nil {
+		return recommendations.Recommendation{}, err
+	}
+	if evidence == "" {
+		evidence = "{}"
+	}
+	if err := json.Unmarshal([]byte(evidence), &rec.Evidence); err != nil {
+		return recommendations.Recommendation{}, err
+	}
+	return rec.WithDefaults(), nil
 }
 
 func (store *Store) jobFromQuery(query string, args ...any) (Job, error) {
