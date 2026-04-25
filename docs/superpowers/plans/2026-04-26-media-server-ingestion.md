@@ -204,7 +204,7 @@ cd backend && go test ./internal/database
 
 Expected: pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/internal/database/store.go backend/internal/database/integration_activity_test.go
@@ -220,7 +220,7 @@ git push
 - Modify: `backend/internal/api/server.go`
 - Add tests: `backend/internal/api/integration_sync_test.go`
 
-- [ ] **Step 1: Write failing Jellyfin connector test**
+- [x] **Step 1: Write failing Jellyfin connector test**
 
 Create `backend/internal/integrations/jellyfin_test.go` using `httptest.Server`. The fake server must support `/System/Info`, `/Users`, and `/Items`.
 
@@ -231,7 +231,7 @@ Assert:
 - a movie item is imported with path, provider IDs, media source size, and user data
 - rollup uses `PlayCount`, `LastPlayedDate`, and `IsFavorite`
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 cd backend && go test ./internal/integrations -run Jellyfin
@@ -239,7 +239,7 @@ cd backend && go test ./internal/integrations -run Jellyfin
 
 Expected: fail because `SyncJellyfin` is undefined.
 
-- [ ] **Step 3: Implement Jellyfin sync**
+- [x] **Step 3: Implement Jellyfin sync**
 
 Add:
 
@@ -249,7 +249,7 @@ func SyncJellyfin(ctx context.Context, options Options, mappings []database.Path
 
 Use pagination with `StartIndex` and `Limit=200`. Request item fields needed for path/provider/user data. Keep the HTTP client timeout bounded. Do not log or return the API token.
 
-- [ ] **Step 4: Write failing API sync test**
+- [x] **Step 4: Write failing API sync test**
 
 In `backend/internal/api/integration_sync_test.go`, assert:
 
@@ -258,7 +258,7 @@ In `backend/internal/api/integration_sync_test.go`, assert:
 - unauthenticated requests are rejected when auth is configured
 - `GET /api/v1/activity/rollups` returns imported activity
 
-- [ ] **Step 5: Implement API routes**
+- [x] **Step 5: Implement API routes**
 
 Extend `integrationActionHandler` to support `/sync` and add:
 
@@ -270,7 +270,7 @@ server.mux.HandleFunc("/api/v1/path-mappings/", server.pathMappingHandler)
 
 After successful Jellyfin sync, persist the snapshot, regenerate recommendations, and audit `integration.sync_completed`.
 
-- [ ] **Step 6: Run tests**
+- [x] **Step 6: Run tests**
 
 ```bash
 cd backend && go test ./internal/integrations ./internal/api

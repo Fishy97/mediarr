@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -112,6 +113,9 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("/api/v1/provider-settings/", server.providerSettingHandler)
 	server.mux.HandleFunc("/api/v1/integrations", server.integrationsHandler)
 	server.mux.HandleFunc("/api/v1/integrations/", server.integrationActionHandler)
+	server.mux.HandleFunc("/api/v1/activity/rollups", server.activityRollupsHandler)
+	server.mux.HandleFunc("/api/v1/path-mappings", server.pathMappingsHandler)
+	server.mux.HandleFunc("/api/v1/path-mappings/", server.pathMappingHandler)
 	server.mux.HandleFunc("/api/v1/ai/status", server.aiStatusHandler)
 	server.mux.HandleFunc("/api/v1/backups", server.backupsHandler)
 	server.mux.HandleFunc("/api/v1/backups/restore", server.backupRestoreHandler)
@@ -532,24 +536,188 @@ func (server *Server) integrationsHandler(w http.ResponseWriter, r *http.Request
 }
 
 func (server *Server) integrationActionHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		methodNotAllowed(w, r)
-		return
-	}
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/integrations/"), "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] != "refresh" {
+	if len(parts) != 2 || parts[0] == "" {
 		http.NotFound(w, r)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
-	defer cancel()
-	result, err := integrations.Refresh(ctx, server.integrationOptions, parts[0])
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	switch parts[1] {
+	case "refresh":
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w, r)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+		defer cancel()
+		result, err := integrations.Refresh(ctx, server.integrationOptions, parts[0])
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		server.record("integration.refresh_requested", "Media-server library refresh requested", map[string]any{"targetId": result.TargetID, "status": result.Status})
+		writeJSON(w, http.StatusAccepted, envelope{Data: result})
+	case "sync":
+		server.integrationSyncHandler(w, r, parts[0])
+	case "items":
+		server.integrationItemsHandler(w, r, parts[0])
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (server *Server) integrationSyncHandler(w http.ResponseWriter, r *http.Request, targetID string) {
+	if server.store == nil {
+		http.Error(w, "integration store is not configured", http.StatusBadRequest)
 		return
 	}
-	server.record("integration.refresh_requested", "Media-server library refresh requested", map[string]any{"targetId": result.TargetID, "status": result.Status})
-	writeJSON(w, http.StatusAccepted, envelope{Data: result})
+	switch r.Method {
+	case http.MethodGet:
+		job, err := server.store.LatestMediaSyncJob(targetID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, envelope{Data: job})
+	case http.MethodPost:
+		mappings, err := server.store.ListPathMappings()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+		defer cancel()
+		snapshot, err := syncIntegrationSnapshot(ctx, server.integrationOptions, targetID, mappings)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := server.store.ReplaceMediaServerSnapshot(snapshot); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := server.regenerateRecommendationsFromCatalog(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		server.record("integration.sync_completed", "Media-server inventory and activity sync completed", map[string]any{"targetId": targetID, "items": snapshot.Job.ItemsImported, "rollups": snapshot.Job.RollupsImported})
+		writeJSON(w, http.StatusAccepted, envelope{Data: snapshot.Job})
+	default:
+		methodNotAllowed(w, r)
+	}
+}
+
+func (server *Server) integrationItemsHandler(w http.ResponseWriter, r *http.Request, targetID string) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.store == nil {
+		http.Error(w, "integration store is not configured", http.StatusBadRequest)
+		return
+	}
+	items, err := server.store.ListMediaServerItems(database.MediaServerItemFilter{
+		ServerID:     targetID,
+		UnmappedOnly: r.URL.Query().Get("unmapped") == "true",
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: items})
+}
+
+func syncIntegrationSnapshot(ctx context.Context, options integrations.Options, targetID string, mappings []database.PathMapping) (database.MediaServerSnapshot, error) {
+	switch strings.ToLower(strings.TrimSpace(targetID)) {
+	case "jellyfin":
+		return integrations.SyncJellyfin(ctx, options, mappings)
+	default:
+		return database.MediaServerSnapshot{}, errors.New("integration sync is not supported for this target")
+	}
+}
+
+func (server *Server) activityRollupsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.store == nil {
+		http.Error(w, "activity store is not configured", http.StatusBadRequest)
+		return
+	}
+	rollups, err := server.store.ListMediaActivityRollups(r.URL.Query().Get("serverId"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: rollups})
+}
+
+func (server *Server) pathMappingsHandler(w http.ResponseWriter, r *http.Request) {
+	if server.store == nil {
+		http.Error(w, "path mapping store is not configured", http.StatusBadRequest)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		mappings, err := server.store.ListPathMappings()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, envelope{Data: mappings})
+	case http.MethodPost:
+		var request database.PathMapping
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		mapping, err := server.store.UpsertPathMapping(request)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		server.record("path_mapping.upserted", "Integration path mapping upserted", map[string]any{"id": mapping.ID, "serverId": mapping.ServerID})
+		writeJSON(w, http.StatusCreated, envelope{Data: mapping})
+	default:
+		methodNotAllowed(w, r)
+	}
+}
+
+func (server *Server) pathMappingHandler(w http.ResponseWriter, r *http.Request) {
+	if server.store == nil {
+		http.Error(w, "path mapping store is not configured", http.StatusBadRequest)
+		return
+	}
+	id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/path-mappings/"), "/")
+	if id == "" {
+		http.NotFound(w, r)
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var request database.PathMapping
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		request.ID = id
+		mapping, err := server.store.UpsertPathMapping(request)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		server.record("path_mapping.upserted", "Integration path mapping upserted", map[string]any{"id": mapping.ID, "serverId": mapping.ServerID})
+		writeJSON(w, http.StatusOK, envelope{Data: mapping})
+	case http.MethodDelete:
+		if err := server.store.DeletePathMapping(id); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		server.record("path_mapping.deleted", "Integration path mapping deleted", map[string]any{"id": id})
+		writeJSON(w, http.StatusOK, envelope{Data: map[string]bool{"ok": true}})
+	default:
+		methodNotAllowed(w, r)
+	}
 }
 
 func (server *Server) aiStatusHandler(w http.ResponseWriter, r *http.Request) {
