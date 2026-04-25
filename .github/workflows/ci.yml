@@ -41,6 +41,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - run: |
+          mkdir -p config
+          {
+            echo "PUID=$(id -u)"
+            echo "PGID=$(id -g)"
+          } > .env
       - run: docker compose config --quiet
       - run: docker compose --profile ai config --quiet
       - run: docker compose build mediarr
