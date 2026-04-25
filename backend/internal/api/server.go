@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Fishy97/mediaar/backend/internal/audit"
-	"github.com/Fishy97/mediaar/backend/internal/database"
-	"github.com/Fishy97/mediaar/backend/internal/filescan"
-	"github.com/Fishy97/mediaar/backend/internal/integrations"
-	"github.com/Fishy97/mediaar/backend/internal/metadata"
-	"github.com/Fishy97/mediaar/backend/internal/recommendations"
+	"github.com/Fishy97/mediarr/backend/internal/audit"
+	"github.com/Fishy97/mediarr/backend/internal/database"
+	"github.com/Fishy97/mediarr/backend/internal/filescan"
+	"github.com/Fishy97/mediarr/backend/internal/integrations"
+	"github.com/Fishy97/mediarr/backend/internal/metadata"
+	"github.com/Fishy97/mediarr/backend/internal/recommendations"
 )
 
 type Deps struct {
@@ -91,7 +91,7 @@ func (server *Server) routes() {
 func (server *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":    "ok",
-		"service":   "mediaar",
+		"service":   "mediarr",
 		"timestamp": time.Now().UTC(),
 	})
 }

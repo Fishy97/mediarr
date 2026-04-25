@@ -13,7 +13,7 @@ func CreateBackup(configDir string, backupDir string) (string, error) {
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		return "", err
 	}
-	backupPath := filepath.Join(backupDir, "mediaar-"+time.Now().UTC().Format("20060102T150405Z")+".zip")
+	backupPath := filepath.Join(backupDir, "mediarr-"+time.Now().UTC().Format("20060102T150405Z")+".zip")
 	file, err := os.Create(backupPath)
 	if err != nil {
 		return "", err
@@ -24,7 +24,7 @@ func CreateBackup(configDir string, backupDir string) (string, error) {
 	defer archive.Close()
 
 	include := map[string]bool{
-		"mediaar.db":    true,
+		"mediarr.db":    true,
 		"settings.json": true,
 		"audit":         true,
 		"providers":     true,

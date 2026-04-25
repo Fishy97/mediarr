@@ -1,4 +1,4 @@
-module github.com/Fishy97/mediaar/backend
+module github.com/Fishy97/mediarr/backend
 
 go 1.23
 

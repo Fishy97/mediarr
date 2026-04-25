@@ -1,6 +1,6 @@
 # Docker Compose Deployment
 
-Mediaar is designed for NAS and home-server deployments.
+Mediarr is designed for NAS and home-server deployments.
 
 1. Copy `.env.example` to `.env`.
 2. Set `MOVIES_DIR`, `SERIES_DIR`, and `ANIME_DIR`.

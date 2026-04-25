@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Fishy97/mediaar/backend/internal/catalog"
-	"github.com/Fishy97/mediaar/backend/internal/probe"
+	"github.com/Fishy97/mediarr/backend/internal/catalog"
+	"github.com/Fishy97/mediarr/backend/internal/probe"
 )
 
 type Library struct {

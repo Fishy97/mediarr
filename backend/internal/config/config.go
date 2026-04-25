@@ -1,0 +1,65 @@
+package config
+
+import (
+	"os"
+	"strconv"
+	"strings"
+)
+
+type Config struct {
+	Addr             string
+	ConfigDir        string
+	FrontendDir      string
+	AdminToken       string
+	OllamaURL        string
+	OversizedBytes   int64
+	DefaultLibraries []LibraryConfig
+}
+
+type LibraryConfig struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Kind string `json:"kind"`
+	Root string `json:"root"`
+}
+
+func Load() Config {
+	cfg := Config{
+		Addr:           envAny(":8080", "MEDIARR_ADDR", "MEDIAAR_ADDR", "MEDIA_STEWARD_ADDR"),
+		ConfigDir:      envAny("/config", "MEDIARR_CONFIG_DIR", "MEDIAAR_CONFIG_DIR", "MEDIA_STEWARD_CONFIG_DIR"),
+		FrontendDir:    envAny("./web", "MEDIARR_FRONTEND_DIR", "MEDIAAR_FRONTEND_DIR", "MEDIA_STEWARD_FRONTEND_DIR"),
+		AdminToken:     envAny("", "MEDIARR_ADMIN_TOKEN", "MEDIAAR_ADMIN_TOKEN", "MEDIA_STEWARD_ADMIN_TOKEN"),
+		OllamaURL:      envAny("http://ollama:11434", "MEDIARR_OLLAMA_URL", "MEDIAAR_OLLAMA_URL", "MEDIA_STEWARD_OLLAMA_URL"),
+		OversizedBytes: envInt64Any(60_000_000_000, "MEDIARR_OVERSIZED_BYTES", "MEDIAAR_OVERSIZED_BYTES", "MEDIA_STEWARD_OVERSIZED_BYTES"),
+	}
+	cfg.DefaultLibraries = []LibraryConfig{
+		{ID: "movies", Name: "Movies", Kind: "movies", Root: envAny("/media/movies", "MEDIARR_MOVIES_DIR", "MEDIAAR_MOVIES_DIR", "MEDIA_STEWARD_MOVIES_DIR")},
+		{ID: "series", Name: "Series", Kind: "series", Root: envAny("/media/series", "MEDIARR_SERIES_DIR", "MEDIAAR_SERIES_DIR", "MEDIA_STEWARD_SERIES_DIR")},
+		{ID: "anime", Name: "Anime", Kind: "anime", Root: envAny("/media/anime", "MEDIARR_ANIME_DIR", "MEDIAAR_ANIME_DIR", "MEDIA_STEWARD_ANIME_DIR")},
+	}
+	return cfg
+}
+
+func envAny(fallback string, keys ...string) string {
+	for _, key := range keys {
+		value := strings.TrimSpace(os.Getenv(key))
+		if value != "" {
+			return value
+		}
+	}
+	return fallback
+}
+
+func envInt64Any(fallback int64, keys ...string) int64 {
+	for _, key := range keys {
+		value := strings.TrimSpace(os.Getenv(key))
+		if value == "" {
+			continue
+		}
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err == nil {
+			return parsed
+		}
+	}
+	return fallback
+}

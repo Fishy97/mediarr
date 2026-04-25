@@ -1,6 +1,6 @@
 # Contributing
 
-Mediaar is intended to be community-run infrastructure for self-hosters.
+Mediarr is intended to be community-run infrastructure for self-hosters.
 
 ## Development Rules
 

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Fishy97/mediaar/backend/internal/catalog"
-	"github.com/Fishy97/mediaar/backend/internal/filescan"
-	"github.com/Fishy97/mediaar/backend/internal/recommendations"
+	"github.com/Fishy97/mediarr/backend/internal/catalog"
+	"github.com/Fishy97/mediarr/backend/internal/filescan"
+	"github.com/Fishy97/mediarr/backend/internal/recommendations"
 )
 
 func TestStorePersistsCatalogItemsFromScan(t *testing.T) {
@@ -80,24 +80,28 @@ func TestStoreReturnsEmptyCatalogList(t *testing.T) {
 	}
 }
 
-func TestOpenMigratesLegacyMediaStewardDatabaseFilename(t *testing.T) {
-	configDir := t.TempDir()
-	legacyPath := filepath.Join(configDir, "media-steward.db")
-	if err := os.WriteFile(legacyPath, []byte{}, 0o600); err != nil {
-		t.Fatal(err)
-	}
+func TestOpenMigratesLegacyDatabaseFilenames(t *testing.T) {
+	for _, legacyName := range []string{"mediaar.db", "media-steward.db"} {
+		t.Run(legacyName, func(t *testing.T) {
+			configDir := t.TempDir()
+			legacyPath := filepath.Join(configDir, legacyName)
+			if err := os.WriteFile(legacyPath, []byte{}, 0o600); err != nil {
+				t.Fatal(err)
+			}
 
-	store, err := Open(configDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
+			store, err := Open(configDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
 
-	if _, err := os.Stat(filepath.Join(configDir, "mediaar.db")); err != nil {
-		t.Fatalf("mediaar db missing after migration: %v", err)
-	}
-	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
-		t.Fatalf("legacy database should be renamed, stat err = %v", err)
+			if _, err := os.Stat(filepath.Join(configDir, "mediarr.db")); err != nil {
+				t.Fatalf("mediarr db missing after migration: %v", err)
+			}
+			if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+				t.Fatalf("legacy database should be renamed, stat err = %v", err)
+			}
+		})
 	}
 }
 

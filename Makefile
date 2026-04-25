@@ -10,7 +10,7 @@ test-frontend:
 
 build:
 	npm --prefix frontend run build
-	cd backend && go build ./cmd/mediaar
+	cd backend && go build ./cmd/mediarr
 
 docker-up:
 	docker compose up --build

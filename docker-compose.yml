@@ -1,18 +1,21 @@
-name: mediaar
+name: mediarr
 
 services:
-  mediaar:
+  mediarr:
     build: .
-    image: mediaar:local
-    container_name: mediaar
+    image: mediarr:local
+    container_name: mediarr
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"
     ports:
       - "8080:8080"
     environment:
+      MEDIARR_ADMIN_TOKEN: ${MEDIARR_ADMIN_TOKEN:-}
+      MEDIARR_OVERSIZED_BYTES: ${MEDIARR_OVERSIZED_BYTES:-60000000000}
+      MEDIARR_OLLAMA_URL: ${MEDIARR_OLLAMA_URL:-http://ollama:11434}
       MEDIAAR_ADMIN_TOKEN: ${MEDIAAR_ADMIN_TOKEN:-}
-      MEDIAAR_OVERSIZED_BYTES: ${MEDIAAR_OVERSIZED_BYTES:-60000000000}
-      MEDIAAR_OLLAMA_URL: ${MEDIAAR_OLLAMA_URL:-http://ollama:11434}
+      MEDIAAR_OVERSIZED_BYTES: ${MEDIAAR_OVERSIZED_BYTES:-}
+      MEDIAAR_OLLAMA_URL: ${MEDIAAR_OLLAMA_URL:-}
       MEDIA_STEWARD_ADMIN_TOKEN: ${MEDIA_STEWARD_ADMIN_TOKEN:-}
       MEDIA_STEWARD_OVERSIZED_BYTES: ${MEDIA_STEWARD_OVERSIZED_BYTES:-}
       MEDIA_STEWARD_OLLAMA_URL: ${MEDIA_STEWARD_OLLAMA_URL:-}
@@ -29,7 +32,7 @@ services:
       start_period: 15s
   ollama:
     image: ollama/ollama:latest
-    container_name: mediaar-ollama
+    container_name: mediarr-ollama
     restart: unless-stopped
     profiles: ["ai"]
     volumes:

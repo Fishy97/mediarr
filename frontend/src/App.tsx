@@ -56,7 +56,7 @@ export function App() {
       setIntegrations(integrationRows);
       setError(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to load Mediaar');
+      setError(caught instanceof Error ? caught.message : 'Unable to load Mediarr');
     }
   }
 
@@ -102,7 +102,7 @@ export function App() {
         <div className="brand">
           <div className="brand-mark"><SearchCheck size={20} /></div>
           <div>
-            <strong>Mediaar</strong>
+            <strong>Mediarr</strong>
             <span>Library control plane</span>
           </div>
         </div>

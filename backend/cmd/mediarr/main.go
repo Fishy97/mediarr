@@ -4,13 +4,13 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/Fishy97/mediaar/backend/internal/api"
-	"github.com/Fishy97/mediaar/backend/internal/audit"
-	"github.com/Fishy97/mediaar/backend/internal/auth"
-	"github.com/Fishy97/mediaar/backend/internal/config"
-	"github.com/Fishy97/mediaar/backend/internal/database"
-	"github.com/Fishy97/mediaar/backend/internal/filescan"
-	"github.com/Fishy97/mediaar/backend/internal/recommendations"
+	"github.com/Fishy97/mediarr/backend/internal/api"
+	"github.com/Fishy97/mediarr/backend/internal/audit"
+	"github.com/Fishy97/mediarr/backend/internal/auth"
+	"github.com/Fishy97/mediarr/backend/internal/config"
+	"github.com/Fishy97/mediarr/backend/internal/database"
+	"github.com/Fishy97/mediarr/backend/internal/filescan"
+	"github.com/Fishy97/mediarr/backend/internal/recommendations"
 )
 
 func main() {
@@ -48,7 +48,7 @@ func main() {
 	})
 	handler := auth.Middleware{AdminToken: cfg.AdminToken}.Wrap(server)
 
-	log.Printf("Mediaar listening on %s", cfg.Addr)
+	log.Printf("Mediarr listening on %s", cfg.Addr)
 	if err := http.ListenAndServe(cfg.Addr, handler); err != nil {
 		log.Fatal(err)
 	}

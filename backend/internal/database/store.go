@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Fishy97/mediaar/backend/internal/catalog"
-	"github.com/Fishy97/mediaar/backend/internal/filescan"
-	"github.com/Fishy97/mediaar/backend/internal/recommendations"
+	"github.com/Fishy97/mediarr/backend/internal/catalog"
+	"github.com/Fishy97/mediarr/backend/internal/filescan"
+	"github.com/Fishy97/mediarr/backend/internal/recommendations"
 
 	_ "modernc.org/sqlite"
 )
@@ -56,14 +56,17 @@ func Open(configDir string) (*Store, error) {
 }
 
 func databasePath(configDir string) (string, error) {
-	current := filepath.Join(configDir, "mediaar.db")
-	legacy := filepath.Join(configDir, "media-steward.db")
+	current := filepath.Join(configDir, "mediarr.db")
 	if _, err := os.Stat(current); err == nil {
 		return current, nil
 	}
-	if _, err := os.Stat(legacy); err == nil {
-		if err := os.Rename(legacy, current); err != nil {
-			return "", err
+	for _, legacy := range []string{"mediaar.db", "media-steward.db"} {
+		legacyPath := filepath.Join(configDir, legacy)
+		if _, err := os.Stat(legacyPath); err == nil {
+			if err := os.Rename(legacyPath, current); err != nil {
+				return "", err
+			}
+			return current, nil
 		}
 	}
 	return current, nil

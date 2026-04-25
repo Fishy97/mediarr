@@ -7,8 +7,7 @@ coverage/
 *.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
-backend/media-steward
-backend/medi-steward
+backend/mediarr
 backend/coverage.out
-config/
+/config/
 tmp/
