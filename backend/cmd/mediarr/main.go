@@ -10,6 +10,7 @@ import (
 	"github.com/Fishy97/mediarr/backend/internal/config"
 	"github.com/Fishy97/mediarr/backend/internal/database"
 	"github.com/Fishy97/mediarr/backend/internal/filescan"
+	"github.com/Fishy97/mediarr/backend/internal/metadata"
 	"github.com/Fishy97/mediarr/backend/internal/recommendations"
 )
 
@@ -45,9 +46,14 @@ func main() {
 		Libraries:   libraries,
 		Audit:       auditLog,
 		Auth:        &authService,
-		Scanner:     filescan.Scanner{Probe: true},
-		Engine:      recommendations.Engine{OversizedThresholdBytes: cfg.OversizedBytes},
-		Store:       store,
+		Providers: metadata.DefaultsWithOptions(metadata.Options{
+			TMDbToken:           cfg.TMDbToken,
+			TheTVDBAPIKey:       cfg.TheTVDBAPIKey,
+			OpenSubtitlesAPIKey: cfg.OpenSubtitlesKey,
+		}),
+		Scanner: filescan.Scanner{Probe: true},
+		Engine:  recommendations.Engine{OversizedThresholdBytes: cfg.OversizedBytes},
+		Store:   store,
 	})
 	handler := auth.Middleware{AdminToken: cfg.AdminToken, Service: &authService}.Wrap(server)
 

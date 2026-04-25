@@ -80,6 +80,96 @@ func TestStoreReturnsEmptyCatalogList(t *testing.T) {
 	}
 }
 
+func TestStorePrunesStaleFilesForScannedLibrary(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC()
+	first := filescan.Result{
+		LibraryID:   "movies",
+		CompletedAt: now,
+		Items: []filescan.Item{
+			{
+				ID:          "file_keep",
+				LibraryID:   "movies",
+				Path:        "/media/movies/Keep.2020.mkv",
+				Fingerprint: "keep",
+				ModifiedAt:  now,
+				Parsed: catalog.ParsedMedia{
+					Kind:         catalog.KindMovie,
+					Title:        "Keep",
+					Year:         2020,
+					CanonicalKey: "movie:keep:2020",
+				},
+			},
+			{
+				ID:          "file_gone",
+				LibraryID:   "movies",
+				Path:        "/media/movies/Gone.2020.mkv",
+				Fingerprint: "gone",
+				ModifiedAt:  now,
+				Parsed: catalog.ParsedMedia{
+					Kind:         catalog.KindMovie,
+					Title:        "Gone",
+					Year:         2020,
+					CanonicalKey: "movie:gone:2020",
+				},
+			},
+		},
+	}
+	if err := store.SaveScan(first); err != nil {
+		t.Fatal(err)
+	}
+
+	second := filescan.Result{
+		LibraryID:   "movies",
+		CompletedAt: now.Add(time.Minute),
+		Items:       first.Items[:1],
+	}
+	if err := store.SaveScan(second); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := store.ListCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Path != "/media/movies/Keep.2020.mkv" {
+		t.Fatalf("stale pruning failed: %#v", items)
+	}
+}
+
+func TestProviderCacheHonorsExpiry(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC()
+	if err := store.SetProviderCache("tmdb", "movie:arrival", `{"id":1}`, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	body, ok, err := store.GetProviderCache("tmdb", "movie:arrival", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || body != `{"id":1}` {
+		t.Fatalf("cache body = %q ok=%v", body, ok)
+	}
+
+	body, ok, err = store.GetProviderCache("tmdb", "movie:arrival", now.Add(2*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok || body != "" {
+		t.Fatalf("expired cache body = %q ok=%v", body, ok)
+	}
+}
+
 func TestOpenMigratesLegacyDatabaseFilenames(t *testing.T) {
 	for _, legacyName := range []string{"mediaar.db", "media-steward.db"} {
 		t.Run(legacyName, func(t *testing.T) {

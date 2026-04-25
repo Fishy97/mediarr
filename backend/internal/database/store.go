@@ -374,7 +374,29 @@ func (store *Store) SaveScan(scan filescan.Result) error {
 			return err
 		}
 	}
+	if err := pruneStaleMedia(tx, scan.LibraryID, scan.Items); err != nil {
+		return err
+	}
 	return tx.Commit()
+}
+
+func pruneStaleMedia(tx *sql.Tx, libraryID string, items []filescan.Item) error {
+	if libraryID == "" {
+		return nil
+	}
+	if len(items) == 0 {
+		_, err := tx.Exec(`DELETE FROM media_files WHERE library_id = ?`, libraryID)
+		return err
+	}
+	placeholders := make([]string, 0, len(items))
+	args := make([]any, 0, len(items)+1)
+	args = append(args, libraryID)
+	for _, item := range items {
+		placeholders = append(placeholders, "?")
+		args = append(args, item.Path)
+	}
+	_, err := tx.Exec(`DELETE FROM media_files WHERE library_id = ? AND path NOT IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	return err
 }
 
 func (store *Store) ListCatalog() ([]CatalogItem, error) {
@@ -480,4 +502,50 @@ func (store *Store) ListRecommendations() ([]recommendations.Recommendation, err
 		recs = append(recs, rec)
 	}
 	return recs, rows.Err()
+}
+
+func (store *Store) SetProviderCache(provider string, cacheKey string, body string, expiresAt time.Time) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	if provider == "" || cacheKey == "" {
+		return errors.New("provider and cache key are required")
+	}
+	_, err := store.DB.Exec(
+		`INSERT INTO provider_cache (provider, cache_key, body, expires_at) VALUES (?, ?, ?, ?)
+		ON CONFLICT(provider, cache_key) DO UPDATE SET body = excluded.body, expires_at = excluded.expires_at`,
+		provider,
+		cacheKey,
+		body,
+		expiresAt.UTC().Format(time.RFC3339Nano),
+	)
+	return err
+}
+
+func (store *Store) GetProviderCache(provider string, cacheKey string, now time.Time) (string, bool, error) {
+	if store == nil || store.DB == nil {
+		return "", false, errors.New("nil database store")
+	}
+	var body string
+	var expiresAtRaw string
+	err := store.DB.QueryRow(
+		`SELECT body, expires_at FROM provider_cache WHERE provider = ? AND cache_key = ?`,
+		provider,
+		cacheKey,
+	).Scan(&body, &expiresAtRaw)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	expiresAt, err := time.Parse(time.RFC3339Nano, expiresAtRaw)
+	if err != nil {
+		return "", false, err
+	}
+	if !expiresAt.After(now.UTC()) {
+		_, _ = store.DB.Exec(`DELETE FROM provider_cache WHERE provider = ? AND cache_key = ?`, provider, cacheKey)
+		return "", false, nil
+	}
+	return body, true, nil
 }
