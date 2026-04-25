@@ -43,8 +43,19 @@ type Result struct {
 	Items        []Item    `json:"items"`
 }
 
+type Progress struct {
+	LibraryID    string `json:"libraryId"`
+	LibraryName  string `json:"libraryName,omitempty"`
+	Phase        string `json:"phase"`
+	Message      string `json:"message"`
+	CurrentLabel string `json:"currentLabel,omitempty"`
+	Processed    int    `json:"processed"`
+	Total        int    `json:"total"`
+}
+
 type Scanner struct {
-	Probe bool
+	Probe    bool
+	Progress func(Progress)
 }
 
 var mediaExtensions = map[string]bool{
@@ -70,6 +81,10 @@ func (scanner Scanner) Scan(library Library) (Result, error) {
 	var mediaPaths []string
 	var subtitlePaths []string
 
+	scanner.report(library, Progress{
+		Phase:   "discovering",
+		Message: "Discovering media files",
+	})
 	err := filepath.WalkDir(library.Root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -92,12 +107,25 @@ func (scanner Scanner) Scan(library Library) (Result, error) {
 
 	sort.Strings(mediaPaths)
 	sort.Strings(subtitlePaths)
+	scanner.report(library, Progress{
+		Phase:     "processing",
+		Message:   "Processing media files",
+		Processed: 0,
+		Total:     len(mediaPaths),
+	})
 
-	for _, mediaPath := range mediaPaths {
+	for index, mediaPath := range mediaPaths {
 		info, err := os.Stat(mediaPath)
 		if err != nil {
 			return result, err
 		}
+		scanner.report(library, Progress{
+			Phase:        "processing",
+			Message:      "Processing " + filepath.Base(mediaPath),
+			CurrentLabel: filepath.Base(mediaPath),
+			Processed:    index,
+			Total:        len(mediaPaths),
+		})
 		parsed := catalog.ParseMediaPath(mediaPath)
 		item := Item{
 			ID:          fingerprint(mediaPath, info),
@@ -114,10 +142,35 @@ func (scanner Scanner) Scan(library Library) (Result, error) {
 		}
 		result.Items = append(result.Items, item)
 		result.FilesScanned++
+		scanner.report(library, Progress{
+			Phase:        "processing",
+			Message:      "Processed " + filepath.Base(mediaPath),
+			CurrentLabel: filepath.Base(mediaPath),
+			Processed:    result.FilesScanned,
+			Total:        len(mediaPaths),
+		})
 	}
 
 	result.CompletedAt = time.Now().UTC()
+	scanner.report(library, Progress{
+		Phase:     "complete",
+		Message:   "Library scan completed",
+		Processed: result.FilesScanned,
+		Total:     len(mediaPaths),
+	})
 	return result, nil
+}
+
+func (scanner Scanner) report(library Library, progress Progress) {
+	if scanner.Progress == nil {
+		return
+	}
+	progress.LibraryID = library.ID
+	progress.LibraryName = library.Name
+	if progress.LibraryName == "" {
+		progress.LibraryName = library.ID
+	}
+	scanner.Progress(progress)
 }
 
 func findSidecarSubtitles(mediaPath string, subtitles []string) []string {

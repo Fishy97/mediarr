@@ -30,6 +30,19 @@ type Options struct {
 	PlexToken   string
 	EmbyURL     string
 	EmbyKey     string
+	Progress    func(Progress)
+}
+
+type Progress struct {
+	TargetID        string `json:"targetId"`
+	Phase           string `json:"phase"`
+	Message         string `json:"message"`
+	CurrentLabel    string `json:"currentLabel,omitempty"`
+	Processed       int    `json:"processed"`
+	Total           int    `json:"total"`
+	ItemsImported   int    `json:"itemsImported"`
+	RollupsImported int    `json:"rollupsImported"`
+	UnmappedItems   int    `json:"unmappedItems"`
 }
 
 type RefreshResult struct {
@@ -183,6 +196,7 @@ func SyncJellyfin(ctx context.Context, options Options, mappings []database.Path
 	if baseURL == "" || token == "" {
 		return database.MediaServerSnapshot{}, errors.New("jellyfin is not configured")
 	}
+	reportProgress(options, Progress{TargetID: "jellyfin", Phase: "connecting", Message: "Connecting to Jellyfin"})
 
 	var info jellyfinSystemInfo
 	if err := getJSON(ctx, baseURL+"/System/Info", "X-Emby-Token", token, &info); err != nil {
@@ -194,6 +208,7 @@ func SyncJellyfin(ctx context.Context, options Options, mappings []database.Path
 	}
 
 	var jellyfinUsers []jellyfinUser
+	reportProgress(options, Progress{TargetID: "jellyfin", Phase: "users", Message: "Reading Jellyfin users"})
 	if err := getJSON(ctx, baseURL+"/Users", "X-Emby-Token", token, &jellyfinUsers); err != nil {
 		return database.MediaServerSnapshot{}, err
 	}
@@ -216,7 +231,12 @@ func SyncJellyfin(ctx context.Context, options Options, mappings []database.Path
 	fileByKey := map[string]database.MediaServerFile{}
 	rollupByItemID := map[string]*database.MediaActivityRollup{}
 	for _, user := range jellyfinUsers {
-		if err := syncJellyfinItemsForUser(ctx, baseURL, token, user.ID, mappings, itemByID, fileByKey, rollupByItemID); err != nil {
+		label := strings.TrimSpace(user.Name)
+		if label == "" {
+			label = "server"
+		}
+		reportProgress(options, Progress{TargetID: "jellyfin", Phase: "items", Message: "Reading Jellyfin items for " + label, CurrentLabel: label})
+		if err := syncJellyfinItemsForUser(ctx, options, baseURL, token, user.ID, mappings, itemByID, fileByKey, rollupByItemID); err != nil {
 			return database.MediaServerSnapshot{}, err
 		}
 	}
@@ -238,6 +258,7 @@ func SyncJellyfin(ctx context.Context, options Options, mappings []database.Path
 		rollups = append(rollups, *rollup)
 	}
 	completedAt := time.Now().UTC()
+	reportProgress(options, Progress{TargetID: "jellyfin", Phase: "complete", Message: "Jellyfin sync completed", ItemsImported: len(items), RollupsImported: len(rollups), UnmappedItems: unmapped})
 	return database.MediaServerSnapshot{
 		Server: database.MediaServer{
 			ID:           "jellyfin",
@@ -275,6 +296,7 @@ func SyncPlex(ctx context.Context, options Options, mappings []database.PathMapp
 	if baseURL == "" || token == "" {
 		return database.MediaServerSnapshot{}, errors.New("plex is not configured")
 	}
+	reportProgress(options, Progress{TargetID: "plex", Phase: "connecting", Message: "Connecting to Plex"})
 
 	var identity plexIdentity
 	if err := getXML(ctx, baseURL+"/identity", "X-Plex-Token", token, &identity); err != nil {
@@ -286,6 +308,7 @@ func SyncPlex(ctx context.Context, options Options, mappings []database.PathMapp
 	}
 
 	var sections plexSectionsResponse
+	reportProgress(options, Progress{TargetID: "plex", Phase: "libraries", Message: "Reading Plex libraries"})
 	if err := getXML(ctx, baseURL+"/library/sections", "X-Plex-Token", token, &sections); err != nil {
 		return database.MediaServerSnapshot{}, err
 	}
@@ -300,6 +323,7 @@ func SyncPlex(ctx context.Context, options Options, mappings []database.PathMapp
 		}
 		libraryKind := normalizePlexKind(section.Type)
 		var library plexLibraryResponse
+		reportProgress(options, Progress{TargetID: "plex", Phase: "items", Message: "Reading Plex library " + strings.TrimSpace(section.Title), CurrentLabel: strings.TrimSpace(section.Title)})
 		if err := getXML(ctx, baseURL+"/library/sections/"+url.PathEscape(section.Key)+"/all", "X-Plex-Token", token, &library); err != nil {
 			return database.MediaServerSnapshot{}, err
 		}
@@ -310,11 +334,12 @@ func SyncPlex(ctx context.Context, options Options, mappings []database.PathMapp
 			Kind:       libraryKind,
 			ItemCount:  len(library.Videos),
 		})
-		for _, video := range library.Videos {
+		for index, video := range library.Videos {
 			externalID := firstNonEmpty(video.RatingKey, strings.TrimPrefix(video.Key, "/library/metadata/"))
 			if externalID == "" {
 				continue
 			}
+			reportProgress(options, Progress{TargetID: "plex", Phase: "items", Message: "Imported " + strings.TrimSpace(video.Title), CurrentLabel: strings.TrimSpace(video.Title), Processed: index + 1, Total: len(library.Videos), ItemsImported: len(itemByID) + 1})
 			runtime := video.Duration / 1000
 			if runtime == 0 && len(video.Media) > 0 {
 				runtime = video.Media[0].Duration / 1000
@@ -354,6 +379,7 @@ func SyncPlex(ctx context.Context, options Options, mappings []database.PathMapp
 	}
 
 	var history plexHistoryResponse
+	reportProgress(options, Progress{TargetID: "plex", Phase: "activity", Message: "Reading Plex playback history", ItemsImported: len(itemByID)})
 	if err := getXML(ctx, baseURL+"/status/sessions/history/all", "X-Plex-Token", token, &history); err != nil {
 		return database.MediaServerSnapshot{}, err
 	}
@@ -405,6 +431,7 @@ func SyncPlex(ctx context.Context, options Options, mappings []database.PathMapp
 		files = append(files, file)
 	}
 	completedAt := time.Now().UTC()
+	reportProgress(options, Progress{TargetID: "plex", Phase: "complete", Message: "Plex sync completed", ItemsImported: len(items), RollupsImported: len(rollups), UnmappedItems: unmapped})
 	return database.MediaServerSnapshot{
 		Server: database.MediaServer{
 			ID:           "plex",
@@ -432,7 +459,7 @@ func SyncPlex(ctx context.Context, options Options, mappings []database.PathMapp
 	}, nil
 }
 
-func syncJellyfinItemsForUser(ctx context.Context, baseURL string, token string, userID string, mappings []database.PathMapping, itemByID map[string]database.MediaServerItem, fileByKey map[string]database.MediaServerFile, rollupByItemID map[string]*database.MediaActivityRollup) error {
+func syncJellyfinItemsForUser(ctx context.Context, options Options, baseURL string, token string, userID string, mappings []database.PathMapping, itemByID map[string]database.MediaServerItem, fileByKey map[string]database.MediaServerFile, rollupByItemID map[string]*database.MediaActivityRollup) error {
 	const limit = 200
 	for start := 0; ; start += limit {
 		values := url.Values{}
@@ -450,10 +477,20 @@ func syncJellyfinItemsForUser(ctx context.Context, baseURL string, token string,
 			return err
 		}
 		now := time.Now().UTC()
-		for _, sourceItem := range response.Items {
+		for index, sourceItem := range response.Items {
 			if strings.TrimSpace(sourceItem.ID) == "" {
 				continue
 			}
+			reportProgress(options, Progress{
+				TargetID:        "jellyfin",
+				Phase:           "items",
+				Message:         "Imported " + strings.TrimSpace(sourceItem.Name),
+				CurrentLabel:    strings.TrimSpace(sourceItem.Name),
+				Processed:       start + index + 1,
+				Total:           response.TotalRecordCount,
+				ItemsImported:   len(itemByID) + 1,
+				RollupsImported: len(rollupByItemID),
+			})
 			if _, exists := itemByID[sourceItem.ID]; !exists {
 				itemByID[sourceItem.ID] = database.MediaServerItem{
 					ServerID:          "jellyfin",
@@ -526,6 +563,20 @@ func syncJellyfinItemsForUser(ctx context.Context, baseURL string, token string,
 		}
 	}
 	return nil
+}
+
+func reportProgress(options Options, progress Progress) {
+	if options.Progress == nil {
+		return
+	}
+	progress.TargetID = strings.TrimSpace(progress.TargetID)
+	progress.Phase = strings.TrimSpace(progress.Phase)
+	progress.Message = strings.TrimSpace(progress.Message)
+	progress.CurrentLabel = strings.TrimSpace(progress.CurrentLabel)
+	if progress.Message == "" {
+		progress.Message = progress.Phase
+	}
+	options.Progress(progress)
 }
 
 func refreshConfig(options Options, targetID string) (endpoint string, token string, method string, headerName string, err error) {

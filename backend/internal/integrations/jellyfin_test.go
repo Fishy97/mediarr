@@ -95,3 +95,69 @@ func TestSyncJellyfinImportsInventoryAndUserActivity(t *testing.T) {
 		t.Fatalf("job = %#v", snapshot.Job)
 	}
 }
+
+func TestSyncJellyfinReportsProgress(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Emby-Token") != "jellyfin-key" {
+			http.Error(w, "missing token", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/System/Info":
+			_, _ = w.Write([]byte(`{"ServerName":"Test Jellyfin"}`))
+		case "/Users":
+			_, _ = w.Write([]byte(`[{"Id":"user_1","Name":"Alex"}]`))
+		case "/Items":
+			_, _ = w.Write([]byte(`{
+				"Items": [{
+					"Id": "item_1",
+					"Name": "Arrival",
+					"Type": "Movie",
+					"Path": "/mnt/media/movies/Arrival (2016).mkv",
+					"MediaSources": [{"Path":"/mnt/media/movies/Arrival (2016).mkv","Size":42000000000,"Container":"mkv"}],
+					"UserData": {"PlayCount":1,"Played":true}
+				}],
+				"TotalRecordCount": 1
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	var events []Progress
+	_, err := SyncJellyfin(context.Background(), Options{
+		JellyfinURL: server.URL,
+		JellyfinKey: "jellyfin-key",
+		Progress: func(progress Progress) {
+			events = append(events, progress)
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(events) < 4 {
+		t.Fatalf("progress events = %#v", events)
+	}
+	if events[0].TargetID != "jellyfin" || events[0].Phase != "connecting" {
+		t.Fatalf("first event = %#v", events[0])
+	}
+	var sawItem bool
+	for _, event := range events {
+		if event.CurrentLabel == "/mnt/media/movies/Arrival (2016).mkv" {
+			t.Fatalf("progress leaked full path: %#v", event)
+		}
+		if event.CurrentLabel == "Arrival" && event.Processed == 1 && event.Total == 1 {
+			sawItem = true
+		}
+	}
+	if !sawItem {
+		t.Fatalf("did not see item progress: %#v", events)
+	}
+	last := events[len(events)-1]
+	if last.Phase != "complete" || last.ItemsImported != 1 || last.RollupsImported != 1 {
+		t.Fatalf("last event = %#v", last)
+	}
+}
