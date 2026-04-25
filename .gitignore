@@ -1,0 +1,14 @@
+.DS_Store
+node_modules/
+dist/
+coverage/
+.vite/
+*.log
+*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+backend/media-steward
+backend/medi-steward
+backend/coverage.out
+config/
+tmp/

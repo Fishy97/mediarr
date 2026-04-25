@@ -1,0 +1,27 @@
+services:
+  media-steward:
+    build: .
+    image: media-steward:local
+    container_name: media-steward
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      MEDIA_STEWARD_ADMIN_TOKEN: ${MEDIA_STEWARD_ADMIN_TOKEN:-}
+      MEDIA_STEWARD_OVERSIZED_BYTES: ${MEDIA_STEWARD_OVERSIZED_BYTES:-60000000000}
+      MEDIA_STEWARD_OLLAMA_URL: ${MEDIA_STEWARD_OLLAMA_URL:-http://ollama:11434}
+    volumes:
+      - ./config:/config
+      - ${MOVIES_DIR:-./fixtures/media/movies}:/media/movies:ro
+      - ${SERIES_DIR:-./fixtures/media/series}:/media/series:ro
+      - ${ANIME_DIR:-./fixtures/media/anime}:/media/anime:ro
+  ollama:
+    image: ollama/ollama:latest
+    container_name: media-steward-ollama
+    restart: unless-stopped
+    profiles: ["ai"]
+    volumes:
+      - ollama:/root/.ollama
+
+volumes:
+  ollama:

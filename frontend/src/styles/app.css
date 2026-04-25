@@ -1,0 +1,449 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f6f7f4;
+  color: #1c2421;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button {
+  font: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+}
+
+.sidebar {
+  background: #17211d;
+  color: #f5f8f3;
+  padding: 22px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-mark {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #f0b429;
+  color: #17211d;
+}
+
+.brand strong,
+.brand span {
+  display: block;
+}
+
+.brand span {
+  margin-top: 2px;
+  color: #b7c5bb;
+  font-size: 0.82rem;
+}
+
+.nav {
+  display: grid;
+  gap: 6px;
+}
+
+.nav-button {
+  width: 100%;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: transparent;
+  color: #d8e0dc;
+  text-align: left;
+  cursor: pointer;
+}
+
+.nav-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.nav-button.active,
+.nav-button:hover {
+  background: #26352f;
+  color: #ffffff;
+}
+
+.main {
+  min-width: 0;
+  padding: 24px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 20px;
+}
+
+.eyebrow {
+  margin: 0 0 5px;
+  color: #62706a;
+  font-size: 0.82rem;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 0;
+  font-size: 1.8rem;
+}
+
+h2 {
+  font-size: 1rem;
+  margin-bottom: 6px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.icon-button,
+.primary-button {
+  border: 1px solid #cbd5cf;
+  min-height: 40px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.icon-button {
+  width: 40px;
+  display: grid;
+  place-items: center;
+  background: #ffffff;
+  color: #24302b;
+}
+
+.primary-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  background: #1f7a5a;
+  border-color: #1f7a5a;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.primary-button:disabled {
+  opacity: 0.64;
+  cursor: wait;
+}
+
+.notice {
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+.notice.error {
+  background: #ffe7de;
+  color: #8f2f16;
+}
+
+.view-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.stat-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.stat,
+.panel,
+.table-panel,
+.status-card,
+.recommendation-card {
+  background: #ffffff;
+  border: 1px solid #dfe6e1;
+  border-radius: 8px;
+}
+
+.stat {
+  padding: 14px;
+  min-height: 110px;
+  display: grid;
+  align-content: space-between;
+  gap: 10px;
+}
+
+.stat svg {
+  color: #1f7a5a;
+}
+
+.stat span,
+.panel-heading span,
+.rec-metrics small {
+  color: #66736d;
+  font-size: 0.82rem;
+}
+
+.stat strong {
+  font-size: 1.25rem;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 16px;
+}
+
+.panel {
+  padding: 16px;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.scan-summary {
+  display: grid;
+  gap: 8px;
+  min-height: 140px;
+  align-content: center;
+}
+
+.scan-summary strong {
+  font-size: 3rem;
+}
+
+.table-panel {
+  overflow: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 760px;
+}
+
+th,
+td {
+  padding: 12px 14px;
+  border-bottom: 1px solid #e7ece8;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  color: #5e6a65;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.path-cell,
+code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.82rem;
+}
+
+.queue,
+.grid-list,
+.settings-layout {
+  display: grid;
+  gap: 12px;
+}
+
+.recommendation-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  gap: 18px;
+  padding: 16px;
+}
+
+.rec-main {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.rec-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #e8f5ef;
+  color: #1f7a5a;
+}
+
+.rec-main p {
+  color: #4c5a54;
+  line-height: 1.45;
+}
+
+.path-list {
+  display: grid;
+  gap: 6px;
+}
+
+code {
+  display: block;
+  padding: 8px;
+  border-radius: 6px;
+  background: #f3f6f4;
+  overflow-wrap: anywhere;
+}
+
+.rec-metrics {
+  display: grid;
+  align-content: start;
+  justify-items: end;
+  gap: 6px;
+}
+
+.rec-metrics span {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: #a5481a;
+}
+
+.status-card {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) max-content;
+  align-items: start;
+  gap: 12px;
+  padding: 14px;
+}
+
+.status-card svg {
+  color: #33658a;
+}
+
+.status-card p {
+  color: #53615b;
+  margin-bottom: 0;
+}
+
+.status-card span {
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: #edf2f7;
+  color: #33485e;
+  font-size: 0.78rem;
+}
+
+.compact-list {
+  display: grid;
+  gap: 8px;
+}
+
+.compact-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid #edf1ee;
+}
+
+.plain-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #4d5a55;
+}
+
+.empty-state {
+  min-height: 160px;
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  color: #68756f;
+  text-align: center;
+}
+
+@media (max-width: 980px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: 12px;
+  }
+
+  .nav {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .stat-strip,
+  .split,
+  .recommendation-card {
+    grid-template-columns: 1fr;
+  }
+
+  .rec-metrics {
+    justify-items: start;
+  }
+}
+
+@media (max-width: 640px) {
+  .main {
+    padding: 16px;
+  }
+
+  .topbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .actions {
+    justify-content: space-between;
+  }
+
+  .nav {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .brand span,
+  .eyebrow {
+    display: none;
+  }
+}
+
