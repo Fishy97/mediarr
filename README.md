@@ -6,7 +6,7 @@ It deliberately does not search for, download, torrent, index, or acquire media.
 
 ## Project Status
 
-Mediarr V1 is a Docker-hosted library scanner, catalog, and review dashboard for already-downloaded media. It can:
+Mediarr 1.1 is a Docker-hosted library scanner, catalog, and review dashboard for already-downloaded media. It can:
 
 - scan movie, series, and anime folders mounted read-only
 - parse common movie, series, and anime filename patterns
@@ -17,6 +17,7 @@ Mediarr V1 is a Docker-hosted library scanner, catalog, and review dashboard for
 - configure provider credentials without returning secrets through the API
 - request Jellyfin, Plex, and Emby library refreshes as sync targets
 - sync Jellyfin and Plex inventory, file evidence, and user activity into a normalized activity model
+- show durable background-job telemetry for filesystem scans and Jellyfin/Plex syncs, including phase, counters, current item, and recent events
 - create activity-aware cleanup recommendations for inactive and never-watched media
 - attach optional local AI rationales to deterministic recommendations when the Ollama sidecar is enabled
 - expose a web UI and REST API
@@ -73,6 +74,13 @@ Run a scan from the UI or with:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/scans
+```
+
+Scan and sync requests return a background job immediately. Track progress from the dashboard or with:
+
+```bash
+curl "http://localhost:8080/api/v1/jobs?active=true"
+curl http://localhost:8080/api/v1/jobs/<job-id>
 ```
 
 Connect Jellyfin or Plex from **Integrations** in the web UI by entering the server URL and API key/token. Mediarr stores those credentials in `/config/mediarr.db` and only returns redacted key status to the browser.

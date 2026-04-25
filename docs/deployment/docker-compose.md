@@ -151,7 +151,14 @@ Run a scan from the web UI, or use the API:
 curl -X POST http://localhost:8080/api/v1/scans
 ```
 
-Then view the catalog:
+The scan runs as a background job. Track active work from the web UI or with:
+
+```bash
+curl "http://localhost:8080/api/v1/jobs?active=true"
+curl http://localhost:8080/api/v1/jobs/<job-id>
+```
+
+When the job completes, view the catalog:
 
 ```bash
 curl http://localhost:8080/api/v1/catalog
@@ -181,6 +188,8 @@ From the API:
 curl -X POST http://localhost:8080/api/v1/integrations/jellyfin/sync
 curl -X POST http://localhost:8080/api/v1/integrations/plex/sync
 ```
+
+Syncs also run as background jobs. The Integrations screen shows the active phase, current item/title, imported counts, unmapped count, and recent events while Jellyfin or Plex is being read.
 
 Mediarr imports media-server inventory, file paths, file sizes, and activity rollups such as play count and last played date. It uses those signals to create suggest-only cleanup recommendations for inactive or never-watched media.
 
