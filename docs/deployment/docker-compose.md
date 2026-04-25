@@ -172,6 +172,24 @@ Backups are written to:
 ./config/backups
 ```
 
+Inspect a backup before restoring it:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/backups/restore \
+  -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/config/backups/mediarr-example.zip","dryRun":true}'
+```
+
+Restore creates a fresh pre-restore backup before replacing files under `/config`:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/backups/restore \
+  -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/config/backups/mediarr-example.zip","dryRun":false}'
+```
+
 For host-level backups, back up the whole `config` directory:
 
 ```bash
@@ -205,6 +223,16 @@ The AI profile starts two additional services:
 The default model is `qwen3:0.6b`. Change `MEDIARR_AI_MODEL` in `.env` if you want a different local Ollama model.
 
 Mediarr treats local AI as advisory only. Core scanning and recommendations do not require AI.
+
+The two supported launch modes are:
+
+```bash
+# No AI
+docker compose up -d
+
+# With AI sidecar
+docker compose --profile ai up -d
+```
 
 ## 10. Reverse Proxy
 

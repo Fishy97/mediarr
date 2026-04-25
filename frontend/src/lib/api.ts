@@ -2,6 +2,7 @@ import type {
   AIStatus,
   AuthResponse,
   AuthUser,
+  BackupRestoreResult,
   CatalogCorrectionInput,
   CatalogItem,
   Integration,
@@ -132,5 +133,11 @@ export const api = {
   },
   async createBackup(): Promise<{ path: string }> {
     return (await request<Envelope<{ path: string }>>('/api/v1/backups', { method: 'POST' })).data;
+  },
+  async restoreBackup(path: string, dryRun: boolean): Promise<BackupRestoreResult> {
+    return (await request<Envelope<BackupRestoreResult>>('/api/v1/backups/restore', {
+      method: 'POST',
+      body: JSON.stringify({ path, dryRun }),
+    })).data;
   },
 };

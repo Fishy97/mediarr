@@ -70,6 +70,12 @@ export type IntegrationRefreshResult = {
   requestedAt: string;
 };
 
+export type BackupRestoreResult = {
+  entries?: string[];
+  preRestoreBackup?: string;
+  restored?: string[];
+};
+
 export type ScanResult = {
   libraryId: string;
   startedAt: string;

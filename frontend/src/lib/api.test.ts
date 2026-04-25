@@ -83,6 +83,25 @@ describe('api auth helpers', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/integrations/jellyfin/refresh', expect.objectContaining({ method: 'POST' }));
   });
+
+  test('backup restore can inspect and restore a config archive', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ data: { entries: ['mediarr.db'] } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { preRestoreBackup: '/config/backups/pre.zip', restored: ['mediarr.db'] } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.restoreBackup('/config/backups/backup.zip', true)).resolves.toMatchObject({ entries: ['mediarr.db'] });
+    await expect(api.restoreBackup('/config/backups/backup.zip', false)).resolves.toMatchObject({ restored: ['mediarr.db'] });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/backups/restore', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ path: '/config/backups/backup.zip', dryRun: true }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/backups/restore', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ path: '/config/backups/backup.zip', dryRun: false }),
+    }));
+  });
 });
 
 function jsonResponse(body: unknown): Response {

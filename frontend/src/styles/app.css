@@ -247,6 +247,11 @@ h2 {
   color: #8f2f16;
 }
 
+.notice.success {
+  background: #e8f5ef;
+  color: #1e6149;
+}
+
 .view-grid {
   display: grid;
   gap: 16px;

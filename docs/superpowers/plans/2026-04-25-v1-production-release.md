@@ -61,18 +61,18 @@
 
 - [ ] Write failing tests for backup contents, restore validation, no-delete endpoints, API auth regression, Docker smoke, and UI setup flow.
 - [x] Add restore dry-run, restore execution with pre-restore backup, backup manifest, and config inclusion.
-- [ ] Add real tiny media fixtures for ffprobe validation and integration fixture libraries.
+- [x] Add real tiny media fixtures for ffprobe validation and integration fixture libraries.
 - [ ] Harden Docker runtime with read-only media mounts, `/config` ownership guidance, healthchecks, labels, and release image docs.
 - [x] Expand CI with backend, frontend, Docker, Compose no-AI, Compose AI config, smoke test, and security/no-delete regression.
-- [ ] Update README, deployment guide, provider guide, AI guide, security policy, contributing guide, release checklist, and API docs.
+- [x] Update README, deployment guide, provider guide, AI guide, security policy, contributing guide, release checklist, and API docs.
 - [ ] Verify GitHub branch CI, then merge/push to `main` after V1 validation is green.
 
 ## V1 Definition Of Done
 
-- [ ] No README language describes V1 features as scaffolded.
+- [x] No README language describes V1 features as scaffolded.
 - [ ] No configured provider/integration route returns placeholder-only data.
-- [ ] No endpoint can permanently delete media.
-- [ ] No AI output is accepted as catalog truth without user approval.
+- [x] No endpoint can permanently delete media.
+- [x] No AI output is accepted as catalog truth without user approval.
 - [ ] Docker Compose no-AI and AI modes both validate.
 - [ ] The app can be installed on a clean Ubuntu Docker host from documented commands.
 - [ ] CI is green on the release branch and `main`.

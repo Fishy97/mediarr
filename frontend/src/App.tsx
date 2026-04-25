@@ -55,6 +55,7 @@ export function App() {
   const [aiStatus, setAIStatus] = useState<AIStatus | null>(null);
   const [status, setStatus] = useState('Loading');
   const [error, setError] = useState<string | null>(null);
+  const [backupNotice, setBackupNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [setupRequired, setSetupRequired] = useState(false);
@@ -132,10 +133,28 @@ export function App() {
   async function createBackup() {
     setBusy(true);
     try {
-      await api.createBackup();
+      const result = await api.createBackup();
+      setBackupNotice(`Backup created: ${result.path}`);
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Backup failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function restoreBackup(path: string, dryRun: boolean) {
+    setBusy(true);
+    try {
+      const result = await api.restoreBackup(path, dryRun);
+      if (dryRun) {
+        setBackupNotice(`Archive contains ${result.entries?.length ?? 0} entries.`);
+      } else {
+        setBackupNotice(`Restored ${result.restored?.length ?? 0} entries. Pre-restore backup: ${result.preRestoreBackup}`);
+      }
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Backup restore failed');
     } finally {
       setBusy(false);
     }
@@ -309,7 +328,7 @@ export function App() {
             busy={busy}
           />
         )}
-        {view === 'settings' && <SettingsView onBackup={() => void createBackup()} busy={busy} />}
+        {view === 'settings' && <SettingsView onBackup={() => void createBackup()} onRestore={(path, dryRun) => void restoreBackup(path, dryRun)} notice={backupNotice} busy={busy} />}
       </main>
     </div>
   );
@@ -815,10 +834,21 @@ function ProviderSettingForm({
   );
 }
 
-function SettingsView({ onBackup, busy }: { onBackup: () => void; busy: boolean }) {
+function SettingsView({
+  onBackup,
+  onRestore,
+  notice,
+  busy,
+}: {
+  onBackup: () => void;
+  onRestore: (path: string, dryRun: boolean) => void;
+  notice: string | null;
+  busy: boolean;
+}) {
+  const [restorePath, setRestorePath] = useState('');
   return (
     <section className="settings-layout">
-      <div className="panel">
+      <div className="panel form-panel">
         <div className="panel-heading">
           <h2>Backups</h2>
           <span>/config/backups</span>
@@ -827,6 +857,21 @@ function SettingsView({ onBackup, busy }: { onBackup: () => void; busy: boolean 
           <Archive size={18} />
           Create backup
         </button>
+        <label>
+          Restore archive
+          <input value={restorePath} onChange={(event) => setRestorePath(event.target.value)} placeholder="/config/backups/mediarr-...zip" />
+        </label>
+        <div className="button-row">
+          <button className="secondary-button" type="button" onClick={() => onRestore(restorePath, true)} disabled={busy || restorePath.trim() === ''}>
+            <SearchCheck size={16} />
+            Inspect
+          </button>
+          <button className="secondary-button" type="button" onClick={() => onRestore(restorePath, false)} disabled={busy || restorePath.trim() === ''}>
+            <RotateCcw size={16} />
+            Restore
+          </button>
+        </div>
+        {notice && <div className="notice success">{notice}</div>}
       </div>
       <div className="panel">
         <div className="panel-heading">
