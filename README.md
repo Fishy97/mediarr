@@ -46,6 +46,8 @@ Open [http://localhost:8080](http://localhost:8080).
 
 Set `MOVIES_DIR`, `SERIES_DIR`, and `ANIME_DIR` in `.env` to point at your media folders. The compose file mounts them read-only.
 
+For a full Ubuntu server walkthrough, see [Docker Compose Deployment Guide](docs/deployment/docker-compose.md).
+
 Run a scan from the UI or with:
 
 ```bash
@@ -75,7 +77,7 @@ Log out and back in so your shell can use Docker without `sudo`.
 ### 2. Clone And Configure
 
 ```bash
-git clone <repo-url> mediarr
+git clone https://github.com/Fishy97/mediarr.git
 cd mediarr
 cp .env.example .env
 id -u

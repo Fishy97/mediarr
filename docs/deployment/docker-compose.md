@@ -1,24 +1,236 @@
-# Docker Compose Deployment
+# Docker Compose Deployment Guide
 
-Mediarr is designed for NAS and home-server deployments.
+Mediarr is designed to be deployed with Docker Compose on Ubuntu servers, NAS boxes, and self-hosted VMs. The repository includes a production-oriented `docker-compose.yml` that builds the app image locally and runs the web UI plus API on port `8080`.
 
-1. Copy `.env.example` to `.env`.
-2. Set `MOVIES_DIR`, `SERIES_DIR`, and `ANIME_DIR`.
-3. Run `docker compose up --build`.
-4. Open `http://localhost:8080`.
+The default deployment is intentionally conservative:
 
-Media mounts are read-only by default:
+- media folders are mounted read-only
+- app state is stored under `./config`
+- cleanup recommendations are suggest-only
+- the container has a healthcheck
+- the container runs as `PUID:PGID`
 
-```yaml
-- ${MOVIES_DIR:-./fixtures/media/movies}:/media/movies:ro
-```
+## Requirements
 
-Durable application state is stored in `./config`, mounted at `/config` in the container.
+- Ubuntu 22.04 LTS or newer
+- Docker Engine with the Compose plugin
+- Git
+- media folders already present on the host
+- at least one writable config directory for Mediarr
 
-The container runs as `PUID:PGID` from `.env`, defaulting to `1000:1000`.
-On Linux hosts, make sure the config folder is writable by that user:
+## 1. Install Docker On Ubuntu
 
 ```bash
-mkdir -p config
-chown -R 1000:1000 config
+sudo apt update
+sudo apt install -y ca-certificates curl git
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo usermod -aG docker "$USER"
 ```
+
+Log out and back in before running Docker without `sudo`.
+
+Verify:
+
+```bash
+docker version
+docker compose version
+```
+
+## 2. Clone The Repository
+
+```bash
+git clone https://github.com/Fishy97/mediarr.git
+cd mediarr
+```
+
+## 3. Prepare Host Folders
+
+Use your real media paths. This example assumes a common `/srv/media` layout:
+
+```bash
+sudo mkdir -p /srv/media/movies /srv/media/series /srv/media/anime
+mkdir -p config
+sudo chown -R "$(id -u):$(id -g)" config
+```
+
+Mediarr only needs write access to `./config`. The media mounts should stay read-only.
+
+## 4. Configure `.env`
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Recommended Ubuntu server values:
+
+```env
+MEDIARR_ADMIN_TOKEN=change-this-to-a-long-random-token
+MEDIARR_OVERSIZED_BYTES=60000000000
+MEDIARR_OLLAMA_URL=http://ollama:11434
+PUID=1000
+PGID=1000
+MOVIES_DIR=/srv/media/movies
+SERIES_DIR=/srv/media/series
+ANIME_DIR=/srv/media/anime
+```
+
+Find your `PUID` and `PGID` with:
+
+```bash
+id -u
+id -g
+```
+
+## 5. Start Mediarr
+
+```bash
+docker compose up --build -d
+```
+
+Check status:
+
+```bash
+docker compose ps
+docker compose logs -f mediarr
+```
+
+Open:
+
+```text
+http://<server-ip>:8080
+```
+
+For local testing on the server itself:
+
+```bash
+curl http://localhost:8080/api/v1/health
+```
+
+Expected response:
+
+```json
+{"service":"mediarr","status":"ok"}
+```
+
+## 6. Run A Scan
+
+Run a scan from the web UI, or use the API:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/scans
+```
+
+Then view the catalog:
+
+```bash
+curl http://localhost:8080/api/v1/catalog
+```
+
+## 7. Backups
+
+Backups include the SQLite database, settings, audit log, provider cache, artwork cache, and user review state.
+
+Create a backup from the UI, or use:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/backups
+```
+
+Backups are written to:
+
+```text
+./config/backups
+```
+
+For host-level backups, back up the whole `config` directory:
+
+```bash
+tar -czf mediarr-config-$(date +%Y%m%d).tar.gz config
+```
+
+## 8. Upgrades
+
+```bash
+cd mediarr
+git pull
+docker compose up --build -d
+docker compose ps
+```
+
+The app stores durable state in `./config`, so rebuilding the image does not remove catalog data.
+
+## 9. Optional Local AI
+
+Ollama is included as an optional Compose profile. Start it with:
+
+```bash
+docker compose --profile ai up --build -d
+```
+
+Mediarr treats local AI as advisory only. Core scanning and recommendations do not require AI.
+
+## 10. Reverse Proxy
+
+For a production server, put Mediarr behind a reverse proxy such as Caddy, Nginx Proxy Manager, Traefik, or Nginx. Do not expose port `8080` directly to the public internet.
+
+Minimum reverse proxy expectations:
+
+- terminate HTTPS
+- restrict access to trusted users or networks
+- forward to `http://127.0.0.1:8080` or `http://<server-ip>:8080`
+- keep `MEDIARR_ADMIN_TOKEN` set
+
+## 11. Troubleshooting
+
+### Container Is Not Healthy
+
+```bash
+docker compose ps
+docker compose logs --tail=200 mediarr
+curl http://localhost:8080/api/v1/health
+```
+
+### Permission Errors In `/config`
+
+```bash
+sudo chown -R "$(id -u):$(id -g)" config
+docker compose restart mediarr
+```
+
+### Media Folders Are Empty In The UI
+
+Check `.env` paths:
+
+```bash
+cat .env
+docker compose config
+```
+
+Confirm the host folders contain media:
+
+```bash
+find "$MOVIES_DIR" -maxdepth 2 -type f | head
+```
+
+### Port `8080` Is Already In Use
+
+Change the published port in `docker-compose.yml`:
+
+```yaml
+ports:
+  - "8090:8080"
+```
+
+Then run:
+
+```bash
+docker compose up -d
+```
+
+Open `http://<server-ip>:8090`.
