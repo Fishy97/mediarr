@@ -184,6 +184,79 @@ type MediaSyncJob struct {
 	CompletedAt     time.Time `json:"completedAt,omitempty"`
 }
 
+type Job struct {
+	ID              string    `json:"id"`
+	Kind            string    `json:"kind"`
+	TargetID        string    `json:"targetId,omitempty"`
+	Status          string    `json:"status"`
+	Phase           string    `json:"phase"`
+	Message         string    `json:"message"`
+	CurrentLabel    string    `json:"currentLabel,omitempty"`
+	Processed       int       `json:"processed"`
+	Total           int       `json:"total"`
+	ItemsImported   int       `json:"itemsImported"`
+	RollupsImported int       `json:"rollupsImported"`
+	UnmappedItems   int       `json:"unmappedItems"`
+	Error           string    `json:"error,omitempty"`
+	StartedAt       time.Time `json:"startedAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+	CompletedAt     time.Time `json:"completedAt,omitempty"`
+}
+
+type JobInput struct {
+	Kind         string
+	TargetID     string
+	Status       string
+	Phase        string
+	Message      string
+	CurrentLabel string
+	Total        int
+}
+
+type JobUpdate struct {
+	Status          string
+	Phase           string
+	Message         string
+	CurrentLabel    string
+	Processed       *int
+	Total           *int
+	ItemsImported   *int
+	RollupsImported *int
+	UnmappedItems   *int
+	Error           string
+	Completed       bool
+}
+
+type JobFilter struct {
+	Kind     string
+	TargetID string
+	Status   string
+	Active   bool
+	Limit    int
+}
+
+type JobEvent struct {
+	ID           string    `json:"id"`
+	JobID        string    `json:"jobId"`
+	Level        string    `json:"level"`
+	Phase        string    `json:"phase"`
+	Message      string    `json:"message"`
+	CurrentLabel string    `json:"currentLabel,omitempty"`
+	Processed    int       `json:"processed"`
+	Total        int       `json:"total"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
+type JobEventInput struct {
+	JobID        string
+	Level        string
+	Phase        string
+	Message      string
+	CurrentLabel string
+	Processed    int
+	Total        int
+}
+
 type PathMapping struct {
 	ID               string    `json:"id"`
 	ServerID         string    `json:"serverId,omitempty"`
@@ -342,6 +415,36 @@ func (store *Store) migrate() error {
 			base_url TEXT NOT NULL DEFAULT '',
 			api_key TEXT NOT NULL DEFAULT '',
 			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS jobs (
+			id TEXT PRIMARY KEY,
+			kind TEXT NOT NULL,
+			target_id TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL,
+			phase TEXT NOT NULL DEFAULT '',
+			message TEXT NOT NULL DEFAULT '',
+			current_label TEXT NOT NULL DEFAULT '',
+			processed INTEGER NOT NULL DEFAULT 0,
+			total INTEGER NOT NULL DEFAULT 0,
+			items_imported INTEGER NOT NULL DEFAULT 0,
+			rollups_imported INTEGER NOT NULL DEFAULT 0,
+			unmapped_items INTEGER NOT NULL DEFAULT 0,
+			error TEXT NOT NULL DEFAULT '',
+			started_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			completed_at TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS job_events (
+			id TEXT PRIMARY KEY,
+			job_id TEXT NOT NULL,
+			level TEXT NOT NULL,
+			phase TEXT NOT NULL DEFAULT '',
+			message TEXT NOT NULL,
+			current_label TEXT NOT NULL DEFAULT '',
+			processed INTEGER NOT NULL DEFAULT 0,
+			total INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
 		)`,
 		`CREATE TABLE IF NOT EXISTS catalog_corrections (
 			media_file_id TEXT PRIMARY KEY,
@@ -1197,6 +1300,280 @@ func (store *Store) LatestMediaSyncJob(serverID string) (MediaSyncJob, error) {
 	return job, nil
 }
 
+func (store *Store) CreateJob(input JobInput) (Job, error) {
+	if store == nil || store.DB == nil {
+		return Job{}, errors.New("nil database store")
+	}
+	kind := normalizeJobKind(input.Kind)
+	if !knownJobKind(kind) {
+		return Job{}, errors.New("unknown job kind")
+	}
+	status := normalizeJobStatus(input.Status)
+	if status == "" {
+		status = "queued"
+	}
+	if !knownJobStatus(status) {
+		return Job{}, errors.New("unknown job status")
+	}
+	now := time.Now().UTC()
+	job := Job{
+		ID:           randomID("job"),
+		Kind:         kind,
+		TargetID:     strings.TrimSpace(input.TargetID),
+		Status:       status,
+		Phase:        strings.TrimSpace(input.Phase),
+		Message:      strings.TrimSpace(input.Message),
+		CurrentLabel: strings.TrimSpace(input.CurrentLabel),
+		Total:        maxInt(input.Total, 0),
+		StartedAt:    now,
+		UpdatedAt:    now,
+	}
+	if job.Phase == "" {
+		job.Phase = status
+	}
+	if job.Message == "" {
+		job.Message = "Job queued"
+	}
+	_, err := store.DB.Exec(`INSERT INTO jobs (
+		id, kind, target_id, status, phase, message, current_label, processed, total,
+		items_imported, rollups_imported, unmapped_items, error, started_at, updated_at, completed_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		job.ID,
+		job.Kind,
+		job.TargetID,
+		job.Status,
+		job.Phase,
+		job.Message,
+		job.CurrentLabel,
+		job.Processed,
+		job.Total,
+		job.ItemsImported,
+		job.RollupsImported,
+		job.UnmappedItems,
+		job.Error,
+		job.StartedAt.Format(time.RFC3339Nano),
+		job.UpdatedAt.Format(time.RFC3339Nano),
+		formatOptionalTime(job.CompletedAt),
+	)
+	if err != nil {
+		return Job{}, err
+	}
+	return job, nil
+}
+
+func (store *Store) UpdateJob(id string, update JobUpdate) (Job, error) {
+	if store == nil || store.DB == nil {
+		return Job{}, errors.New("nil database store")
+	}
+	job, err := store.GetJob(id)
+	if err != nil {
+		return Job{}, err
+	}
+	if strings.TrimSpace(update.Status) != "" {
+		status := normalizeJobStatus(update.Status)
+		if !knownJobStatus(status) {
+			return Job{}, errors.New("unknown job status")
+		}
+		job.Status = status
+	}
+	if strings.TrimSpace(update.Phase) != "" {
+		job.Phase = strings.TrimSpace(update.Phase)
+	}
+	if strings.TrimSpace(update.Message) != "" {
+		job.Message = strings.TrimSpace(update.Message)
+	}
+	if strings.TrimSpace(update.CurrentLabel) != "" {
+		job.CurrentLabel = strings.TrimSpace(update.CurrentLabel)
+	}
+	if update.Processed != nil {
+		job.Processed = maxInt(*update.Processed, 0)
+	}
+	if update.Total != nil {
+		job.Total = maxInt(*update.Total, 0)
+	}
+	if update.ItemsImported != nil {
+		job.ItemsImported = maxInt(*update.ItemsImported, 0)
+	}
+	if update.RollupsImported != nil {
+		job.RollupsImported = maxInt(*update.RollupsImported, 0)
+	}
+	if update.UnmappedItems != nil {
+		job.UnmappedItems = maxInt(*update.UnmappedItems, 0)
+	}
+	if strings.TrimSpace(update.Error) != "" {
+		job.Error = strings.TrimSpace(update.Error)
+	}
+	if update.Completed || job.Status == "completed" || job.Status == "failed" {
+		if job.CompletedAt.IsZero() {
+			job.CompletedAt = time.Now().UTC()
+		}
+	}
+	job.UpdatedAt = time.Now().UTC()
+	_, err = store.DB.Exec(`UPDATE jobs SET
+		status = ?, phase = ?, message = ?, current_label = ?, processed = ?, total = ?,
+		items_imported = ?, rollups_imported = ?, unmapped_items = ?, error = ?,
+		updated_at = ?, completed_at = ?
+		WHERE id = ?`,
+		job.Status,
+		job.Phase,
+		job.Message,
+		job.CurrentLabel,
+		job.Processed,
+		job.Total,
+		job.ItemsImported,
+		job.RollupsImported,
+		job.UnmappedItems,
+		job.Error,
+		job.UpdatedAt.Format(time.RFC3339Nano),
+		formatOptionalTime(job.CompletedAt),
+		job.ID,
+	)
+	if err != nil {
+		return Job{}, err
+	}
+	return job, nil
+}
+
+func (store *Store) GetJob(id string) (Job, error) {
+	if store == nil || store.DB == nil {
+		return Job{}, errors.New("nil database store")
+	}
+	return store.jobFromQuery(`SELECT id, kind, target_id, status, phase, message, current_label,
+		processed, total, items_imported, rollups_imported, unmapped_items, error, started_at, updated_at, completed_at
+		FROM jobs WHERE id = ?`, strings.TrimSpace(id))
+}
+
+func (store *Store) LatestJob(kind string, targetID string) (Job, error) {
+	if store == nil || store.DB == nil {
+		return Job{}, errors.New("nil database store")
+	}
+	return store.jobFromQuery(`SELECT id, kind, target_id, status, phase, message, current_label,
+		processed, total, items_imported, rollups_imported, unmapped_items, error, started_at, updated_at, completed_at
+		FROM jobs WHERE kind = ? AND target_id = ? ORDER BY started_at DESC LIMIT 1`, normalizeJobKind(kind), strings.TrimSpace(targetID))
+}
+
+func (store *Store) ListJobs(filter JobFilter) ([]Job, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	conditions := []string{}
+	args := []any{}
+	if kind := normalizeJobKind(filter.Kind); kind != "" {
+		conditions = append(conditions, "kind = ?")
+		args = append(args, kind)
+	}
+	if strings.TrimSpace(filter.TargetID) != "" {
+		conditions = append(conditions, "target_id = ?")
+		args = append(args, strings.TrimSpace(filter.TargetID))
+	}
+	if status := normalizeJobStatus(filter.Status); status != "" {
+		conditions = append(conditions, "status = ?")
+		args = append(args, status)
+	}
+	if filter.Active {
+		conditions = append(conditions, "status IN ('queued', 'running')")
+	}
+	query := `SELECT id, kind, target_id, status, phase, message, current_label,
+		processed, total, items_imported, rollups_imported, unmapped_items, error, started_at, updated_at, completed_at
+		FROM jobs`
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	query += " ORDER BY started_at DESC LIMIT ?"
+	args = append(args, limit)
+	rows, err := store.DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	jobs := []Job{}
+	for rows.Next() {
+		job, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, rows.Err()
+}
+
+func (store *Store) AddJobEvent(input JobEventInput) (JobEvent, error) {
+	if store == nil || store.DB == nil {
+		return JobEvent{}, errors.New("nil database store")
+	}
+	input.JobID = strings.TrimSpace(input.JobID)
+	if input.JobID == "" {
+		return JobEvent{}, errors.New("job id is required")
+	}
+	event := JobEvent{
+		ID:           randomID("evt"),
+		JobID:        input.JobID,
+		Level:        normalizeJobEventLevel(input.Level),
+		Phase:        strings.TrimSpace(input.Phase),
+		Message:      strings.TrimSpace(input.Message),
+		CurrentLabel: strings.TrimSpace(input.CurrentLabel),
+		Processed:    maxInt(input.Processed, 0),
+		Total:        maxInt(input.Total, 0),
+		CreatedAt:    time.Now().UTC(),
+	}
+	if event.Message == "" {
+		return JobEvent{}, errors.New("job event message is required")
+	}
+	_, err := store.DB.Exec(`INSERT INTO job_events (
+		id, job_id, level, phase, message, current_label, processed, total, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		event.ID,
+		event.JobID,
+		event.Level,
+		event.Phase,
+		event.Message,
+		event.CurrentLabel,
+		event.Processed,
+		event.Total,
+		event.CreatedAt.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return JobEvent{}, err
+	}
+	return event, nil
+}
+
+func (store *Store) ListJobEvents(jobID string, limit int) ([]JobEvent, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	if limit <= 0 {
+		limit = 25
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	rows, err := store.DB.Query(`SELECT id, job_id, level, phase, message, current_label, processed, total, created_at
+		FROM job_events WHERE job_id = ? ORDER BY created_at DESC LIMIT ?`, strings.TrimSpace(jobID), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	events := []JobEvent{}
+	for rows.Next() {
+		var event JobEvent
+		var createdAt string
+		if err := rows.Scan(&event.ID, &event.JobID, &event.Level, &event.Phase, &event.Message, &event.CurrentLabel, &event.Processed, &event.Total, &createdAt); err != nil {
+			return nil, err
+		}
+		event.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+		events = append(events, event)
+	}
+	return events, rows.Err()
+}
+
 func (store *Store) UpsertPathMapping(mapping PathMapping) (PathMapping, error) {
 	if store == nil || store.DB == nil {
 		return PathMapping{}, errors.New("nil database store")
@@ -1801,6 +2178,41 @@ func knownIntegration(integration string) bool {
 	}
 }
 
+func normalizeJobKind(kind string) string {
+	return strings.ToLower(strings.TrimSpace(kind))
+}
+
+func knownJobKind(kind string) bool {
+	switch normalizeJobKind(kind) {
+	case "filesystem_scan", "jellyfin_sync", "plex_sync", "emby_sync":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeJobStatus(status string) string {
+	return strings.ToLower(strings.TrimSpace(status))
+}
+
+func knownJobStatus(status string) bool {
+	switch normalizeJobStatus(status) {
+	case "queued", "running", "completed", "failed":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeJobEventLevel(level string) string {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "debug", "warning", "error":
+		return strings.ToLower(strings.TrimSpace(level))
+	default:
+		return "info"
+	}
+}
+
 func normalizeProviderName(provider string) string {
 	return strings.ToLower(strings.TrimSpace(provider))
 }
@@ -1848,6 +2260,54 @@ func defaultString(value string, fallback string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return fallback
+	}
+	return value
+}
+
+type jobScanner interface {
+	Scan(dest ...any) error
+}
+
+func (store *Store) jobFromQuery(query string, args ...any) (Job, error) {
+	row := store.DB.QueryRow(query, args...)
+	return scanJob(row)
+}
+
+func scanJob(scanner jobScanner) (Job, error) {
+	var job Job
+	var startedAt string
+	var updatedAt string
+	var completedAt sql.NullString
+	err := scanner.Scan(
+		&job.ID,
+		&job.Kind,
+		&job.TargetID,
+		&job.Status,
+		&job.Phase,
+		&job.Message,
+		&job.CurrentLabel,
+		&job.Processed,
+		&job.Total,
+		&job.ItemsImported,
+		&job.RollupsImported,
+		&job.UnmappedItems,
+		&job.Error,
+		&startedAt,
+		&updatedAt,
+		&completedAt,
+	)
+	if err != nil {
+		return Job{}, err
+	}
+	job.StartedAt, _ = time.Parse(time.RFC3339Nano, startedAt)
+	job.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+	job.CompletedAt = parseSQLTime(completedAt)
+	return job, nil
+}
+
+func maxInt(value int, floor int) int {
+	if value < floor {
+		return floor
 	}
 	return value
 }
