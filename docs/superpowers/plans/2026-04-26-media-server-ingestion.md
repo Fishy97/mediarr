@@ -278,7 +278,7 @@ cd backend && go test ./internal/integrations ./internal/api
 
 Expected: pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/internal/integrations/integrations.go backend/internal/integrations/jellyfin_test.go backend/internal/api/server.go backend/internal/api/integration_sync_test.go
@@ -293,7 +293,7 @@ git push
 - Test: `backend/internal/integrations/plex_test.go`
 - Modify: `backend/internal/api/server.go`
 
-- [ ] **Step 1: Write failing Plex connector test**
+- [x] **Step 1: Write failing Plex connector test**
 
 Create `backend/internal/integrations/plex_test.go` with XML fixtures for `/identity`, `/library/sections`, `/library/sections/1/all`, and `/status/sessions/history/all`.
 
@@ -304,7 +304,7 @@ Assert:
 - movie media parts import file path and size
 - history rows import `viewedAt`, `accountID`, and roll up last played and play count
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 cd backend && go test ./internal/integrations -run Plex
@@ -312,7 +312,7 @@ cd backend && go test ./internal/integrations -run Plex
 
 Expected: fail because `SyncPlex` is undefined.
 
-- [ ] **Step 3: Implement Plex sync**
+- [x] **Step 3: Implement Plex sync**
 
 Add:
 
@@ -322,11 +322,11 @@ func SyncPlex(ctx context.Context, options Options, mappings []database.PathMapp
 
 Use XML decoding for Plex responses. Import movies and episodes from library sections. Import playback history with pagination controls where available. Prefer locally matched file sizes when path mapping succeeds; otherwise use Plex part size as server-reported.
 
-- [ ] **Step 4: Wire Plex through API sync route**
+- [x] **Step 4: Wire Plex through API sync route**
 
 Update sync dispatch to call Jellyfin or Plex based on integration ID. Return `400` for unsupported sync targets such as Emby until Emby ingestion exists.
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 ```bash
 cd backend && go test ./internal/integrations ./internal/api

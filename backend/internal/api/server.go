@@ -630,6 +630,8 @@ func syncIntegrationSnapshot(ctx context.Context, options integrations.Options, 
 	switch strings.ToLower(strings.TrimSpace(targetID)) {
 	case "jellyfin":
 		return integrations.SyncJellyfin(ctx, options, mappings)
+	case "plex":
+		return integrations.SyncPlex(ctx, options, mappings)
 	default:
 		return database.MediaServerSnapshot{}, errors.New("integration sync is not supported for this target")
 	}

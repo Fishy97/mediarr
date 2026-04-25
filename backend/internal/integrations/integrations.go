@@ -3,6 +3,7 @@ package integrations
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"net/http"
 	"net/url"
@@ -78,6 +79,61 @@ type jellyfinUserData struct {
 	LastPlayedDate string `json:"LastPlayedDate"`
 	Played         bool   `json:"Played"`
 	IsFavorite     bool   `json:"IsFavorite"`
+}
+
+type plexIdentity struct {
+	FriendlyName string `xml:"friendlyName,attr"`
+}
+
+type plexSectionsResponse struct {
+	Directories []plexDirectory `xml:"Directory"`
+}
+
+type plexDirectory struct {
+	Key   string `xml:"key,attr"`
+	Title string `xml:"title,attr"`
+	Type  string `xml:"type,attr"`
+}
+
+type plexLibraryResponse struct {
+	Videos []plexVideo `xml:"Video"`
+}
+
+type plexVideo struct {
+	RatingKey string      `xml:"ratingKey,attr"`
+	Key       string      `xml:"key,attr"`
+	Title     string      `xml:"title,attr"`
+	Type      string      `xml:"type,attr"`
+	Year      int         `xml:"year,attr"`
+	AddedAt   int64       `xml:"addedAt,attr"`
+	Duration  int         `xml:"duration,attr"`
+	Guids     []plexGuid  `xml:"Guid"`
+	Media     []plexMedia `xml:"Media"`
+}
+
+type plexGuid struct {
+	ID string `xml:"id,attr"`
+}
+
+type plexMedia struct {
+	Duration int        `xml:"duration,attr"`
+	Parts    []plexPart `xml:"Part"`
+}
+
+type plexPart struct {
+	File      string `xml:"file,attr"`
+	Size      int64  `xml:"size,attr"`
+	Container string `xml:"container,attr"`
+}
+
+type plexHistoryResponse struct {
+	Videos []plexHistoryVideo `xml:"Video"`
+}
+
+type plexHistoryVideo struct {
+	RatingKey string `xml:"ratingKey,attr"`
+	ViewedAt  int64  `xml:"viewedAt,attr"`
+	AccountID string `xml:"accountID,attr"`
 }
 
 func Defaults() []Target {
@@ -202,6 +258,170 @@ func SyncJellyfin(ctx context.Context, options Options, mappings []database.Path
 		Job: database.MediaSyncJob{
 			ID:              "sync_jellyfin_" + completedAt.Format("20060102150405"),
 			ServerID:        "jellyfin",
+			Status:          "completed",
+			ItemsImported:   len(items),
+			RollupsImported: len(rollups),
+			UnmappedItems:   unmapped,
+			StartedAt:       startedAt,
+			CompletedAt:     completedAt,
+		},
+	}, nil
+}
+
+func SyncPlex(ctx context.Context, options Options, mappings []database.PathMapping) (database.MediaServerSnapshot, error) {
+	baseURL := strings.TrimRight(strings.TrimSpace(options.PlexURL), "/")
+	token := strings.TrimSpace(options.PlexToken)
+	startedAt := time.Now().UTC()
+	if baseURL == "" || token == "" {
+		return database.MediaServerSnapshot{}, errors.New("plex is not configured")
+	}
+
+	var identity plexIdentity
+	if err := getXML(ctx, baseURL+"/identity", "X-Plex-Token", token, &identity); err != nil {
+		return database.MediaServerSnapshot{}, err
+	}
+	serverName := strings.TrimSpace(identity.FriendlyName)
+	if serverName == "" {
+		serverName = "Plex"
+	}
+
+	var sections plexSectionsResponse
+	if err := getXML(ctx, baseURL+"/library/sections", "X-Plex-Token", token, &sections); err != nil {
+		return database.MediaServerSnapshot{}, err
+	}
+
+	now := time.Now().UTC()
+	var libraries []database.MediaServerLibrary
+	itemByID := map[string]database.MediaServerItem{}
+	fileByKey := map[string]database.MediaServerFile{}
+	for _, section := range sections.Directories {
+		if strings.TrimSpace(section.Key) == "" {
+			continue
+		}
+		libraryKind := normalizePlexKind(section.Type)
+		var library plexLibraryResponse
+		if err := getXML(ctx, baseURL+"/library/sections/"+url.PathEscape(section.Key)+"/all", "X-Plex-Token", token, &library); err != nil {
+			return database.MediaServerSnapshot{}, err
+		}
+		libraries = append(libraries, database.MediaServerLibrary{
+			ServerID:   "plex",
+			ExternalID: section.Key,
+			Name:       strings.TrimSpace(section.Title),
+			Kind:       libraryKind,
+			ItemCount:  len(library.Videos),
+		})
+		for _, video := range library.Videos {
+			externalID := firstNonEmpty(video.RatingKey, strings.TrimPrefix(video.Key, "/library/metadata/"))
+			if externalID == "" {
+				continue
+			}
+			runtime := video.Duration / 1000
+			if runtime == 0 && len(video.Media) > 0 {
+				runtime = video.Media[0].Duration / 1000
+			}
+			itemByID[externalID] = database.MediaServerItem{
+				ServerID:          "plex",
+				ExternalID:        externalID,
+				LibraryExternalID: section.Key,
+				Kind:              normalizePlexKind(firstNonEmpty(video.Type, section.Type)),
+				Title:             strings.TrimSpace(video.Title),
+				Year:              video.Year,
+				ProviderIDs:       plexProviderIDs(video.Guids),
+				RuntimeSeconds:    runtime,
+				DateCreated:       unixTime(video.AddedAt),
+				MatchConfidence:   0.78,
+				UpdatedAt:         now,
+			}
+			for _, media := range video.Media {
+				for _, part := range media.Parts {
+					if strings.TrimSpace(part.File) == "" {
+						continue
+					}
+					localPath, verification, confidence := applyPathMappings("plex", part.File, mappings)
+					fileByKey[externalID+"|"+part.File] = database.MediaServerFile{
+						ServerID:        "plex",
+						ItemExternalID:  externalID,
+						Path:            part.File,
+						SizeBytes:       part.Size,
+						Container:       part.Container,
+						LocalPath:       localPath,
+						Verification:    verification,
+						MatchConfidence: confidence,
+					}
+				}
+			}
+		}
+	}
+
+	var history plexHistoryResponse
+	if err := getXML(ctx, baseURL+"/status/sessions/history/all", "X-Plex-Token", token, &history); err != nil {
+		return database.MediaServerSnapshot{}, err
+	}
+	rollupByItemID := map[string]*database.MediaActivityRollup{}
+	uniqueAccounts := map[string]map[string]bool{}
+	for _, event := range history.Videos {
+		if strings.TrimSpace(event.RatingKey) == "" {
+			continue
+		}
+		rollup := rollupByItemID[event.RatingKey]
+		if rollup == nil {
+			rollup = &database.MediaActivityRollup{ServerID: "plex", ItemExternalID: event.RatingKey, UpdatedAt: now}
+			rollupByItemID[event.RatingKey] = rollup
+		}
+		rollup.PlayCount++
+		viewedAt := unixTime(event.ViewedAt)
+		if !viewedAt.IsZero() && (rollup.LastPlayedAt.IsZero() || viewedAt.After(rollup.LastPlayedAt)) {
+			rollup.LastPlayedAt = viewedAt
+		}
+		accountID := strings.TrimSpace(event.AccountID)
+		if accountID != "" {
+			if uniqueAccounts[event.RatingKey] == nil {
+				uniqueAccounts[event.RatingKey] = map[string]bool{}
+			}
+			uniqueAccounts[event.RatingKey][accountID] = true
+		}
+	}
+	rollups := make([]database.MediaActivityRollup, 0, len(rollupByItemID))
+	for itemID, rollup := range rollupByItemID {
+		rollup.UniqueUsers = len(uniqueAccounts[itemID])
+		rollup.WatchedUsers = rollup.UniqueUsers
+		if rollup.UniqueUsers == 0 && rollup.PlayCount > 0 {
+			rollup.UniqueUsers = 1
+			rollup.WatchedUsers = 1
+		}
+		rollups = append(rollups, *rollup)
+	}
+
+	items := make([]database.MediaServerItem, 0, len(itemByID))
+	for _, item := range itemByID {
+		items = append(items, item)
+	}
+	files := make([]database.MediaServerFile, 0, len(fileByKey))
+	unmapped := 0
+	for _, file := range fileByKey {
+		if file.LocalPath == "" {
+			unmapped++
+		}
+		files = append(files, file)
+	}
+	completedAt := time.Now().UTC()
+	return database.MediaServerSnapshot{
+		Server: database.MediaServer{
+			ID:           "plex",
+			Kind:         "plex",
+			Name:         serverName,
+			BaseURL:      baseURL,
+			Status:       "configured",
+			LastSyncedAt: completedAt,
+			UpdatedAt:    completedAt,
+		},
+		Libraries: libraries,
+		Items:     items,
+		Files:     files,
+		Rollups:   rollups,
+		Job: database.MediaSyncJob{
+			ID:              "sync_plex_" + completedAt.Format("20060102150405"),
+			ServerID:        "plex",
 			Status:          "completed",
 			ItemsImported:   len(items),
 			RollupsImported: len(rollups),
@@ -390,6 +610,25 @@ func getJSON(ctx context.Context, endpoint string, headerName string, token stri
 	return json.NewDecoder(res.Body).Decode(target)
 }
 
+func getXML(ctx context.Context, endpoint string, headerName string, token string, target any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	if headerName != "" {
+		req.Header.Set(headerName, token)
+	}
+	res, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode > 299 {
+		return errors.New("provider request failed with status " + res.Status)
+	}
+	return xml.NewDecoder(res.Body).Decode(target)
+}
+
 func intString(value int) string {
 	return strconv.Itoa(value)
 }
@@ -407,6 +646,33 @@ func normalizeJellyfinKind(value string) string {
 	default:
 		return "video"
 	}
+}
+
+func normalizePlexKind(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "movie":
+		return "movie"
+	case "show":
+		return "series"
+	case "season":
+		return "season"
+	case "episode":
+		return "episode"
+	default:
+		return "video"
+	}
+}
+
+func plexProviderIDs(guids []plexGuid) map[string]string {
+	providerIDs := map[string]string{}
+	for _, guid := range guids {
+		provider, id, ok := strings.Cut(strings.TrimSpace(guid.ID), "://")
+		if !ok || provider == "" || id == "" {
+			continue
+		}
+		providerIDs[strings.ToLower(provider)] = id
+	}
+	return providerIDs
 }
 
 func applyPathMappings(serverID string, path string, mappings []database.PathMapping) (string, string, float64) {
@@ -431,6 +697,13 @@ func applyPathMappings(serverID string, path string, mappings []database.PathMap
 		}
 	}
 	return "", "server_reported", 0.62
+}
+
+func unixTime(seconds int64) time.Time {
+	if seconds <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(seconds, 0).UTC()
 }
 
 func parseProviderTime(value string) time.Time {
