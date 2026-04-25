@@ -1,0 +1,171 @@
+package database
+
+import (
+	"testing"
+	"time"
+)
+
+func TestMediaServerSnapshotPersistsNormalizedActivity(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	completedAt := parseIntegrationTestTime("2026-04-26T10:00:00Z")
+	snapshot := MediaServerSnapshot{
+		Server: MediaServer{
+			ID:      "srv_jellyfin",
+			Kind:    "jellyfin",
+			Name:    "Jellyfin",
+			BaseURL: "http://jellyfin.local",
+			Status:  "configured",
+		},
+		Users: []MediaServerUser{
+			{ServerID: "srv_jellyfin", ExternalID: "u1", DisplayName: "Alex"},
+		},
+		Libraries: []MediaServerLibrary{
+			{ServerID: "srv_jellyfin", ExternalID: "lib_movies", Name: "Movies", Kind: "movie", ItemCount: 1},
+		},
+		Items: []MediaServerItem{
+			{
+				ServerID:          "srv_jellyfin",
+				ExternalID:        "item_1",
+				LibraryExternalID: "lib_movies",
+				Kind:              "movie",
+				Title:             "Arrival",
+				Year:              2016,
+				Path:              "/media/movies/Arrival (2016).mkv",
+				ProviderIDs:       map[string]string{"Tmdb": "329865", "Imdb": "tt2543164"},
+				RuntimeSeconds:    6960,
+				MatchConfidence:   0.95,
+			},
+		},
+		Files: []MediaServerFile{
+			{
+				ServerID:        "srv_jellyfin",
+				ItemExternalID:  "item_1",
+				Path:            "/media/movies/Arrival (2016).mkv",
+				SizeBytes:       42_000_000_000,
+				Container:       "mkv",
+				Verification:    "server_reported",
+				MatchConfidence: 0.7,
+			},
+		},
+		Rollups: []MediaActivityRollup{
+			{
+				ServerID:       "srv_jellyfin",
+				ItemExternalID: "item_1",
+				PlayCount:      2,
+				UniqueUsers:    1,
+				WatchedUsers:   1,
+				FavoriteCount:  0,
+				LastPlayedAt:   parseIntegrationTestTime("2025-01-02T03:04:05Z"),
+			},
+		},
+		Job: MediaSyncJob{
+			ID:              "sync_1",
+			ServerID:        "srv_jellyfin",
+			Status:          "completed",
+			ItemsImported:   1,
+			RollupsImported: 1,
+			UnmappedItems:   0,
+			StartedAt:       completedAt.Add(-time.Minute),
+			CompletedAt:     completedAt,
+		},
+	}
+
+	if err := store.ReplaceMediaServerSnapshot(snapshot); err != nil {
+		t.Fatal(err)
+	}
+
+	rollups, err := store.ListMediaActivityRollups("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rollups) != 1 || rollups[0].PlayCount != 2 || rollups[0].UniqueUsers != 1 {
+		t.Fatalf("rollups = %#v", rollups)
+	}
+	if rollups[0].LastPlayedAt.IsZero() || rollups[0].LastPlayedAt.Format(time.RFC3339) != "2025-01-02T03:04:05Z" {
+		t.Fatalf("last played = %s", rollups[0].LastPlayedAt.Format(time.RFC3339))
+	}
+
+	items, err := store.ListMediaServerItems(MediaServerItemFilter{ServerID: "srv_jellyfin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %d, want 1", len(items))
+	}
+	if items[0].Title != "Arrival" || items[0].ProviderIDs["Tmdb"] != "329865" {
+		t.Fatalf("unexpected item: %#v", items[0])
+	}
+
+	job, err := store.LatestMediaSyncJob("srv_jellyfin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Status != "completed" || job.ItemsImported != 1 || job.RollupsImported != 1 {
+		t.Fatalf("job = %#v", job)
+	}
+}
+
+func TestPathMappingsCanBeUpsertedListedAndDeleted(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	mapping, err := store.UpsertPathMapping(PathMapping{
+		ServerID:         "srv_jellyfin",
+		ServerPathPrefix: "/mnt/media",
+		LocalPathPrefix:  "/media",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mapping.ID == "" {
+		t.Fatal("mapping id was not assigned")
+	}
+
+	updated, err := store.UpsertPathMapping(PathMapping{
+		ID:               mapping.ID,
+		ServerID:         "srv_jellyfin",
+		ServerPathPrefix: "/srv/media",
+		LocalPathPrefix:  "/media",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ServerPathPrefix != "/srv/media" {
+		t.Fatalf("updated mapping = %#v", updated)
+	}
+
+	mappings, err := store.ListPathMappings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mappings) != 1 || mappings[0].ID != mapping.ID {
+		t.Fatalf("mappings = %#v", mappings)
+	}
+
+	if err := store.DeletePathMapping(mapping.ID); err != nil {
+		t.Fatal(err)
+	}
+	mappings, err = store.ListPathMappings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mappings) != 0 {
+		t.Fatalf("mappings after delete = %#v", mappings)
+	}
+}
+
+func parseIntegrationTestTime(value string) time.Time {
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		panic(err)
+	}
+	return parsed
+}

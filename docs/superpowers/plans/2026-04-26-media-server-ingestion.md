@@ -36,7 +36,7 @@
 - Modify: `backend/internal/database/store.go`
 - Test: `backend/internal/database/integration_activity_test.go`
 
-- [ ] **Step 1: Write failing migration and persistence tests**
+- [x] **Step 1: Write failing migration and persistence tests**
 
 Create `backend/internal/database/integration_activity_test.go` with tests that open a temp store, call new methods, and verify these behaviors:
 
@@ -74,7 +74,7 @@ func TestMediaServerSnapshotPersistsNormalizedActivity(t *testing.T) {
 
 Add a second test for `UpsertPathMapping`, `ListPathMappings`, and `DeletePathMapping`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -84,7 +84,7 @@ cd backend && go test ./internal/database -run 'TestMediaServerSnapshot|TestPath
 
 Expected: fail because new types and methods are undefined.
 
-- [ ] **Step 3: Implement database types and migrations**
+- [x] **Step 3: Implement database types and migrations**
 
 In `backend/internal/database/store.go`, add typed structs for `MediaServer`, `MediaServerUser`, `MediaServerLibrary`, `MediaServerItem`, `MediaServerFile`, `MediaActivityRollup`, `MediaSyncJob`, `PathMapping`, `MediaServerSnapshot`, and `MediaServerItemFilter`.
 
@@ -178,7 +178,7 @@ CREATE TABLE IF NOT EXISTS integration_path_mappings (
 
 Add columns to `recommendations`: `server_id`, `external_item_id`, `last_played_at`, `play_count`, `unique_users`, `favorite_count`, `verification`, and `evidence`.
 
-- [ ] **Step 4: Implement store methods**
+- [x] **Step 4: Implement store methods**
 
 Implement:
 
@@ -194,7 +194,7 @@ func (store *Store) DeletePathMapping(id string) error
 
 Use a transaction for snapshot replacement and preserve old snapshots if any write fails.
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run:
 
