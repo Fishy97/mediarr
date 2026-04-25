@@ -105,6 +105,11 @@ export type IntegrationSyncJob = {
   id: string;
   serverId: string;
   status: string;
+  phase?: string;
+  message?: string;
+  currentLabel?: string;
+  processed?: number;
+  total?: number;
   itemsImported: number;
   rollupsImported: number;
   unmappedItems: number;
@@ -112,6 +117,41 @@ export type IntegrationSyncJob = {
   error?: string;
   startedAt: string;
   completedAt?: string;
+};
+
+export type Job = {
+  id: string;
+  kind: string;
+  targetId?: string;
+  status: string;
+  phase: string;
+  message: string;
+  currentLabel?: string;
+  processed: number;
+  total: number;
+  itemsImported: number;
+  rollupsImported: number;
+  unmappedItems: number;
+  error?: string;
+  startedAt: string;
+  updatedAt: string;
+  completedAt?: string;
+};
+
+export type JobEvent = {
+  id: string;
+  jobId: string;
+  level: string;
+  phase: string;
+  message: string;
+  currentLabel?: string;
+  processed: number;
+  total: number;
+  createdAt: string;
+};
+
+export type JobDetail = Job & {
+  events: JobEvent[];
 };
 
 export type MediaServerItem = {

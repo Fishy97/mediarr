@@ -103,6 +103,19 @@ describe('api auth helpers', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/v1/path-mappings', expect.any(Object));
   });
 
+  test('jobs endpoints expose active background progress', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ data: [{ id: 'job_1', kind: 'filesystem_scan', status: 'running', phase: 'processing' }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'job_1', kind: 'filesystem_scan', status: 'running', events: [{ id: 'evt_1', message: 'Processed Arrival' }] } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.jobs({ active: true })).resolves.toHaveLength(1);
+    await expect(api.job('job_1')).resolves.toMatchObject({ id: 'job_1', events: [{ message: 'Processed Arrival' }] });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/jobs?active=true', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/jobs/job_1', expect.any(Object));
+  });
+
   test('integration settings calls redactable media server setting endpoints', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ data: [{ integration: 'jellyfin', baseUrl: 'http://jellyfin:8096', apiKeyConfigured: true, apiKeyLast4: 'abcd' }] }))

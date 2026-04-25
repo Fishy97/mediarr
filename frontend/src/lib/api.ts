@@ -11,6 +11,8 @@ import type {
   IntegrationSetting,
   IntegrationSettingInput,
   IntegrationSyncJob,
+  Job,
+  JobDetail,
   Library,
   MediaServerItem,
   PathMapping,
@@ -102,8 +104,8 @@ export const api = {
   async clearCatalogCorrection(id: string): Promise<void> {
     await request<Envelope<{ ok: boolean }>>(`/api/v1/catalog/${encodeURIComponent(id)}/correction`, { method: 'DELETE' });
   },
-  async startScan(): Promise<{ scans: ScanResult[]; recommendations: Recommendation[] }> {
-    return (await request<Envelope<{ scans: ScanResult[]; recommendations: Recommendation[] }>>('/api/v1/scans', {
+  async startScan(): Promise<Job> {
+    return (await request<Envelope<Job>>('/api/v1/scans', {
       method: 'POST',
     })).data;
   },
@@ -151,6 +153,26 @@ export const api = {
   },
   async integrationSyncStatus(id: string): Promise<IntegrationSyncJob> {
     return (await request<Envelope<IntegrationSyncJob>>(`/api/v1/integrations/${encodeURIComponent(id)}/sync`)).data;
+  },
+  async jobs(filter?: { active?: boolean; kind?: string; targetId?: string; limit?: number }): Promise<Job[]> {
+    const params = new URLSearchParams();
+    if (filter?.active) {
+      params.set('active', 'true');
+    }
+    if (filter?.kind) {
+      params.set('kind', filter.kind);
+    }
+    if (filter?.targetId) {
+      params.set('targetId', filter.targetId);
+    }
+    if (filter?.limit) {
+      params.set('limit', String(filter.limit));
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return (await request<Envelope<Job[]>>(`/api/v1/jobs${suffix}`)).data;
+  },
+  async job(id: string): Promise<JobDetail> {
+    return (await request<Envelope<JobDetail>>(`/api/v1/jobs/${encodeURIComponent(id)}`)).data;
   },
   async integrationItems(id: string, unmapped = false): Promise<MediaServerItem[]> {
     const suffix = unmapped ? '?unmapped=true' : '';

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import {
   Activity,
@@ -37,6 +37,9 @@ import type {
   IntegrationSyncJob,
   IntegrationSetting,
   IntegrationSettingInput,
+  Job,
+  JobDetail,
+  JobEvent,
   Library as MediaLibrary,
   MediaServerItem,
   PathMapping,
@@ -63,6 +66,8 @@ export function App() {
   const [integrationItems, setIntegrationItems] = useState<MediaServerItem[]>([]);
   const [activityRollups, setActivityRollups] = useState<ActivityRollup[]>([]);
   const [pathMappings, setPathMappings] = useState<PathMapping[]>([]);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobDetails, setJobDetails] = useState<Record<string, JobDetail>>({});
   const [aiStatus, setAIStatus] = useState<AIStatus | null>(null);
   const [status, setStatus] = useState('Loading');
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +76,7 @@ export function App() {
   const [authChecked, setAuthChecked] = useState(false);
   const [setupRequired, setSetupRequired] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
+  const activeJobIds = useRef<Set<string>>(new Set());
 
   async function refresh() {
     try {
@@ -103,6 +109,39 @@ export function App() {
     }
   }
 
+  async function refreshJobs() {
+    if (!user) {
+      return;
+    }
+    try {
+      const jobRows = await api.jobs({ limit: 12 });
+      const activeRows = jobRows.filter(isActiveJob);
+      const previousActive = activeJobIds.current;
+      const completedSinceLastPoll = jobRows.some((job) => previousActive.has(job.id) && !isActiveJob(job));
+      activeJobIds.current = new Set(activeRows.map((job) => job.id));
+      setJobs(jobRows);
+
+      const details = await Promise.all(jobRows.slice(0, 8).map((job) => api.job(job.id).catch(() => null)));
+      setJobDetails((current) => {
+        const next = { ...current };
+        details.forEach((detail) => {
+          if (detail) {
+            next[detail.id] = detail;
+          }
+        });
+        return next;
+      });
+
+      if (completedSinceLastPoll) {
+        await refresh();
+      } else if (activeRows.some((job) => job.kind.endsWith('_sync'))) {
+        await refreshIntegrationActivity();
+      }
+    } catch {
+      // Job polling is advisory UI telemetry; the main refresh path surfaces hard failures.
+    }
+  }
+
   async function refreshIntegrationActivity(integrationRows = integrations) {
     const mediaServers = integrationRows.filter((integration) => integration.kind === 'media_server');
     const [rollupRows, mappingRows, itemRows, jobRows] = await Promise.all([
@@ -123,6 +162,17 @@ export function App() {
   useEffect(() => {
     void bootstrap();
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      return undefined;
+    }
+    void refreshJobs();
+    const timer = window.setInterval(() => {
+      void refreshJobs();
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [user]);
 
   async function bootstrap() {
     try {
@@ -149,10 +199,9 @@ export function App() {
   async function startScan() {
     setBusy(true);
     try {
-      const result = await api.startScan();
-      setScans((current) => [...current, ...result.scans]);
-      setRecommendations(result.recommendations);
-      setCatalog(result.scans.flatMap((scan) => scan.items).map(toCatalogItem));
+      const job = await api.startScan();
+      setJobs((current) => [job, ...current.filter((row) => row.id !== job.id)]);
+      await refreshJobs();
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Scan failed');
@@ -283,14 +332,7 @@ export function App() {
     try {
       const job = await api.syncIntegration(id);
       setSyncJobs((current) => ({ ...current, [id]: job }));
-      const [items, rollups, recs] = await Promise.all([
-        api.integrationItems(id),
-        api.activityRollups(),
-        api.recommendations(),
-      ]);
-      setIntegrationItems((current) => [...current.filter((item) => item.serverId !== id), ...items]);
-      setActivityRollups(rollups);
-      setRecommendations(recs);
+      await refreshJobs();
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to sync integration');
@@ -303,6 +345,7 @@ export function App() {
   const totalFiles = catalogItems.length;
   const totalSize = catalogItems.reduce((sum, item) => sum + item.sizeBytes, 0);
   const recoverable = recommendations.reduce((sum, rec) => sum + rec.spaceSavedBytes, 0);
+  const scanning = jobs.some((job) => isActiveJob(job) && job.kind === 'filesystem_scan');
 
   if (!authChecked) {
     return <LoadingScreen />;
@@ -362,9 +405,9 @@ export function App() {
             <button className="icon-button" onClick={() => void logout()} title="Log out" aria-label="Log out">
               <LogOut size={18} />
             </button>
-            <button className="primary-button" onClick={() => void startScan()} disabled={busy}>
+            <button className="primary-button" onClick={() => void startScan()} disabled={busy || scanning}>
               <Activity size={18} />
-              {busy ? 'Working' : 'Scan now'}
+              {scanning ? 'Scanning' : busy ? 'Working' : 'Scan now'}
             </button>
           </div>
         </header>
@@ -381,6 +424,8 @@ export function App() {
             recommendations={recommendations}
             scans={scans}
             activityRollups={activityRollups}
+            jobs={jobs}
+            jobDetails={jobDetails}
           />
         )}
         {view === 'libraries' && <Libraries libraries={libraries} scans={scans} />}
@@ -397,6 +442,8 @@ export function App() {
             integrationItems={integrationItems}
             activityRollups={activityRollups}
             pathMappings={pathMappings}
+            jobs={jobs}
+            jobDetails={jobDetails}
             onProviderUpdate={(provider, setting) => void updateProviderSetting(provider, setting)}
             onIntegrationUpdate={(integration, setting) => void updateIntegrationSetting(integration, setting)}
             onIntegrationRefresh={(id) => void refreshIntegration(id)}
@@ -477,6 +524,8 @@ function Dashboard({
   recommendations,
   scans,
   activityRollups,
+  jobs,
+  jobDetails,
 }: {
   status: string;
   libraries: MediaLibrary[];
@@ -486,6 +535,8 @@ function Dashboard({
   recommendations: Recommendation[];
   scans: ScanResult[];
   activityRollups: ActivityRollup[];
+  jobs: Job[];
+  jobDetails: Record<string, JobDetail>;
 }) {
   const lastScan = scans.at(-1);
   const activityRecommendations = recommendations.filter((rec) => rec.serverId);
@@ -495,6 +546,7 @@ function Dashboard({
     .reduce((sum, rec) => sum + rec.spaceSavedBytes, 0);
   return (
     <section className="view-grid">
+      <JobTelemetry jobs={jobs} jobDetails={jobDetails} />
       <div className="stat-strip">
         <Stat icon={<HeartPulse />} label="System" value={status.toUpperCase()} />
         <Stat icon={<FolderOpen />} label="Libraries" value={String(libraries.length)} />
@@ -788,6 +840,8 @@ function Integrations({
   integrationItems,
   activityRollups,
   pathMappings,
+  jobs,
+  jobDetails,
   onProviderUpdate,
   onIntegrationUpdate,
   onIntegrationRefresh,
@@ -803,6 +857,8 @@ function Integrations({
   integrationItems: MediaServerItem[];
   activityRollups: ActivityRollup[];
   pathMappings: PathMapping[];
+  jobs: Job[];
+  jobDetails: Record<string, JobDetail>;
   onProviderUpdate: (provider: string, setting: ProviderSettingInput) => void;
   onIntegrationUpdate: (integration: string, setting: IntegrationSettingInput) => void;
   onIntegrationRefresh: (id: string) => void;
@@ -810,24 +866,30 @@ function Integrations({
   busy: boolean;
 }) {
   const mediaServers = integrations.filter((integration) => integration.kind === 'media_server');
+  const activeSyncJobs = jobs.filter((job) => isActiveJob(job) && job.kind.endsWith('_sync'));
   return (
     <section className="view-grid">
       <div className="integration-grid">
-        {mediaServers.map((integration) => (
-          <MediaServerCard
-            key={integration.id}
-            integration={integration}
-            setting={integrationSettings.find((setting) => setting.integration === integration.id)}
-            job={syncJobs[integration.id] ?? null}
-            importedItems={integrationItems.filter((item) => item.serverId === integration.id).length}
-            activityCount={activityRollups.filter((rollup) => rollup.serverId === integration.id).length}
-            pathMappingCount={pathMappings.filter((mapping) => !mapping.serverId || mapping.serverId === integration.id).length}
-            busy={busy}
-            onUpdate={onIntegrationUpdate}
-            onRefresh={onIntegrationRefresh}
-            onSync={onIntegrationSync}
-          />
-        ))}
+        {mediaServers.map((integration) => {
+          const activeJob = activeSyncJobs.find((job) => job.targetId === integration.id);
+          return (
+            <MediaServerCard
+              key={integration.id}
+              integration={integration}
+              setting={integrationSettings.find((setting) => setting.integration === integration.id)}
+              job={syncJobs[integration.id] ?? null}
+              importedItems={integrationItems.filter((item) => item.serverId === integration.id).length}
+              activityCount={activityRollups.filter((rollup) => rollup.serverId === integration.id).length}
+              pathMappingCount={pathMappings.filter((mapping) => !mapping.serverId || mapping.serverId === integration.id).length}
+              activeJob={activeJob}
+              jobDetail={activeJob ? jobDetails[activeJob.id] : undefined}
+              busy={busy}
+              onUpdate={onIntegrationUpdate}
+              onRefresh={onIntegrationRefresh}
+              onSync={onIntegrationSync}
+            />
+          );
+        })}
       </div>
       <div className="grid-list">
         {aiStatus && (
@@ -872,6 +934,8 @@ function MediaServerCard({
   integration,
   setting,
   job,
+  activeJob,
+  jobDetail,
   importedItems,
   activityCount,
   pathMappingCount,
@@ -883,6 +947,8 @@ function MediaServerCard({
   integration: Integration;
   setting?: IntegrationSetting;
   job: IntegrationSyncJob | null;
+  activeJob?: Job;
+  jobDetail?: JobDetail;
   importedItems: number;
   activityCount: number;
   pathMappingCount: number;
@@ -893,6 +959,7 @@ function MediaServerCard({
 }) {
   const [baseUrl, setBaseURL] = useState(setting?.baseUrl || '');
   const [apiKey, setAPIKey] = useState('');
+  const displayJob = activeJob ?? syncJobToJob(job);
 
   useEffect(() => {
     setBaseURL(setting?.baseUrl || '');
@@ -959,10 +1026,11 @@ function MediaServerCard({
             </button>
             <button className="primary-button" onClick={() => onSync(integration.id)} disabled={busy}>
               <Database size={16} />
-              Sync
+              {activeJob ? 'Syncing' : 'Sync'}
             </button>
           </div>
         </div>
+        {displayJob && <ProgressPanel job={displayJob} events={jobDetail?.events || []} compact />}
       </div>
     </article>
   );
@@ -974,6 +1042,60 @@ function Signal({ label, value }: { label: string; value: string }) {
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+function JobTelemetry({ jobs, jobDetails }: { jobs: Job[]; jobDetails: Record<string, JobDetail> }) {
+  const active = jobs.filter(isActiveJob);
+  const recent = jobs.filter((job) => !isActiveJob(job)).slice(0, 3);
+  if (active.length === 0 && recent.length === 0) {
+    return null;
+  }
+  return (
+    <section className="job-telemetry">
+      {active.map((job) => (
+        <ProgressPanel key={job.id} job={job} events={jobDetails[job.id]?.events || []} />
+      ))}
+      {active.length === 0 && recent.map((job) => (
+        <ProgressPanel key={job.id} job={job} events={jobDetails[job.id]?.events || []} compact />
+      ))}
+    </section>
+  );
+}
+
+function ProgressPanel({ job, events, compact = false }: { job: Job; events: JobEvent[]; compact?: boolean }) {
+  const percent = job.total > 0 ? Math.min(100, Math.round((job.processed / job.total) * 100)) : 0;
+  const visibleEvents = events.slice(0, compact ? 3 : 5);
+  return (
+    <article className={compact ? 'progress-panel compact' : 'progress-panel'}>
+      <div className="progress-header">
+        <div>
+          <span className="status-pill">{job.status}</span>
+          <h2>{jobKindLabel(job)}</h2>
+          <p>{job.message || job.phase}</p>
+        </div>
+        <strong>{job.total > 0 ? `${job.processed} / ${job.total}` : job.currentLabel || job.phase}</strong>
+      </div>
+      <div className="progress-track" aria-label={`${jobKindLabel(job)} progress`}>
+        <span style={{ width: job.total > 0 ? `${percent}%` : isActiveJob(job) ? '36%' : '100%' }} />
+      </div>
+      <div className="progress-meta">
+        <span>{job.currentLabel || 'Preparing'}</span>
+        <span>{job.itemsImported ? `${job.itemsImported} imported` : job.rollupsImported ? `${job.rollupsImported} activity rows` : formatElapsed(job.startedAt, job.completedAt)}</span>
+        {job.unmappedItems > 0 && <span>{job.unmappedItems} unmapped</span>}
+      </div>
+      {visibleEvents.length > 0 && (
+        <div className="event-feed">
+          {visibleEvents.map((event) => (
+            <div key={event.id} className="event-row">
+              <span>{event.phase}</span>
+              <strong>{event.currentLabel || event.message}</strong>
+            </div>
+          ))}
+        </div>
+      )}
+      {job.error && <div className="notice error">{job.error}</div>}
+    </article>
   );
 }
 
@@ -1187,6 +1309,61 @@ function titleFor(view: View): string {
     integrations: 'Integrations',
     settings: 'Settings',
   }[view];
+}
+
+function isActiveJob(job: Job): boolean {
+  return job.status === 'queued' || job.status === 'running';
+}
+
+function jobKindLabel(job: Job): string {
+  switch (job.kind) {
+    case 'filesystem_scan':
+      return 'Filesystem Scan';
+    case 'jellyfin_sync':
+      return 'Jellyfin Sync';
+    case 'plex_sync':
+      return 'Plex Sync';
+    default:
+      return job.kind.replaceAll('_', ' ');
+  }
+}
+
+function syncJobToJob(job: IntegrationSyncJob | null): Job | undefined {
+  if (!job) {
+    return undefined;
+  }
+  return {
+    id: job.id,
+    kind: `${job.serverId}_sync`,
+    targetId: job.serverId,
+    status: job.status,
+    phase: job.phase || job.status,
+    message: job.message || job.status,
+    currentLabel: job.currentLabel,
+    processed: job.processed || 0,
+    total: job.total || 0,
+    itemsImported: job.itemsImported,
+    rollupsImported: job.rollupsImported,
+    unmappedItems: job.unmappedItems,
+    error: job.error,
+    startedAt: job.startedAt,
+    updatedAt: job.completedAt || job.startedAt,
+    completedAt: job.completedAt,
+  };
+}
+
+function formatElapsed(startedAt: string, completedAt?: string): string {
+  const start = new Date(startedAt);
+  const end = completedAt ? new Date(completedAt) : new Date();
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return 'Timing unavailable';
+  }
+  const seconds = Math.max(0, Math.round((end.getTime() - start.getTime()) / 1000));
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${seconds % 60}s`;
 }
 
 function toCatalogItem(item: ScanResult['items'][number]): CatalogItem {
