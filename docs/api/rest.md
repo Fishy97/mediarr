@@ -23,6 +23,8 @@ All API routes are rooted at `/api/v1`.
 | GET | `/providers` | Metadata provider health and attribution |
 | GET | `/provider-settings` | Redacted provider credential and base URL settings |
 | PUT | `/provider-settings/{provider}` | Update provider base URL, API key, or clear stored key |
+| GET | `/integration-settings` | Redacted Jellyfin, Plex, and Emby connection settings |
+| PUT | `/integration-settings/{id}` | Update media-server base URL, API key/token, or clear stored key |
 | GET | `/integrations` | Media-server and AI integration status |
 | POST | `/integrations/{id}/refresh` | Request a Jellyfin, Plex, or Emby library refresh |
 | POST | `/integrations/{id}/sync` | Import Jellyfin or Plex inventory and activity |

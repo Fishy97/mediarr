@@ -51,6 +51,7 @@ type Server struct {
 	providerBase       metadata.Options
 	providerOptions    metadata.Options
 	integrations       []integrations.Target
+	integrationBase    integrations.Options
 	integrationOptions integrations.Options
 	audit              *audit.Logger
 	auth               *auth.Service
@@ -71,6 +72,7 @@ func NewServer(deps Deps) *Server {
 		providerBase:       deps.ProviderOptions,
 		providerOptions:    deps.ProviderOptions,
 		integrations:       deps.Integrations,
+		integrationBase:    deps.IntegrationOptions,
 		integrationOptions: deps.IntegrationOptions,
 		audit:              deps.Audit,
 		auth:               deps.Auth,
@@ -81,6 +83,7 @@ func NewServer(deps Deps) *Server {
 	}
 	if server.store != nil {
 		_ = server.refreshProviderOptionsFromStore()
+		_ = server.refreshIntegrationOptionsFromStore()
 	}
 	if server.providers == nil {
 		server.providers = metadata.DefaultsWithOptions(server.providerOptions)
@@ -112,6 +115,8 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("/api/v1/providers", server.providersHandler)
 	server.mux.HandleFunc("/api/v1/provider-settings", server.providerSettingsHandler)
 	server.mux.HandleFunc("/api/v1/provider-settings/", server.providerSettingHandler)
+	server.mux.HandleFunc("/api/v1/integration-settings", server.integrationSettingsHandler)
+	server.mux.HandleFunc("/api/v1/integration-settings/", server.integrationSettingHandler)
 	server.mux.HandleFunc("/api/v1/integrations", server.integrationsHandler)
 	server.mux.HandleFunc("/api/v1/integrations/", server.integrationActionHandler)
 	server.mux.HandleFunc("/api/v1/activity/rollups", server.activityRollupsHandler)
@@ -527,9 +532,66 @@ func (server *Server) providerSettingHandler(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, envelope{Data: setting})
 }
 
+func (server *Server) integrationSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.store == nil {
+		http.Error(w, "integration settings store is not configured", http.StatusBadRequest)
+		return
+	}
+	settings, err := server.store.ListIntegrationSettings()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: settings})
+}
+
+func (server *Server) integrationSettingHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.store == nil {
+		http.Error(w, "integration settings store is not configured", http.StatusBadRequest)
+		return
+	}
+	integration := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/integration-settings/"), "/")
+	if integration == "" {
+		http.NotFound(w, r)
+		return
+	}
+	var request database.IntegrationSettingInput
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	request.Integration = integration
+	setting, err := server.store.UpsertIntegrationSetting(request)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := server.refreshIntegrationOptionsFromStore(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	server.mu.Lock()
+	server.integrations = integrations.DefaultsWithOptions(server.integrationOptions)
+	server.mu.Unlock()
+	server.record("integration.updated", "Media-server integration settings updated", map[string]any{"integration": setting.Integration, "apiKeyConfigured": setting.APIKeyConfigured})
+	writeJSON(w, http.StatusOK, envelope{Data: setting})
+}
+
 func (server *Server) integrationsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w, r)
+		return
+	}
+	if err := server.refreshIntegrationOptionsFromStore(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	server.mu.Lock()
@@ -547,6 +609,10 @@ func (server *Server) integrationActionHandler(w http.ResponseWriter, r *http.Re
 	}
 	switch parts[1] {
 	case "refresh":
+		if err := server.refreshIntegrationOptionsFromStore(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		if r.Method != http.MethodPost {
 			methodNotAllowed(w, r)
 			return
@@ -583,6 +649,10 @@ func (server *Server) integrationSyncHandler(w http.ResponseWriter, r *http.Requ
 		}
 		writeJSON(w, http.StatusOK, envelope{Data: job})
 	case http.MethodPost:
+		if err := server.refreshIntegrationOptionsFromStore(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		mappings, err := server.store.ListPathMappings()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -854,6 +924,18 @@ func (server *Server) refreshProviderOptionsFromStore() error {
 	return nil
 }
 
+func (server *Server) refreshIntegrationOptionsFromStore() error {
+	if server.store == nil {
+		return nil
+	}
+	settings, err := server.store.ListIntegrationSettingSecrets()
+	if err != nil {
+		return err
+	}
+	server.integrationOptions = mergeIntegrationSettings(server.integrationBase, settings)
+	return nil
+}
+
 func mergeProviderSettings(options metadata.Options, settings []database.ProviderSetting) metadata.Options {
 	for _, setting := range settings {
 		switch setting.Provider {
@@ -871,6 +953,35 @@ func mergeProviderSettings(options metadata.Options, settings []database.Provide
 			options.OpenSubtitlesAPIKey = setting.APIKey
 			if setting.BaseURL != "" {
 				options.OpenSubtitlesURL = setting.BaseURL
+			}
+		}
+	}
+	return options
+}
+
+func mergeIntegrationSettings(options integrations.Options, settings []database.IntegrationSetting) integrations.Options {
+	for _, setting := range settings {
+		switch setting.Integration {
+		case "jellyfin":
+			if setting.BaseURL != "" {
+				options.JellyfinURL = setting.BaseURL
+			}
+			if setting.APIKey != "" {
+				options.JellyfinKey = setting.APIKey
+			}
+		case "plex":
+			if setting.BaseURL != "" {
+				options.PlexURL = setting.BaseURL
+			}
+			if setting.APIKey != "" {
+				options.PlexToken = setting.APIKey
+			}
+		case "emby":
+			if setting.BaseURL != "" {
+				options.EmbyURL = setting.BaseURL
+			}
+			if setting.APIKey != "" {
+				options.EmbyKey = setting.APIKey
 			}
 		}
 	}

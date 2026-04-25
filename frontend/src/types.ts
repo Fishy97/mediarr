@@ -86,6 +86,21 @@ export type IntegrationRefreshResult = {
   requestedAt: string;
 };
 
+export type IntegrationSetting = {
+  integration: string;
+  baseUrl?: string;
+  apiKeyConfigured: boolean;
+  apiKeyLast4?: string;
+  updatedAt?: string;
+};
+
+export type IntegrationSettingInput = {
+  baseUrl?: string;
+  apiKey?: string;
+  clearApiKey?: boolean;
+  clearBaseUrl?: boolean;
+};
+
 export type IntegrationSyncJob = {
   id: string;
   serverId: string;

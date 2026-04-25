@@ -158,7 +158,21 @@ curl http://localhost:8080/api/v1/catalog
 
 ## 7. Sync Jellyfin Or Plex Activity
 
-Configure `MEDIARR_JELLYFIN_URL` and `MEDIARR_JELLYFIN_API_KEY`, or `MEDIARR_PLEX_URL` and `MEDIARR_PLEX_TOKEN`, then use the Integrations screen to run a media-server sync.
+Open the Integrations screen, choose Jellyfin or Plex, and enter the media-server URL plus API key/token. Mediarr stores the settings in `/config/mediarr.db` and shows only redacted credential status in the browser.
+
+Environment variables such as `MEDIARR_JELLYFIN_URL`, `MEDIARR_JELLYFIN_API_KEY`, `MEDIARR_PLEX_URL`, and `MEDIARR_PLEX_TOKEN` are still supported for automation, but they are not required for normal setup.
+
+You can also configure integrations through the API:
+
+```bash
+curl -X PUT http://localhost:8080/api/v1/integration-settings/jellyfin \
+  -H "Content-Type: application/json" \
+  -d '{"baseUrl":"http://jellyfin:8096","apiKey":"your-jellyfin-api-key"}'
+
+curl -X PUT http://localhost:8080/api/v1/integration-settings/plex \
+  -H "Content-Type: application/json" \
+  -d '{"baseUrl":"http://plex:32400","apiKey":"your-plex-token"}'
+```
 
 From the API:
 

@@ -8,6 +8,8 @@ import type {
   CatalogItem,
   Integration,
   IntegrationRefreshResult,
+  IntegrationSetting,
+  IntegrationSettingInput,
   IntegrationSyncJob,
   Library,
   MediaServerItem,
@@ -134,6 +136,15 @@ export const api = {
   },
   async refreshIntegration(id: string): Promise<IntegrationRefreshResult> {
     return (await request<Envelope<IntegrationRefreshResult>>(`/api/v1/integrations/${encodeURIComponent(id)}/refresh`, { method: 'POST' })).data;
+  },
+  async integrationSettings(): Promise<IntegrationSetting[]> {
+    return (await request<Envelope<IntegrationSetting[]>>('/api/v1/integration-settings')).data;
+  },
+  async updateIntegrationSetting(integration: string, setting: IntegrationSettingInput): Promise<IntegrationSetting> {
+    return (await request<Envelope<IntegrationSetting>>(`/api/v1/integration-settings/${encodeURIComponent(integration)}`, {
+      method: 'PUT',
+      body: JSON.stringify(setting),
+    })).data;
   },
   async syncIntegration(id: string): Promise<IntegrationSyncJob> {
     return (await request<Envelope<IntegrationSyncJob>>(`/api/v1/integrations/${encodeURIComponent(id)}/sync`, { method: 'POST' })).data;

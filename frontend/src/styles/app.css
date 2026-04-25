@@ -417,6 +417,34 @@ code {
   gap: 16px;
 }
 
+.integration-config {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.integration-config label {
+  display: grid;
+  gap: 6px;
+  color: #dbeafe;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.integration-config input {
+  min-height: 40px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #f5f7fb;
+  background: rgba(255, 255, 255, 0.06);
+  font: inherit;
+}
+
+.integration-config .button-row {
+  grid-column: 1 / -1;
+}
+
 .signal-grid,
 .rec-evidence {
   display: grid;
@@ -663,6 +691,7 @@ code {
   .integration-grid,
   .provider-settings,
   .form-grid,
+  .integration-config,
   .signal-grid,
   .rec-evidence {
     grid-template-columns: 1fr;

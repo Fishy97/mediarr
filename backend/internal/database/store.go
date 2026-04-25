@@ -68,6 +68,23 @@ type ProviderSettingInput struct {
 	ClearBaseURL bool   `json:"clearBaseUrl"`
 }
 
+type IntegrationSetting struct {
+	Integration      string    `json:"integration"`
+	BaseURL          string    `json:"baseUrl,omitempty"`
+	APIKey           string    `json:"-"`
+	APIKeyConfigured bool      `json:"apiKeyConfigured"`
+	APIKeyLast4      string    `json:"apiKeyLast4,omitempty"`
+	UpdatedAt        time.Time `json:"updatedAt"`
+}
+
+type IntegrationSettingInput struct {
+	Integration  string `json:"integration"`
+	BaseURL      string `json:"baseUrl"`
+	APIKey       string `json:"apiKey"`
+	ClearAPIKey  bool   `json:"clearApiKey"`
+	ClearBaseURL bool   `json:"clearBaseUrl"`
+}
+
 type CatalogCorrection struct {
 	MediaFileID  string       `json:"mediaFileId"`
 	Title        string       `json:"title"`
@@ -316,6 +333,12 @@ func (store *Store) migrate() error {
 		)`,
 		`CREATE TABLE IF NOT EXISTS provider_settings (
 			provider TEXT PRIMARY KEY,
+			base_url TEXT NOT NULL DEFAULT '',
+			api_key TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS integration_settings (
+			integration TEXT PRIMARY KEY,
 			base_url TEXT NOT NULL DEFAULT '',
 			api_key TEXT NOT NULL DEFAULT '',
 			updated_at TEXT NOT NULL
@@ -1559,6 +1582,102 @@ func (store *Store) ListProviderSettingSecrets() ([]ProviderSetting, error) {
 	return settings, rows.Err()
 }
 
+func (store *Store) UpsertIntegrationSetting(input IntegrationSettingInput) (IntegrationSetting, error) {
+	if store == nil || store.DB == nil {
+		return IntegrationSetting{}, errors.New("nil database store")
+	}
+	integration := normalizeIntegrationName(input.Integration)
+	if !knownIntegration(integration) {
+		return IntegrationSetting{}, errors.New("unknown integration")
+	}
+
+	current := IntegrationSetting{}
+	var updatedAtRaw string
+	err := store.DB.QueryRow(
+		`SELECT integration, base_url, api_key, updated_at FROM integration_settings WHERE integration = ?`,
+		integration,
+	).Scan(&current.Integration, &current.BaseURL, &current.APIKey, &updatedAtRaw)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return IntegrationSetting{}, err
+	}
+
+	baseURL := strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
+	if baseURL == "" && !input.ClearBaseURL {
+		baseURL = current.BaseURL
+	}
+	apiKey := current.APIKey
+	if input.ClearAPIKey {
+		apiKey = ""
+	} else if strings.TrimSpace(input.APIKey) != "" {
+		apiKey = strings.TrimSpace(input.APIKey)
+	}
+
+	updatedAt := time.Now().UTC()
+	_, err = store.DB.Exec(
+		`INSERT INTO integration_settings (integration, base_url, api_key, updated_at) VALUES (?, ?, ?, ?)
+		ON CONFLICT(integration) DO UPDATE SET
+			base_url = excluded.base_url,
+			api_key = excluded.api_key,
+			updated_at = excluded.updated_at`,
+		integration,
+		baseURL,
+		apiKey,
+		updatedAt.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return IntegrationSetting{}, err
+	}
+	return redactedIntegrationSetting(integration, baseURL, apiKey, updatedAt), nil
+}
+
+func (store *Store) ListIntegrationSettings() ([]IntegrationSetting, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	rows, err := store.DB.Query(`SELECT integration, base_url, api_key, updated_at FROM integration_settings ORDER BY integration`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	settings := []IntegrationSetting{}
+	for rows.Next() {
+		var setting IntegrationSetting
+		var updatedAtRaw string
+		if err := rows.Scan(&setting.Integration, &setting.BaseURL, &setting.APIKey, &updatedAtRaw); err != nil {
+			return nil, err
+		}
+		setting.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAtRaw)
+		settings = append(settings, redactedIntegrationSetting(setting.Integration, setting.BaseURL, setting.APIKey, setting.UpdatedAt))
+	}
+	return settings, rows.Err()
+}
+
+func (store *Store) ListIntegrationSettingSecrets() ([]IntegrationSetting, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	rows, err := store.DB.Query(`SELECT integration, base_url, api_key, updated_at FROM integration_settings ORDER BY integration`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	settings := []IntegrationSetting{}
+	for rows.Next() {
+		var setting IntegrationSetting
+		var updatedAtRaw string
+		if err := rows.Scan(&setting.Integration, &setting.BaseURL, &setting.APIKey, &updatedAtRaw); err != nil {
+			return nil, err
+		}
+		setting.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAtRaw)
+		setting.APIKeyConfigured = strings.TrimSpace(setting.APIKey) != ""
+		setting.APIKeyLast4 = last4(setting.APIKey)
+		settings = append(settings, setting)
+	}
+	return settings, rows.Err()
+}
+
 func (store *Store) UpsertCatalogCorrection(mediaFileID string, input CatalogCorrectionInput) (CatalogCorrection, error) {
 	if store == nil || store.DB == nil {
 		return CatalogCorrection{}, errors.New("nil database store")
@@ -1651,12 +1770,35 @@ func redactedProviderSetting(provider string, baseURL string, apiKey string, upd
 	}
 }
 
+func redactedIntegrationSetting(integration string, baseURL string, apiKey string, updatedAt time.Time) IntegrationSetting {
+	return IntegrationSetting{
+		Integration:      integration,
+		BaseURL:          baseURL,
+		APIKeyConfigured: strings.TrimSpace(apiKey) != "",
+		APIKeyLast4:      last4(apiKey),
+		UpdatedAt:        updatedAt,
+	}
+}
+
 func last4(value string) string {
 	value = strings.TrimSpace(value)
 	if len(value) <= 4 {
 		return value
 	}
 	return value[len(value)-4:]
+}
+
+func normalizeIntegrationName(integration string) string {
+	return strings.ToLower(strings.TrimSpace(integration))
+}
+
+func knownIntegration(integration string) bool {
+	switch normalizeIntegrationName(integration) {
+	case "jellyfin", "plex", "emby":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeProviderName(provider string) string {

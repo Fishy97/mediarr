@@ -35,6 +35,8 @@ import type {
   CatalogItem,
   Integration,
   IntegrationSyncJob,
+  IntegrationSetting,
+  IntegrationSettingInput,
   Library as MediaLibrary,
   MediaServerItem,
   PathMapping,
@@ -55,6 +57,7 @@ export function App() {
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [providers, setProviders] = useState<ProviderHealth[]>([]);
   const [providerSettings, setProviderSettings] = useState<ProviderSetting[]>([]);
+  const [integrationSettings, setIntegrationSettings] = useState<IntegrationSetting[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [syncJobs, setSyncJobs] = useState<Record<string, IntegrationSyncJob | null>>({});
   const [integrationItems, setIntegrationItems] = useState<MediaServerItem[]>([]);
@@ -71,7 +74,7 @@ export function App() {
 
   async function refresh() {
     try {
-      const [health, libs, catalogRows, scanRows, recs, providerRows, providerSettingRows, integrationRows, ai] = await Promise.all([
+      const [health, libs, catalogRows, scanRows, recs, providerRows, providerSettingRows, integrationSettingRows, integrationRows, ai] = await Promise.all([
         api.health(),
         api.libraries(),
         api.catalog(),
@@ -79,6 +82,7 @@ export function App() {
         api.recommendations(),
         api.providers(),
         api.providerSettings(),
+        api.integrationSettings(),
         api.integrations(),
         api.aiStatus(),
       ]);
@@ -89,6 +93,7 @@ export function App() {
       setRecommendations(recs);
       setProviders(providerRows);
       setProviderSettings(providerSettingRows);
+      setIntegrationSettings(integrationSettingRows);
       setIntegrations(integrationRows);
       setAIStatus(ai);
       await refreshIntegrationActivity(integrationRows);
@@ -209,6 +214,22 @@ export function App() {
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to update provider settings');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateIntegrationSetting(integration: string, setting: IntegrationSettingInput) {
+    setBusy(true);
+    try {
+      await api.updateIntegrationSetting(integration, setting);
+      const [settings, integrationRows] = await Promise.all([api.integrationSettings(), api.integrations()]);
+      setIntegrationSettings(settings);
+      setIntegrations(integrationRows);
+      await refreshIntegrationActivity(integrationRows);
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to update integration settings');
     } finally {
       setBusy(false);
     }
@@ -370,12 +391,14 @@ export function App() {
             providers={providers}
             providerSettings={providerSettings}
             integrations={integrations}
+            integrationSettings={integrationSettings}
             aiStatus={aiStatus}
             syncJobs={syncJobs}
             integrationItems={integrationItems}
             activityRollups={activityRollups}
             pathMappings={pathMappings}
             onProviderUpdate={(provider, setting) => void updateProviderSetting(provider, setting)}
+            onIntegrationUpdate={(integration, setting) => void updateIntegrationSetting(integration, setting)}
             onIntegrationRefresh={(id) => void refreshIntegration(id)}
             onIntegrationSync={(id) => void syncIntegration(id)}
             busy={busy}
@@ -759,12 +782,14 @@ function Integrations({
   providers,
   providerSettings,
   integrations,
+  integrationSettings,
   aiStatus,
   syncJobs,
   integrationItems,
   activityRollups,
   pathMappings,
   onProviderUpdate,
+  onIntegrationUpdate,
   onIntegrationRefresh,
   onIntegrationSync,
   busy,
@@ -772,12 +797,14 @@ function Integrations({
   providers: ProviderHealth[];
   providerSettings: ProviderSetting[];
   integrations: Integration[];
+  integrationSettings: IntegrationSetting[];
   aiStatus: AIStatus | null;
   syncJobs: Record<string, IntegrationSyncJob | null>;
   integrationItems: MediaServerItem[];
   activityRollups: ActivityRollup[];
   pathMappings: PathMapping[];
   onProviderUpdate: (provider: string, setting: ProviderSettingInput) => void;
+  onIntegrationUpdate: (integration: string, setting: IntegrationSettingInput) => void;
   onIntegrationRefresh: (id: string) => void;
   onIntegrationSync: (id: string) => void;
   busy: boolean;
@@ -790,11 +817,13 @@ function Integrations({
           <MediaServerCard
             key={integration.id}
             integration={integration}
+            setting={integrationSettings.find((setting) => setting.integration === integration.id)}
             job={syncJobs[integration.id] ?? null}
             importedItems={integrationItems.filter((item) => item.serverId === integration.id).length}
             activityCount={activityRollups.filter((rollup) => rollup.serverId === integration.id).length}
             pathMappingCount={pathMappings.filter((mapping) => !mapping.serverId || mapping.serverId === integration.id).length}
             busy={busy}
+            onUpdate={onIntegrationUpdate}
             onRefresh={onIntegrationRefresh}
             onSync={onIntegrationSync}
           />
@@ -841,23 +870,45 @@ function Integrations({
 
 function MediaServerCard({
   integration,
+  setting,
   job,
   importedItems,
   activityCount,
   pathMappingCount,
   busy,
+  onUpdate,
   onRefresh,
   onSync,
 }: {
   integration: Integration;
+  setting?: IntegrationSetting;
   job: IntegrationSyncJob | null;
   importedItems: number;
   activityCount: number;
   pathMappingCount: number;
   busy: boolean;
+  onUpdate: (integration: string, setting: IntegrationSettingInput) => void;
   onRefresh: (id: string) => void;
   onSync: (id: string) => void;
 }) {
+  const [baseUrl, setBaseURL] = useState(setting?.baseUrl || '');
+  const [apiKey, setAPIKey] = useState('');
+
+  useEffect(() => {
+    setBaseURL(setting?.baseUrl || '');
+    setAPIKey('');
+  }, [setting?.baseUrl, setting?.apiKeyConfigured]);
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    onUpdate(integration.id, {
+      baseUrl,
+      apiKey,
+      clearApiKey: apiKey === '' ? undefined : false,
+    });
+    setAPIKey('');
+  }
+
   return (
     <article className="media-server-card">
       <div className="server-mark"><Server size={22} /></div>
@@ -873,10 +924,34 @@ function MediaServerCard({
           <Signal label="Imported" value={String(job?.itemsImported ?? importedItems)} />
           <Signal label="Activity" value={String(job?.rollupsImported ?? activityCount)} />
           <Signal label="Unmapped" value={String(job?.unmappedItems ?? 0)} />
-          <Signal label="Mappings" value={String(pathMappingCount)} />
+          <Signal label="Credential" value={setting?.apiKeyConfigured ? `Key ...${setting.apiKeyLast4 || ''}` : 'Not set'} />
         </div>
+        <form className="integration-config" onSubmit={submit}>
+          <label>
+            Server URL
+            <input value={baseUrl} onChange={(event) => setBaseURL(event.target.value)} placeholder={integration.id === 'plex' ? 'http://plex:32400' : 'http://jellyfin:8096'} />
+          </label>
+          <label>
+            API key or token
+            <input value={apiKey} onChange={(event) => setAPIKey(event.target.value)} type="password" placeholder={setting?.apiKeyConfigured ? `Configured ...${setting.apiKeyLast4 || ''}` : 'Paste token'} />
+          </label>
+          <div className="button-row">
+            <button className="secondary-button" type="submit" disabled={busy || (!baseUrl && !apiKey)}>
+              <Save size={16} />
+              Save
+            </button>
+            <button className="secondary-button" type="button" disabled={busy || !setting?.apiKeyConfigured} onClick={() => onUpdate(integration.id, { baseUrl, clearApiKey: true })}>
+              <RotateCcw size={16} />
+              Clear key
+            </button>
+            <button className="secondary-button" type="button" disabled={busy || (!setting?.baseUrl && !setting?.apiKeyConfigured)} onClick={() => onUpdate(integration.id, { clearApiKey: true, clearBaseUrl: true })}>
+              <LogOut size={16} />
+              Disconnect
+            </button>
+          </div>
+        </form>
         <div className="server-sync-row">
-          <span>{job?.completedAt ? `Last sync ${formatDateTime(job.completedAt)}` : 'No inventory sync yet'}</span>
+          <span>{job?.completedAt ? `Last sync ${formatDateTime(job.completedAt)}` : `No inventory sync yet • ${pathMappingCount} path mappings`}</span>
           <div className="button-row">
             <button className="secondary-button" onClick={() => onRefresh(integration.id)} disabled={busy}>
               <RefreshCw size={16} />

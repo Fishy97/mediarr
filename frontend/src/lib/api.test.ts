@@ -103,6 +103,22 @@ describe('api auth helpers', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/v1/path-mappings', expect.any(Object));
   });
 
+  test('integration settings calls redactable media server setting endpoints', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ data: [{ integration: 'jellyfin', baseUrl: 'http://jellyfin:8096', apiKeyConfigured: true, apiKeyLast4: 'abcd' }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: { integration: 'jellyfin', baseUrl: 'http://jellyfin:8096', apiKeyConfigured: true, apiKeyLast4: 'abcd' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.integrationSettings()).resolves.toHaveLength(1);
+    await api.updateIntegrationSetting('jellyfin', { baseUrl: 'http://jellyfin:8096', apiKey: 'secret-abcd' });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/integration-settings', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/integration-settings/jellyfin', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ baseUrl: 'http://jellyfin:8096', apiKey: 'secret-abcd' }),
+    }));
+  });
+
   test('backup restore can inspect and restore a config archive', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ data: { entries: ['mediarr.db'] } }))

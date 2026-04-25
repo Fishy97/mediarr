@@ -73,7 +73,21 @@ Run a scan from the UI or with:
 curl -X POST http://localhost:8080/api/v1/scans
 ```
 
-Sync a connected Jellyfin or Plex server from the UI Integrations screen, or with:
+Connect Jellyfin or Plex from **Integrations** in the web UI by entering the server URL and API key/token. Mediarr stores those credentials in `/config/mediarr.db` and only returns redacted key status to the browser.
+
+You can also configure integrations through the REST API:
+
+```bash
+curl -X PUT http://localhost:8080/api/v1/integration-settings/jellyfin \
+  -H "Content-Type: application/json" \
+  -d '{"baseUrl":"http://jellyfin:8096","apiKey":"your-jellyfin-api-key"}'
+
+curl -X PUT http://localhost:8080/api/v1/integration-settings/plex \
+  -H "Content-Type: application/json" \
+  -d '{"baseUrl":"http://plex:32400","apiKey":"your-plex-token"}'
+```
+
+Then sync from the UI Integrations screen, or with:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/integrations/jellyfin/sync
