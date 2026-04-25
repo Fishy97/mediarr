@@ -52,8 +52,8 @@
 - [ ] Write failing tests for non-destructive recommendation invariants, duplicate scoring, oversized scoring, missing subtitles, AI JSON validation, and integration connection checks.
 - [ ] Expand recommendations with rule source, severity, affected paths, expected savings, keep/remove candidates, ignore/restore workflow, and audit events.
 - [ ] Implement Ollama health, model availability checks, advisory suggestion prompts, strict JSON decoding, timeout handling, and confidence scoring.
-- [ ] Attach AI explanations only to deterministic recommendations and never allow AI to alter catalog truth automatically.
-- [ ] Implement Jellyfin, Plex, and Emby connection tests and sync-target refresh actions with typed clients and audit results.
+- [x] Attach AI explanations only to deterministic recommendations and never allow AI to alter catalog truth automatically.
+- [x] Implement Jellyfin, Plex, and Emby connection tests and sync-target refresh actions with typed clients and audit results.
 - [ ] Add frontend recommendation action screens, AI status, and integration configuration screens.
 - [ ] Run the full validation suite and commit as `feat: add v1 recommendations ai integrations`.
 

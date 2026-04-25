@@ -251,6 +251,10 @@ func TestStoreReplacesRecommendationsWithoutLosingSafetyFields(t *testing.T) {
 			Source:          "rule:duplicate-canonical-key",
 			AffectedPaths:   []string{"/media/a.mkv", "/media/b.mkv"},
 			Destructive:     false,
+			AIRationale:     "Keep the intended edition.",
+			AITags:          []string{"duplicate"},
+			AIConfidence:    0.81,
+			AISource:        "ollama:qwen3:0.6b",
 		},
 	}
 
@@ -270,6 +274,9 @@ func TestStoreReplacesRecommendationsWithoutLosingSafetyFields(t *testing.T) {
 	}
 	if len(got[0].AffectedPaths) != 2 {
 		t.Fatalf("affected paths = %#v", got[0].AffectedPaths)
+	}
+	if got[0].AIRationale == "" || got[0].AISource != "ollama:qwen3:0.6b" || got[0].AIConfidence != 0.81 || len(got[0].AITags) != 1 {
+		t.Fatalf("AI advisory fields not persisted: %#v", got[0])
 	}
 }
 

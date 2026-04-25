@@ -173,6 +173,10 @@ func (store *Store) migrate() error {
 			source TEXT NOT NULL,
 			affected_paths TEXT NOT NULL,
 			destructive INTEGER NOT NULL DEFAULT 0,
+			ai_rationale TEXT NOT NULL DEFAULT '',
+			ai_tags TEXT NOT NULL DEFAULT '[]',
+			ai_confidence REAL NOT NULL DEFAULT 0,
+			ai_source TEXT NOT NULL DEFAULT '',
 			ignored_at TEXT
 		)`,
 		`CREATE TABLE IF NOT EXISTS provider_cache (
@@ -238,6 +242,19 @@ func (store *Store) migrate() error {
 	}
 	if err := store.ensureColumn("media_files", "year", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
+	}
+	for _, column := range []struct {
+		name       string
+		definition string
+	}{
+		{name: "ai_rationale", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "ai_tags", definition: "TEXT NOT NULL DEFAULT '[]'"},
+		{name: "ai_confidence", definition: "REAL NOT NULL DEFAULT 0"},
+		{name: "ai_source", definition: "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := store.ensureColumn("recommendations", column.name, column.definition); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -555,8 +572,8 @@ func (store *Store) ReplaceRecommendations(recs []recommendations.Recommendation
 		return err
 	}
 	stmt, err := tx.Prepare(`INSERT INTO recommendations (
-		id, action, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		id, action, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive, ai_rationale, ai_tags, ai_confidence, ai_source
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
@@ -567,11 +584,33 @@ func (store *Store) ReplaceRecommendations(recs []recommendations.Recommendation
 		if err != nil {
 			return err
 		}
+		tags := rec.AITags
+		if tags == nil {
+			tags = []string{}
+		}
+		aiTags, err := json.Marshal(tags)
+		if err != nil {
+			return err
+		}
 		destructive := 0
 		if rec.Destructive {
 			destructive = 1
 		}
-		if _, err := stmt.Exec(rec.ID, string(rec.Action), rec.Title, rec.Explanation, rec.SpaceSavedBytes, rec.Confidence, rec.Source, string(paths), destructive); err != nil {
+		if _, err := stmt.Exec(
+			rec.ID,
+			string(rec.Action),
+			rec.Title,
+			rec.Explanation,
+			rec.SpaceSavedBytes,
+			rec.Confidence,
+			rec.Source,
+			string(paths),
+			destructive,
+			rec.AIRationale,
+			string(aiTags),
+			rec.AIConfidence,
+			rec.AISource,
+		); err != nil {
 			return err
 		}
 	}
@@ -582,7 +621,7 @@ func (store *Store) ListRecommendations() ([]recommendations.Recommendation, err
 	if store == nil || store.DB == nil {
 		return nil, errors.New("nil database store")
 	}
-	rows, err := store.DB.Query(`SELECT id, action, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive
+	rows, err := store.DB.Query(`SELECT id, action, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive, ai_rationale, ai_tags, ai_confidence, ai_source
 		FROM recommendations
 		WHERE ignored_at IS NULL
 		ORDER BY space_saved_bytes DESC, id`)
@@ -596,14 +635,21 @@ func (store *Store) ListRecommendations() ([]recommendations.Recommendation, err
 		var rec recommendations.Recommendation
 		var action string
 		var paths string
+		var aiTags string
 		var destructive int
-		if err := rows.Scan(&rec.ID, &action, &rec.Title, &rec.Explanation, &rec.SpaceSavedBytes, &rec.Confidence, &rec.Source, &paths, &destructive); err != nil {
+		if err := rows.Scan(&rec.ID, &action, &rec.Title, &rec.Explanation, &rec.SpaceSavedBytes, &rec.Confidence, &rec.Source, &paths, &destructive, &rec.AIRationale, &aiTags, &rec.AIConfidence, &rec.AISource); err != nil {
 			return nil, err
 		}
 		rec.Action = recommendations.Action(action)
 		rec.Destructive = destructive == 1
 		if err := json.Unmarshal([]byte(paths), &rec.AffectedPaths); err != nil {
 			return nil, err
+		}
+		if err := json.Unmarshal([]byte(aiTags), &rec.AITags); err != nil {
+			return nil, err
+		}
+		if rec.AITags == nil {
+			rec.AITags = []string{}
 		}
 		recs = append(recs, rec)
 	}

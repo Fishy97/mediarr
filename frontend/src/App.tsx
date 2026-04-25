@@ -199,6 +199,19 @@ export function App() {
     }
   }
 
+  async function refreshIntegration(id: string) {
+    setBusy(true);
+    try {
+      await api.refreshIntegration(id);
+      setIntegrations(await api.integrations());
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to refresh integration');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const catalogItems = useMemo(() => catalog, [catalog]);
   const totalFiles = catalogItems.length;
   const totalSize = catalogItems.reduce((sum, item) => sum + item.sizeBytes, 0);
@@ -292,6 +305,7 @@ export function App() {
             integrations={integrations}
             aiStatus={aiStatus}
             onProviderUpdate={(provider, setting) => void updateProviderSetting(provider, setting)}
+            onIntegrationRefresh={(id) => void refreshIntegration(id)}
             busy={busy}
           />
         )}
@@ -626,6 +640,12 @@ function RecommendationQueue({ recommendations, onIgnore, busy }: { recommendati
               <div className="path-list">
                 {rec.affectedPaths.map((path) => <code key={path}>{path}</code>)}
               </div>
+              {rec.aiRationale && (
+                <div className="ai-note">
+                  <Bot size={16} />
+                  <span>{rec.aiRationale}</span>
+                </div>
+              )}
             </div>
           </div>
           <div className="rec-metrics">
@@ -646,6 +666,7 @@ function Integrations({
   integrations,
   aiStatus,
   onProviderUpdate,
+  onIntegrationRefresh,
   busy,
 }: {
   providers: ProviderHealth[];
@@ -653,6 +674,7 @@ function Integrations({
   integrations: Integration[];
   aiStatus: AIStatus | null;
   onProviderUpdate: (provider: string, setting: ProviderSettingInput) => void;
+  onIntegrationRefresh: (id: string) => void;
   busy: boolean;
 }) {
   return (
@@ -666,6 +688,11 @@ function Integrations({
               <p>{integration.description}</p>
             </div>
             <span>{integration.status}</span>
+            {integration.kind === 'media_server' && (
+              <button className="icon-button" onClick={() => onIntegrationRefresh(integration.id)} disabled={busy} title="Refresh media server" aria-label={`Refresh ${integration.name}`}>
+                <RefreshCw size={16} />
+              </button>
+            )}
           </article>
         ))}
         {aiStatus && (

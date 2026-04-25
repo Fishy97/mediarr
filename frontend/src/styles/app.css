@@ -413,7 +413,7 @@ code {
 
 .status-card {
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) max-content;
+  grid-template-columns: 26px minmax(0, 1fr) max-content max-content;
   align-items: start;
   gap: 12px;
   padding: 14px;
@@ -434,6 +434,23 @@ code {
   background: #edf2f7;
   color: #33485e;
   font-size: 0.78rem;
+}
+
+.ai-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #eef5f8;
+  color: #284758;
+  line-height: 1.4;
+}
+
+.ai-note svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
 }
 
 .compact-list {

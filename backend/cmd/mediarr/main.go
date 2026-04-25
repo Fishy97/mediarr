@@ -47,26 +47,27 @@ func main() {
 		TheTVDBAPIKey:       cfg.TheTVDBAPIKey,
 		OpenSubtitlesAPIKey: cfg.OpenSubtitlesKey,
 	}
+	integrationOptions := integrations.Options{
+		JellyfinURL: cfg.JellyfinURL,
+		JellyfinKey: cfg.JellyfinAPIKey,
+		PlexURL:     cfg.PlexURL,
+		PlexToken:   cfg.PlexToken,
+		EmbyURL:     cfg.EmbyURL,
+		EmbyKey:     cfg.EmbyAPIKey,
+	}
 
 	server := api.NewServer(api.Deps{
-		ConfigDir:       cfg.ConfigDir,
-		FrontendDir:     cfg.FrontendDir,
-		Libraries:       libraries,
-		Audit:           auditLog,
-		Auth:            &authService,
-		AI:              &aiClient,
-		ProviderOptions: providerOptions,
-		Integrations: integrations.DefaultsWithOptions(integrations.Options{
-			JellyfinURL: cfg.JellyfinURL,
-			JellyfinKey: cfg.JellyfinAPIKey,
-			PlexURL:     cfg.PlexURL,
-			PlexToken:   cfg.PlexToken,
-			EmbyURL:     cfg.EmbyURL,
-			EmbyKey:     cfg.EmbyAPIKey,
-		}),
-		Scanner: filescan.Scanner{Probe: true},
-		Engine:  recommendations.Engine{OversizedThresholdBytes: cfg.OversizedBytes},
-		Store:   store,
+		ConfigDir:          cfg.ConfigDir,
+		FrontendDir:        cfg.FrontendDir,
+		Libraries:          libraries,
+		Audit:              auditLog,
+		Auth:               &authService,
+		AI:                 &aiClient,
+		ProviderOptions:    providerOptions,
+		IntegrationOptions: integrationOptions,
+		Scanner:            filescan.Scanner{Probe: true},
+		Engine:             recommendations.Engine{OversizedThresholdBytes: cfg.OversizedBytes},
+		Store:              store,
 	})
 	handler := auth.Middleware{AdminToken: cfg.AdminToken, Service: &authService}.Wrap(server)
 

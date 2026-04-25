@@ -49,7 +49,7 @@ func (client OllamaClient) Health(ctx context.Context) Health {
 		health.Status = "invalid_config"
 		return health
 	}
-	res, err := client.httpClient().Do(req)
+	res, err := client.healthClient().Do(req)
 	if err != nil {
 		health.Status = "unavailable"
 		return health
@@ -138,6 +138,13 @@ func (client OllamaClient) httpClient() *http.Client {
 		return client.Client
 	}
 	return &http.Client{Timeout: 20 * time.Second}
+}
+
+func (client OllamaClient) healthClient() *http.Client {
+	if client.Client != nil {
+		return client.Client
+	}
+	return &http.Client{Timeout: 3 * time.Second}
 }
 
 func mustJSON(value any) string {

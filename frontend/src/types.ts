@@ -15,6 +15,10 @@ export type Recommendation = {
   source: string;
   affectedPaths: string[];
   destructive: boolean;
+  aiRationale?: string;
+  aiTags?: string[];
+  aiConfidence?: number;
+  aiSource?: string;
 };
 
 export type ProviderHealth = {
@@ -57,6 +61,13 @@ export type Integration = {
   status: string;
   description: string;
   checkedAt: string;
+};
+
+export type IntegrationRefreshResult = {
+  targetId: string;
+  status: string;
+  message: string;
+  requestedAt: string;
 };
 
 export type ScanResult = {

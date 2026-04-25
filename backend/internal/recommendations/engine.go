@@ -34,6 +34,10 @@ type Recommendation struct {
 	Source          string   `json:"source"`
 	AffectedPaths   []string `json:"affectedPaths"`
 	Destructive     bool     `json:"destructive"`
+	AIRationale     string   `json:"aiRationale,omitempty"`
+	AITags          []string `json:"aiTags,omitempty"`
+	AIConfidence    float64  `json:"aiConfidence,omitempty"`
+	AISource        string   `json:"aiSource,omitempty"`
 }
 
 type Engine struct {

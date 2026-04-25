@@ -5,6 +5,7 @@ import type {
   CatalogCorrectionInput,
   CatalogItem,
   Integration,
+  IntegrationRefreshResult,
   Library,
   ProviderHealth,
   ProviderSetting,
@@ -125,6 +126,9 @@ export const api = {
   },
   async integrations(): Promise<Integration[]> {
     return (await request<Envelope<Integration[]>>('/api/v1/integrations')).data;
+  },
+  async refreshIntegration(id: string): Promise<IntegrationRefreshResult> {
+    return (await request<Envelope<IntegrationRefreshResult>>(`/api/v1/integrations/${encodeURIComponent(id)}/refresh`, { method: 'POST' })).data;
   },
   async createBackup(): Promise<{ path: string }> {
     return (await request<Envelope<{ path: string }>>('/api/v1/backups', { method: 'POST' })).data;

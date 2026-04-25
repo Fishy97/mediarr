@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -20,58 +21,61 @@ import (
 )
 
 type Deps struct {
-	ConfigDir       string
-	FrontendDir     string
-	Libraries       []filescan.Library
-	Recommendations []recommendations.Recommendation
-	Providers       []metadata.Provider
-	ProviderOptions metadata.Options
-	Integrations    []integrations.Target
-	Audit           *audit.Logger
-	Auth            *auth.Service
-	AI              *ai.OllamaClient
-	Scanner         filescan.Scanner
-	Engine          recommendations.Engine
-	Store           *database.Store
+	ConfigDir          string
+	FrontendDir        string
+	Libraries          []filescan.Library
+	Recommendations    []recommendations.Recommendation
+	Providers          []metadata.Provider
+	ProviderOptions    metadata.Options
+	Integrations       []integrations.Target
+	IntegrationOptions integrations.Options
+	Audit              *audit.Logger
+	Auth               *auth.Service
+	AI                 *ai.OllamaClient
+	Scanner            filescan.Scanner
+	Engine             recommendations.Engine
+	Store              *database.Store
 }
 
 type Server struct {
-	mux             *http.ServeMux
-	configDir       string
-	frontendDir     string
-	mu              sync.RWMutex
-	libraries       []filescan.Library
-	scans           []filescan.Result
-	recommendations []recommendations.Recommendation
-	providers       []metadata.Provider
-	providerBase    metadata.Options
-	providerOptions metadata.Options
-	integrations    []integrations.Target
-	audit           *audit.Logger
-	auth            *auth.Service
-	ai              *ai.OllamaClient
-	scanner         filescan.Scanner
-	engine          recommendations.Engine
-	store           *database.Store
+	mux                *http.ServeMux
+	configDir          string
+	frontendDir        string
+	mu                 sync.RWMutex
+	libraries          []filescan.Library
+	scans              []filescan.Result
+	recommendations    []recommendations.Recommendation
+	providers          []metadata.Provider
+	providerBase       metadata.Options
+	providerOptions    metadata.Options
+	integrations       []integrations.Target
+	integrationOptions integrations.Options
+	audit              *audit.Logger
+	auth               *auth.Service
+	ai                 *ai.OllamaClient
+	scanner            filescan.Scanner
+	engine             recommendations.Engine
+	store              *database.Store
 }
 
 func NewServer(deps Deps) *Server {
 	server := &Server{
-		mux:             http.NewServeMux(),
-		configDir:       deps.ConfigDir,
-		frontendDir:     deps.FrontendDir,
-		libraries:       deps.Libraries,
-		recommendations: deps.Recommendations,
-		providers:       deps.Providers,
-		providerBase:    deps.ProviderOptions,
-		providerOptions: deps.ProviderOptions,
-		integrations:    deps.Integrations,
-		audit:           deps.Audit,
-		auth:            deps.Auth,
-		ai:              deps.AI,
-		scanner:         deps.Scanner,
-		engine:          deps.Engine,
-		store:           deps.Store,
+		mux:                http.NewServeMux(),
+		configDir:          deps.ConfigDir,
+		frontendDir:        deps.FrontendDir,
+		libraries:          deps.Libraries,
+		recommendations:    deps.Recommendations,
+		providers:          deps.Providers,
+		providerBase:       deps.ProviderOptions,
+		providerOptions:    deps.ProviderOptions,
+		integrations:       deps.Integrations,
+		integrationOptions: deps.IntegrationOptions,
+		audit:              deps.Audit,
+		auth:               deps.Auth,
+		ai:                 deps.AI,
+		scanner:            deps.Scanner,
+		engine:             deps.Engine,
+		store:              deps.Store,
 	}
 	if server.store != nil {
 		_ = server.refreshProviderOptionsFromStore()
@@ -80,7 +84,7 @@ func NewServer(deps Deps) *Server {
 		server.providers = metadata.DefaultsWithOptions(server.providerOptions)
 	}
 	if server.integrations == nil {
-		server.integrations = integrations.Defaults()
+		server.integrations = integrations.DefaultsWithOptions(server.integrationOptions)
 	}
 	server.routes()
 	return server
@@ -107,6 +111,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("/api/v1/provider-settings", server.providerSettingsHandler)
 	server.mux.HandleFunc("/api/v1/provider-settings/", server.providerSettingHandler)
 	server.mux.HandleFunc("/api/v1/integrations", server.integrationsHandler)
+	server.mux.HandleFunc("/api/v1/integrations/", server.integrationActionHandler)
 	server.mux.HandleFunc("/api/v1/ai/status", server.aiStatusHandler)
 	server.mux.HandleFunc("/api/v1/backups", server.backupsHandler)
 	server.mux.HandleFunc("/api/v1/backups/restore", server.backupRestoreHandler)
@@ -261,7 +266,7 @@ func (server *Server) scansHandler(w http.ResponseWriter, r *http.Request) {
 		defer server.mu.RUnlock()
 		writeJSON(w, http.StatusOK, envelope{Data: server.scans})
 	case http.MethodPost:
-		results, recs, err := server.scanAll()
+		results, recs, err := server.scanAll(r.Context())
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -339,7 +344,7 @@ func (server *Server) catalogCorrectionHandler(w http.ResponseWriter, r *http.Re
 	}
 }
 
-func (server *Server) scanAll() ([]filescan.Result, []recommendations.Recommendation, error) {
+func (server *Server) scanAll(ctx context.Context) ([]filescan.Result, []recommendations.Recommendation, error) {
 	server.mu.RLock()
 	libraries := append([]filescan.Library(nil), server.libraries...)
 	server.mu.RUnlock()
@@ -378,7 +383,7 @@ func (server *Server) scanAll() ([]filescan.Result, []recommendations.Recommenda
 		}
 		files = recommendationFilesFromCatalog(items)
 	}
-	recs := server.engine.Generate(files)
+	recs := server.enrichRecommendationsWithAI(ctx, server.engine.Generate(files))
 	if server.store != nil {
 		if err := server.store.ReplaceRecommendations(recs); err != nil {
 			return nil, nil, err
@@ -519,7 +524,32 @@ func (server *Server) integrationsHandler(w http.ResponseWriter, r *http.Request
 		methodNotAllowed(w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, envelope{Data: server.integrations})
+	server.mu.Lock()
+	server.integrations = integrations.DefaultsWithOptions(server.integrationOptions)
+	integrationRows := append([]integrations.Target(nil), server.integrations...)
+	server.mu.Unlock()
+	writeJSON(w, http.StatusOK, envelope{Data: integrationRows})
+}
+
+func (server *Server) integrationActionHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, r)
+		return
+	}
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/integrations/"), "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] != "refresh" {
+		http.NotFound(w, r)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+	result, err := integrations.Refresh(ctx, server.integrationOptions, parts[0])
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	server.record("integration.refresh_requested", "Media-server library refresh requested", map[string]any{"targetId": result.TargetID, "status": result.Status})
+	writeJSON(w, http.StatusAccepted, envelope{Data: result})
 }
 
 func (server *Server) aiStatusHandler(w http.ResponseWriter, r *http.Request) {
@@ -681,7 +711,7 @@ func (server *Server) regenerateRecommendationsFromCatalog() error {
 	if err != nil {
 		return err
 	}
-	recs := server.engine.Generate(recommendationFilesFromCatalog(items))
+	recs := server.enrichRecommendationsWithAI(context.Background(), server.engine.Generate(recommendationFilesFromCatalog(items)))
 	if err := server.store.ReplaceRecommendations(recs); err != nil {
 		return err
 	}
@@ -689,6 +719,37 @@ func (server *Server) regenerateRecommendationsFromCatalog() error {
 	server.recommendations = recs
 	server.mu.Unlock()
 	return nil
+}
+
+func (server *Server) enrichRecommendationsWithAI(ctx context.Context, recs []recommendations.Recommendation) []recommendations.Recommendation {
+	if server.ai == nil || len(recs) == 0 {
+		return recs
+	}
+	health := server.ai.Health(ctx)
+	if !health.ModelAvailable {
+		return recs
+	}
+	enriched := append([]recommendations.Recommendation(nil), recs...)
+	for index := range enriched {
+		if enriched[index].Destructive || !strings.HasPrefix(enriched[index].Source, "rule:") {
+			continue
+		}
+		itemCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+		suggestion, err := server.ai.SuggestRationale(itemCtx, ai.SuggestionInput{
+			Title:         enriched[index].Title,
+			Explanation:   enriched[index].Explanation,
+			AffectedPaths: enriched[index].AffectedPaths,
+		})
+		cancel()
+		if err != nil {
+			continue
+		}
+		enriched[index].AIRationale = suggestion.Rationale
+		enriched[index].AITags = suggestion.Tags
+		enriched[index].AIConfidence = suggestion.Confidence
+		enriched[index].AISource = "ollama:" + health.Model
+	}
+	return enriched
 }
 
 func recommendationFilesFromCatalog(items []database.CatalogItem) []recommendations.MediaFile {

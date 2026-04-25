@@ -74,6 +74,15 @@ describe('api auth helpers', () => {
     }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/catalog/file_1/correction', expect.objectContaining({ method: 'DELETE' }));
   });
+
+  test('integration refresh calls sync target endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ data: { targetId: 'jellyfin', status: 'requested' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.refreshIntegration('jellyfin')).resolves.toMatchObject({ targetId: 'jellyfin', status: 'requested' });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/integrations/jellyfin/refresh', expect.objectContaining({ method: 'POST' }));
+  });
 });
 
 function jsonResponse(body: unknown): Response {
