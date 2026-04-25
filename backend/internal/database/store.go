@@ -271,6 +271,15 @@ type PathMapping struct {
 	UpdatedAt        time.Time `json:"updatedAt"`
 }
 
+type PathMappingVerification struct {
+	Mapping       PathMapping `json:"mapping"`
+	MatchedFiles  int         `json:"matchedFiles"`
+	MappedFiles   int         `json:"mappedFiles"`
+	VerifiedFiles int         `json:"verifiedFiles"`
+	MissingFiles  int         `json:"missingFiles"`
+	UpdatedAt     time.Time   `json:"updatedAt"`
+}
+
 type MediaServerSnapshot struct {
 	Server    MediaServer           `json:"server"`
 	Users     []MediaServerUser     `json:"users"`
@@ -1130,7 +1139,7 @@ func (store *Store) ListMediaServerItems(filter MediaServerItemFilter) ([]MediaS
 			SELECT 1 FROM media_server_files
 			WHERE media_server_files.server_id = media_server_items.server_id
 			AND media_server_files.item_external_id = media_server_items.external_id
-			AND media_server_files.local_media_file_id = ''
+			AND (media_server_files.local_path = '' OR media_server_files.verification = 'unmapped')
 		)`)
 	}
 	if len(conditions) > 0 {
@@ -1646,6 +1655,142 @@ func (store *Store) ListPathMappings() ([]PathMapping, error) {
 		mappings = append(mappings, mapping)
 	}
 	return mappings, rows.Err()
+}
+
+func (store *Store) GetPathMapping(id string) (PathMapping, error) {
+	if store == nil || store.DB == nil {
+		return PathMapping{}, errors.New("nil database store")
+	}
+	var mapping PathMapping
+	var createdAt string
+	var updatedAt string
+	err := store.DB.QueryRow(`SELECT id, server_id, server_path_prefix, local_path_prefix, created_at, updated_at
+		FROM integration_path_mappings
+		WHERE id = ?`, strings.TrimSpace(id)).Scan(
+		&mapping.ID,
+		&mapping.ServerID,
+		&mapping.ServerPathPrefix,
+		&mapping.LocalPathPrefix,
+		&createdAt,
+		&updatedAt,
+	)
+	if err != nil {
+		return PathMapping{}, err
+	}
+	mapping.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	mapping.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+	return mapping, nil
+}
+
+func (store *Store) VerifyPathMapping(id string) (PathMappingVerification, error) {
+	if store == nil || store.DB == nil {
+		return PathMappingVerification{}, errors.New("nil database store")
+	}
+	mapping, err := store.GetPathMapping(id)
+	if err != nil {
+		return PathMappingVerification{}, err
+	}
+	serverPrefix := strings.TrimRight(strings.TrimSpace(mapping.ServerPathPrefix), "/")
+	localPrefix := strings.TrimRight(strings.TrimSpace(mapping.LocalPathPrefix), "/")
+	if serverPrefix == "" || localPrefix == "" {
+		return PathMappingVerification{}, errors.New("path mapping prefixes are required")
+	}
+
+	query := `SELECT server_id, item_external_id, path, size_bytes
+		FROM media_server_files
+		WHERE (path = ? OR path LIKE ?)`
+	args := []any{serverPrefix, serverPrefix + "/%"}
+	if strings.TrimSpace(mapping.ServerID) != "" {
+		query += " AND server_id = ?"
+		args = append(args, strings.TrimSpace(mapping.ServerID))
+	}
+	query += " ORDER BY server_id, item_external_id, path"
+	rows, err := store.DB.Query(query, args...)
+	if err != nil {
+		return PathMappingVerification{}, err
+	}
+	defer rows.Close()
+
+	type mappedFile struct {
+		serverID       string
+		itemExternalID string
+		serverPath     string
+		localPath      string
+		sizeBytes      int64
+		verification   string
+		confidence     float64
+	}
+	files := []mappedFile{}
+	result := PathMappingVerification{Mapping: mapping, UpdatedAt: time.Now().UTC()}
+	for rows.Next() {
+		var file mappedFile
+		if err := rows.Scan(&file.serverID, &file.itemExternalID, &file.serverPath, &file.sizeBytes); err != nil {
+			return PathMappingVerification{}, err
+		}
+		file.localPath = translateMappedPath(file.serverPath, serverPrefix, localPrefix)
+		file.verification = "unmapped"
+		file.confidence = 0.4
+		result.MatchedFiles++
+		if info, err := os.Stat(file.localPath); err == nil && !info.IsDir() {
+			result.MappedFiles++
+			if file.sizeBytes <= 0 || info.Size() == file.sizeBytes {
+				file.verification = "local_verified"
+				file.confidence = 0.95
+				result.VerifiedFiles++
+			} else {
+				file.verification = "path_mapped"
+				file.confidence = 0.82
+			}
+		} else {
+			result.MissingFiles++
+		}
+		files = append(files, file)
+	}
+	if err := rows.Err(); err != nil {
+		return PathMappingVerification{}, err
+	}
+
+	tx, err := store.DB.Begin()
+	if err != nil {
+		return PathMappingVerification{}, err
+	}
+	defer tx.Rollback()
+	for _, file := range files {
+		if _, err := tx.Exec(`UPDATE media_server_files
+			SET local_path = ?, verification = ?, match_confidence = ?
+			WHERE server_id = ? AND item_external_id = ? AND path = ?`,
+			file.localPath,
+			file.verification,
+			file.confidence,
+			file.serverID,
+			file.itemExternalID,
+			file.serverPath,
+		); err != nil {
+			return PathMappingVerification{}, err
+		}
+		if file.confidence > 0 {
+			if _, err := tx.Exec(`UPDATE media_server_items
+				SET match_confidence = CASE WHEN match_confidence < ? THEN ? ELSE match_confidence END,
+					updated_at = ?
+				WHERE server_id = ? AND external_id = ?`,
+				file.confidence,
+				file.confidence,
+				result.UpdatedAt.Format(time.RFC3339Nano),
+				file.serverID,
+				file.itemExternalID,
+			); err != nil {
+				return PathMappingVerification{}, err
+			}
+		}
+	}
+	if _, err := tx.Exec(`UPDATE integration_path_mappings SET updated_at = ? WHERE id = ?`, result.UpdatedAt.Format(time.RFC3339Nano), mapping.ID); err != nil {
+		return PathMappingVerification{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return PathMappingVerification{}, err
+	}
+	result.Mapping.UpdatedAt = result.UpdatedAt
+	return result, nil
 }
 
 func (store *Store) DeletePathMapping(id string) error {
@@ -2213,6 +2358,21 @@ func normalizeRecommendationState(state recommendations.State) recommendations.S
 	default:
 		return recommendations.StateNew
 	}
+}
+
+func translateMappedPath(path string, serverPrefix string, localPrefix string) string {
+	path = filepath.Clean(strings.TrimSpace(path))
+	serverPrefix = filepath.Clean(strings.TrimSpace(serverPrefix))
+	localPrefix = filepath.Clean(strings.TrimSpace(localPrefix))
+	if path == serverPrefix {
+		return localPrefix
+	}
+	suffix := strings.TrimPrefix(path, serverPrefix)
+	suffix = strings.TrimLeft(suffix, string(os.PathSeparator)+"/")
+	if suffix == "" {
+		return localPrefix
+	}
+	return filepath.Join(localPrefix, filepath.FromSlash(suffix))
 }
 
 func normalizeJobEventLevel(level string) string {

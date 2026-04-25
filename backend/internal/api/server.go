@@ -1000,8 +1000,43 @@ func (server *Server) pathMappingHandler(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "path mapping store is not configured", http.StatusBadRequest)
 		return
 	}
-	id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/path-mappings/"), "/")
-	if id == "" {
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/path-mappings/"), "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		http.NotFound(w, r)
+		return
+	}
+	if parts[0] == "unmapped" {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w, r)
+			return
+		}
+		items, err := server.store.ListMediaServerItems(database.MediaServerItemFilter{
+			ServerID:     r.URL.Query().Get("serverId"),
+			UnmappedOnly: true,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, envelope{Data: items})
+		return
+	}
+	id := parts[0]
+	if len(parts) == 2 && parts[1] == "verify" {
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w, r)
+			return
+		}
+		result, err := server.store.VerifyPathMapping(id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		server.record("path_mapping.verified", "Integration path mapping verified", map[string]any{"id": id, "matchedFiles": result.MatchedFiles, "verifiedFiles": result.VerifiedFiles, "missingFiles": result.MissingFiles})
+		writeJSON(w, http.StatusOK, envelope{Data: result})
+		return
+	}
+	if len(parts) != 1 {
 		http.NotFound(w, r)
 		return
 	}

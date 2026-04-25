@@ -1,6 +1,8 @@
 package database
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -161,6 +163,86 @@ func TestPathMappingsCanBeUpsertedListedAndDeleted(t *testing.T) {
 	}
 	if len(mappings) != 0 {
 		t.Fatalf("mappings after delete = %#v", mappings)
+	}
+}
+
+func TestPathMappingVerificationUpgradesFileEvidence(t *testing.T) {
+	localRoot := t.TempDir()
+	localMovie := filepath.Join(localRoot, "movies", "Arrival (2016).mkv")
+	if err := os.MkdirAll(filepath.Dir(localMovie), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(localMovie, []byte("verified media bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	snapshot := MediaServerSnapshot{
+		Server: MediaServer{ID: "jellyfin", Kind: "jellyfin", Name: "Jellyfin", BaseURL: "http://jellyfin.local", Status: "configured"},
+		Items: []MediaServerItem{{
+			ServerID:          "jellyfin",
+			ExternalID:        "item_1",
+			LibraryExternalID: "movies",
+			Kind:              "movie",
+			Title:             "Arrival",
+			Path:              "/mnt/media/movies/Arrival (2016).mkv",
+			MatchConfidence:   0.7,
+		}},
+		Files: []MediaServerFile{{
+			ServerID:        "jellyfin",
+			ItemExternalID:  "item_1",
+			Path:            "/mnt/media/movies/Arrival (2016).mkv",
+			SizeBytes:       int64(len("verified media bytes")),
+			Verification:    "server_reported",
+			MatchConfidence: 0.7,
+		}},
+		Job: MediaSyncJob{ID: "sync_1", ServerID: "jellyfin", Status: "completed", StartedAt: time.Now().UTC(), CompletedAt: time.Now().UTC()},
+	}
+	if err := store.ReplaceMediaServerSnapshot(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	unmapped, err := store.ListMediaServerItems(MediaServerItemFilter{ServerID: "jellyfin", UnmappedOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unmapped) != 1 {
+		t.Fatalf("unmapped before verify = %#v, want one item", unmapped)
+	}
+	mapping, err := store.UpsertPathMapping(PathMapping{
+		ServerID:         "jellyfin",
+		ServerPathPrefix: "/mnt/media",
+		LocalPathPrefix:  localRoot,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := store.VerifyPathMapping(mapping.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MatchedFiles != 1 || result.VerifiedFiles != 1 || result.MissingFiles != 0 {
+		t.Fatalf("verification result = %#v", result)
+	}
+
+	media, err := store.ListActivityRecommendationMedia()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(media) != 1 || media[0].Path != localMovie || media[0].Verification != "local_verified" || media[0].MatchConfidence < 0.95 {
+		t.Fatalf("activity media after verify = %#v", media)
+	}
+	unmapped, err = store.ListMediaServerItems(MediaServerItemFilter{ServerID: "jellyfin", UnmappedOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unmapped) != 0 {
+		t.Fatalf("unmapped after verify = %#v, want none", unmapped)
 	}
 }
 
