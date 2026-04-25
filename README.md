@@ -46,6 +46,8 @@ docker compose up --build -d
 
 Open [http://localhost:8080](http://localhost:8080).
 
+Mediarr ships with no default password. On a fresh `/config` volume, the first browser visit is forced through **First run setup**, where you create the local admin account. The setup endpoint is disabled after the first admin exists.
+
 ### Launch Modes
 
 Run Mediarr without the optional local AI sidecar:

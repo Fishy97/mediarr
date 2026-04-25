@@ -7,6 +7,7 @@ The default deployment is intentionally conservative:
 - media folders are mounted read-only
 - app state is stored under `./config`
 - cleanup recommendations are suggest-only
+- there is no default password; first launch requires creating the local admin account in the web UI
 - the container has a healthcheck
 - the container runs as `PUID:PGID`
 
