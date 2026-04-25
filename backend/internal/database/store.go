@@ -1419,7 +1419,7 @@ func (store *Store) UpdateJob(id string, update JobUpdate) (Job, error) {
 	if strings.TrimSpace(update.Error) != "" {
 		job.Error = strings.TrimSpace(update.Error)
 	}
-	if update.Completed || job.Status == "completed" || job.Status == "failed" {
+	if update.Completed || job.Status == "completed" || job.Status == "failed" || job.Status == "canceled" || job.Status == "stale" {
 		if job.CompletedAt.IsZero() {
 			job.CompletedAt = time.Now().UTC()
 		}
@@ -1518,6 +1518,37 @@ func (store *Store) ListJobs(filter JobFilter) ([]Job, error) {
 		jobs = append(jobs, job)
 	}
 	return jobs, rows.Err()
+}
+
+func (store *Store) MarkStaleJobs(cutoff time.Time) (int, error) {
+	if store == nil || store.DB == nil {
+		return 0, errors.New("nil database store")
+	}
+	if cutoff.IsZero() {
+		return 0, errors.New("stale cutoff is required")
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := store.DB.Exec(`UPDATE jobs
+		SET status = 'stale',
+			phase = 'stale',
+			message = 'Marked stale after no progress',
+			error = 'job became stale before completion',
+			updated_at = ?,
+			completed_at = COALESCE(completed_at, ?)
+		WHERE status IN ('queued', 'running')
+		AND updated_at < ?`,
+		now,
+		now,
+		cutoff.UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(affected), nil
 }
 
 func (store *Store) AddJobEvent(input JobEventInput) (JobEvent, error) {
@@ -2338,7 +2369,7 @@ func normalizeJobStatus(status string) string {
 
 func knownJobStatus(status string) bool {
 	switch normalizeJobStatus(status) {
-	case "queued", "running", "completed", "failed":
+	case "queued", "running", "completed", "failed", "canceled", "stale":
 		return true
 	default:
 		return false

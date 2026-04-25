@@ -60,6 +60,8 @@ type Server struct {
 	scanner            filescan.Scanner
 	engine             recommendations.Engine
 	store              *database.Store
+	jobCancelMu        sync.Mutex
+	jobCancels         map[string]context.CancelFunc
 }
 
 func NewServer(deps Deps) *Server {
@@ -81,6 +83,7 @@ func NewServer(deps Deps) *Server {
 		scanner:            deps.Scanner,
 		engine:             deps.Engine,
 		store:              deps.Store,
+		jobCancels:         map[string]context.CancelFunc{},
 	}
 	if server.store != nil {
 		_ = server.refreshProviderOptionsFromStore()
@@ -287,6 +290,7 @@ func (server *Server) jobsHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "job store is not configured", http.StatusBadRequest)
 		return
 	}
+	_, _ = server.store.MarkStaleJobs(time.Now().Add(-24 * time.Hour))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	jobs, err := server.store.ListJobs(database.JobFilter{
 		Kind:     r.URL.Query().Get("kind"),
@@ -303,17 +307,33 @@ func (server *Server) jobsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (server *Server) jobHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		methodNotAllowed(w, r)
-		return
-	}
 	if server.store == nil {
 		http.Error(w, "job store is not configured", http.StatusBadRequest)
 		return
 	}
-	id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/jobs/"), "/")
-	if id == "" {
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/jobs/"), "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
 		http.NotFound(w, r)
+		return
+	}
+	id := parts[0]
+	if len(parts) == 2 {
+		switch parts[1] {
+		case "cancel":
+			server.cancelJobHandler(w, r, id)
+		case "retry":
+			server.retryJobHandler(w, r, id)
+		default:
+			http.NotFound(w, r)
+		}
+		return
+	}
+	if len(parts) != 1 {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r)
 		return
 	}
 	job, err := server.store.GetJob(id)
@@ -327,6 +347,66 @@ func (server *Server) jobHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{Data: jobDetail{Job: job, Events: events}})
+}
+
+func (server *Server) cancelJobHandler(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, r)
+		return
+	}
+	server.cancelRunningJob(id)
+	job, err := server.store.UpdateJob(id, database.JobUpdate{
+		Status:    "canceled",
+		Phase:     "canceled",
+		Message:   "Canceled by admin",
+		Error:     "job canceled by admin",
+		Completed: true,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	_, _ = server.store.AddJobEvent(database.JobEventInput{
+		JobID:   id,
+		Level:   "warning",
+		Phase:   job.Phase,
+		Message: job.Message,
+	})
+	server.record("job.canceled", "Background job canceled", map[string]any{"id": id, "kind": job.Kind, "targetId": job.TargetID})
+	writeJSON(w, http.StatusOK, envelope{Data: job})
+}
+
+func (server *Server) retryJobHandler(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, r)
+		return
+	}
+	previous, err := server.store.GetJob(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	if previous.Status == "queued" || previous.Status == "running" {
+		http.Error(w, "active jobs cannot be retried", http.StatusConflict)
+		return
+	}
+	job, err := server.store.CreateJob(database.JobInput{
+		Kind:     previous.Kind,
+		TargetID: previous.TargetID,
+		Phase:    "queued",
+		Message:  "Retry queued",
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := server.startJob(job); err != nil {
+		_, _ = server.store.UpdateJob(job.ID, database.JobUpdate{Status: "failed", Phase: "failed", Message: "Unable to retry job", Error: err.Error(), Completed: true})
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	server.record("job.retried", "Background job retry queued", map[string]any{"id": previous.ID, "retryId": job.ID, "kind": job.Kind, "targetId": job.TargetID})
+	writeJSON(w, http.StatusAccepted, envelope{Data: job})
 }
 
 func (server *Server) scansHandler(w http.ResponseWriter, r *http.Request) {
@@ -347,7 +427,10 @@ func (server *Server) scansHandler(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			go server.runScanJob(job.ID)
+			if err := server.startJob(job); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 			writeJSON(w, http.StatusAccepted, envelope{Data: job})
 			return
 		}
@@ -446,12 +529,52 @@ func (server *Server) activeScanHandler(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, envelope{Data: jobs})
 }
 
+func (server *Server) startJob(job database.Job) error {
+	switch job.Kind {
+	case "filesystem_scan":
+		go server.runScanJob(job.ID)
+	case "jellyfin_sync", "plex_sync":
+		go server.runIntegrationSyncJob(job.ID, job.TargetID)
+	default:
+		return errors.New("job kind cannot be started")
+	}
+	return nil
+}
+
+func (server *Server) registerJobCancel(jobID string, cancel context.CancelFunc) {
+	server.jobCancelMu.Lock()
+	defer server.jobCancelMu.Unlock()
+	server.jobCancels[jobID] = cancel
+}
+
+func (server *Server) unregisterJobCancel(jobID string) {
+	server.jobCancelMu.Lock()
+	defer server.jobCancelMu.Unlock()
+	delete(server.jobCancels, jobID)
+}
+
+func (server *Server) cancelRunningJob(jobID string) {
+	server.jobCancelMu.Lock()
+	cancel := server.jobCancels[jobID]
+	server.jobCancelMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
 func (server *Server) runScanJob(jobID string) {
 	reporter := jobReporter{store: server.store, jobID: jobID}
-	reporter.update(database.JobUpdate{Status: "running", Phase: "starting", Message: "Starting filesystem scan"}, true)
 	ctx, cancel := context.WithTimeout(context.Background(), 24*time.Hour)
 	defer cancel()
+	server.registerJobCancel(jobID, cancel)
+	defer server.unregisterJobCancel(jobID)
+	reporter.update(database.JobUpdate{Status: "running", Phase: "starting", Message: "Starting filesystem scan"}, true)
 	if _, _, err := server.scanAll(ctx, &reporter); err != nil {
+		if errors.Is(err, context.Canceled) {
+			reporter.update(database.JobUpdate{Status: "canceled", Phase: "canceled", Message: "Filesystem scan canceled", Error: "job canceled by admin", Completed: true}, true)
+			server.record("scan.canceled", "Library scan canceled", map[string]any{"jobId": jobID})
+			return
+		}
 		reporter.update(database.JobUpdate{Status: "failed", Phase: "failed", Message: "Filesystem scan failed", Error: err.Error(), Completed: true}, true)
 		server.record("scan.failed", "Library scan failed", map[string]any{"jobId": jobID, "error": err.Error()})
 		return
@@ -467,6 +590,9 @@ func (server *Server) scanAll(ctx context.Context, reporter *jobReporter) ([]fil
 	var results []filescan.Result
 	var files []recommendations.MediaFile
 	for libraryIndex, library := range libraries {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		if reporter != nil {
 			reporter.update(database.JobUpdate{
 				Phase:        "discovering",
@@ -490,6 +616,9 @@ func (server *Server) scanAll(ctx context.Context, reporter *jobReporter) ([]fil
 		}
 		result, err := scanner.Scan(library)
 		if err != nil {
+			return nil, nil, err
+		}
+		if err := ctx.Err(); err != nil {
 			return nil, nil, err
 		}
 		results = append(results, result)
@@ -524,6 +653,9 @@ func (server *Server) scanAll(ctx context.Context, reporter *jobReporter) ([]fil
 	}
 	if reporter != nil {
 		reporter.update(database.JobUpdate{Phase: "recommendations", Message: "Generating cleanup recommendations"}, true)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
 	}
 	recs, err := server.generateRecommendations(ctx, files)
 	if err != nil {
@@ -825,7 +957,10 @@ func (server *Server) integrationSyncHandler(w http.ResponseWriter, r *http.Requ
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		go server.runIntegrationSyncJob(job.ID, targetID)
+		if err := server.startJob(job); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		writeJSON(w, http.StatusAccepted, envelope{Data: mediaSyncJobFromJob(job)})
 	default:
 		methodNotAllowed(w, r)
@@ -834,9 +969,11 @@ func (server *Server) integrationSyncHandler(w http.ResponseWriter, r *http.Requ
 
 func (server *Server) runIntegrationSyncJob(jobID string, targetID string) {
 	reporter := jobReporter{store: server.store, jobID: jobID}
-	reporter.update(database.JobUpdate{Status: "running", Phase: "connecting", Message: "Starting " + targetID + " sync"}, true)
 	ctx, cancel := context.WithTimeout(context.Background(), 24*time.Hour)
 	defer cancel()
+	server.registerJobCancel(jobID, cancel)
+	defer server.unregisterJobCancel(jobID)
+	reporter.update(database.JobUpdate{Status: "running", Phase: "connecting", Message: "Starting " + targetID + " sync"}, true)
 
 	if err := server.refreshIntegrationOptionsFromStore(); err != nil {
 		reporter.update(database.JobUpdate{Status: "failed", Phase: "failed", Message: "Unable to load integration settings", Error: err.Error(), Completed: true}, true)
@@ -862,6 +999,11 @@ func (server *Server) runIntegrationSyncJob(jobID string, targetID string) {
 	}
 	snapshot, err := syncIntegrationSnapshot(ctx, options, targetID, mappings)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			reporter.update(database.JobUpdate{Status: "canceled", Phase: "canceled", Message: "Media-server sync canceled", Error: "job canceled by admin", Completed: true}, true)
+			server.record("integration.sync_canceled", "Media-server inventory and activity sync canceled", map[string]any{"targetId": targetID})
+			return
+		}
 		reporter.update(database.JobUpdate{Status: "failed", Phase: "failed", Message: "Media-server sync failed", Error: err.Error(), Completed: true}, true)
 		server.record("integration.sync_failed", "Media-server inventory and activity sync failed", map[string]any{"targetId": targetID, "error": err.Error()})
 		return
@@ -1410,6 +1552,10 @@ func (reporter jobReporter) update(update database.JobUpdate, event bool) databa
 	if reporter.store == nil || reporter.jobID == "" {
 		return database.Job{}
 	}
+	current, err := reporter.store.GetJob(reporter.jobID)
+	if err == nil && isTerminalJobStatus(current.Status) && strings.TrimSpace(update.Status) != current.Status {
+		return current
+	}
 	job, err := reporter.store.UpdateJob(reporter.jobID, update)
 	if err != nil {
 		return database.Job{}
@@ -1430,6 +1576,15 @@ func (reporter jobReporter) update(update database.JobUpdate, event bool) databa
 		})
 	}
 	return job
+}
+
+func isTerminalJobStatus(status string) bool {
+	switch status {
+	case "completed", "failed", "canceled", "stale":
+		return true
+	default:
+		return false
+	}
 }
 
 func intPtr(value int) *int {
