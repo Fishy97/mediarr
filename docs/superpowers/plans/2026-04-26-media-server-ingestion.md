@@ -79,7 +79,7 @@ Add a second test for `UpsertPathMapping`, `ListPathMappings`, and `DeletePathMa
 Run:
 
 ```bash
-go test ./backend/internal/database -run 'TestMediaServerSnapshot|TestPathMapping'
+cd backend && go test ./internal/database -run 'TestMediaServerSnapshot|TestPathMapping'
 ```
 
 Expected: fail because new types and methods are undefined.
@@ -199,7 +199,7 @@ Use a transaction for snapshot replacement and preserve old snapshots if any wri
 Run:
 
 ```bash
-go test ./backend/internal/database
+cd backend && go test ./internal/database
 ```
 
 Expected: pass.
@@ -234,7 +234,7 @@ Assert:
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-go test ./backend/internal/integrations -run Jellyfin
+cd backend && go test ./internal/integrations -run Jellyfin
 ```
 
 Expected: fail because `SyncJellyfin` is undefined.
@@ -273,7 +273,7 @@ After successful Jellyfin sync, persist the snapshot, regenerate recommendations
 - [ ] **Step 6: Run tests**
 
 ```bash
-go test ./backend/internal/integrations ./backend/internal/api
+cd backend && go test ./internal/integrations ./internal/api
 ```
 
 Expected: pass.
@@ -307,7 +307,7 @@ Assert:
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-go test ./backend/internal/integrations -run Plex
+cd backend && go test ./internal/integrations -run Plex
 ```
 
 Expected: fail because `SyncPlex` is undefined.
@@ -329,7 +329,7 @@ Update sync dispatch to call Jellyfin or Plex based on integration ID. Return `4
 - [ ] **Step 5: Run tests**
 
 ```bash
-go test ./backend/internal/integrations ./backend/internal/api
+cd backend && go test ./internal/integrations ./internal/api
 ```
 
 Expected: pass.
@@ -362,7 +362,7 @@ Add tests for:
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-go test ./backend/internal/recommendations -run 'Activity|Inactive|Never'
+cd backend && go test ./internal/recommendations -run 'Activity|Inactive|Never'
 ```
 
 Expected: fail because activity inputs/actions do not exist.
@@ -398,7 +398,7 @@ Update API regeneration paths so catalog rules and activity rules are combined b
 - [ ] **Step 6: Run tests**
 
 ```bash
-go test ./backend/internal/recommendations ./backend/internal/database ./backend/internal/api
+cd backend && go test ./internal/recommendations ./internal/database ./internal/api
 ```
 
 Expected: pass.
@@ -502,8 +502,8 @@ Document:
 - [ ] **Step 2: Run backend validation**
 
 ```bash
-go test ./...
-go vet ./...
+cd backend && go test ./...
+cd backend && go vet ./...
 ```
 
 Expected: both pass.
