@@ -288,3 +288,45 @@ func TestStoreReturnsEmptyRecommendationList(t *testing.T) {
 		t.Fatal("empty recommendations should be an empty list, not nil")
 	}
 }
+
+func TestStoreIgnoresAndRestoresRecommendations(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	rec := recommendations.Recommendation{
+		ID:              "rec_ignore",
+		Action:          recommendations.ActionReviewDuplicate,
+		Title:           "Review duplicate media",
+		Explanation:     "Multiple files resolve to the same catalog item.",
+		SpaceSavedBytes: 10,
+		Confidence:      0.92,
+		Source:          "rule:test",
+		AffectedPaths:   []string{"/media/a.mkv"},
+	}
+	if err := store.ReplaceRecommendations([]recommendations.Recommendation{rec}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.IgnoreRecommendation("rec_ignore"); err != nil {
+		t.Fatal(err)
+	}
+	recs, err := store.ListRecommendations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 0 {
+		t.Fatalf("ignored recommendations = %#v, want none", recs)
+	}
+	if err := store.RestoreRecommendation("rec_ignore"); err != nil {
+		t.Fatal(err)
+	}
+	recs, err = store.ListRecommendations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("restored recommendations = %d, want 1", len(recs))
+	}
+}

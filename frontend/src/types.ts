@@ -7,7 +7,7 @@ export type Library = {
 
 export type Recommendation = {
   id: string;
-  action: 'review_duplicate' | 'review_oversized';
+  action: 'review_duplicate' | 'review_oversized' | 'review_missing_subtitles';
   title: string;
   explanation: string;
   spaceSavedBytes: number;
@@ -86,4 +86,11 @@ export type AuthResponse = {
   user: AuthUser;
   token: string;
   expiresAt?: string;
+};
+
+export type AIStatus = {
+  status: string;
+  model: string;
+  modelAvailable: boolean;
+  checkedAt: string;
 };

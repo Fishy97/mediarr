@@ -218,6 +218,21 @@ h2 {
   cursor: wait;
 }
 
+.secondary-button {
+  min-height: 34px;
+  border: 1px solid #cbd5cf;
+  border-radius: 8px;
+  padding: 0 12px;
+  background: #ffffff;
+  color: #24302b;
+  cursor: pointer;
+}
+
+.secondary-button:disabled {
+  opacity: 0.64;
+  cursor: wait;
+}
+
 .notice {
   border-radius: 8px;
   padding: 12px 14px;

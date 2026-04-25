@@ -1,4 +1,4 @@
-import type { AuthResponse, AuthUser, CatalogItem, Integration, Library, ProviderHealth, Recommendation, ScanResult, SetupStatus } from '../types';
+import type { AIStatus, AuthResponse, AuthUser, CatalogItem, Integration, Library, ProviderHealth, Recommendation, ScanResult, SetupStatus } from '../types';
 
 type Envelope<T> = { data: T };
 
@@ -79,8 +79,17 @@ export const api = {
   async recommendations(): Promise<Recommendation[]> {
     return (await request<Envelope<Recommendation[]>>('/api/v1/recommendations')).data;
   },
+  async ignoreRecommendation(id: string): Promise<void> {
+    await request<Envelope<{ ok: boolean }>>(`/api/v1/recommendations/${encodeURIComponent(id)}/ignore`, { method: 'POST' });
+  },
+  async restoreRecommendation(id: string): Promise<void> {
+    await request<Envelope<{ ok: boolean }>>(`/api/v1/recommendations/${encodeURIComponent(id)}/restore`, { method: 'POST' });
+  },
   async providers(): Promise<ProviderHealth[]> {
     return (await request<Envelope<ProviderHealth[]>>('/api/v1/providers')).data;
+  },
+  async aiStatus(): Promise<AIStatus> {
+    return (await request<Envelope<AIStatus>>('/api/v1/ai/status')).data;
   },
   async integrations(): Promise<Integration[]> {
     return (await request<Envelope<Integration[]>>('/api/v1/integrations')).data;

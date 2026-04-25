@@ -504,6 +504,22 @@ func (store *Store) ListRecommendations() ([]recommendations.Recommendation, err
 	return recs, rows.Err()
 }
 
+func (store *Store) IgnoreRecommendation(id string) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	_, err := store.DB.Exec(`UPDATE recommendations SET ignored_at = ? WHERE id = ?`, time.Now().UTC().Format(time.RFC3339Nano), id)
+	return err
+}
+
+func (store *Store) RestoreRecommendation(id string) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	_, err := store.DB.Exec(`UPDATE recommendations SET ignored_at = NULL WHERE id = ?`, id)
+	return err
+}
+
 func (store *Store) SetProviderCache(provider string, cacheKey string, body string, expiresAt time.Time) error {
 	if store == nil || store.DB == nil {
 		return errors.New("nil database store")

@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { api, getAuthToken } from './lib/api';
 import { formatBytes, formatConfidence } from './lib/format';
-import type { AuthUser, CatalogItem, Integration, Library as MediaLibrary, ProviderHealth, Recommendation, ScanResult } from './types';
+import type { AIStatus, AuthUser, CatalogItem, Integration, Library as MediaLibrary, ProviderHealth, Recommendation, ScanResult } from './types';
 
 type View = 'dashboard' | 'libraries' | 'catalog' | 'recommendations' | 'integrations' | 'settings';
 
@@ -34,6 +34,7 @@ export function App() {
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [providers, setProviders] = useState<ProviderHealth[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
+  const [aiStatus, setAIStatus] = useState<AIStatus | null>(null);
   const [status, setStatus] = useState('Loading');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -43,7 +44,7 @@ export function App() {
 
   async function refresh() {
     try {
-      const [health, libs, catalogRows, scanRows, recs, providerRows, integrationRows] = await Promise.all([
+      const [health, libs, catalogRows, scanRows, recs, providerRows, integrationRows, ai] = await Promise.all([
         api.health(),
         api.libraries(),
         api.catalog(),
@@ -51,6 +52,7 @@ export function App() {
         api.recommendations(),
         api.providers(),
         api.integrations(),
+        api.aiStatus(),
       ]);
       setStatus(health.status);
       setLibraries(libs);
@@ -59,6 +61,7 @@ export function App() {
       setRecommendations(recs);
       setProviders(providerRows);
       setIntegrations(integrationRows);
+      setAIStatus(ai);
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to load Mediarr');
@@ -113,6 +116,19 @@ export function App() {
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Backup failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function ignoreRecommendation(id: string) {
+    setBusy(true);
+    try {
+      await api.ignoreRecommendation(id);
+      setRecommendations((current) => current.filter((rec) => rec.id !== id));
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to ignore recommendation');
     } finally {
       setBusy(false);
     }
@@ -203,8 +219,8 @@ export function App() {
         )}
         {view === 'libraries' && <Libraries libraries={libraries} scans={scans} />}
         {view === 'catalog' && <Catalog items={catalogItems} />}
-        {view === 'recommendations' && <RecommendationQueue recommendations={recommendations} />}
-        {view === 'integrations' && <Integrations providers={providers} integrations={integrations} />}
+        {view === 'recommendations' && <RecommendationQueue recommendations={recommendations} onIgnore={(id) => void ignoreRecommendation(id)} busy={busy} />}
+        {view === 'integrations' && <Integrations providers={providers} integrations={integrations} aiStatus={aiStatus} />}
         {view === 'settings' && <SettingsView onBackup={() => void createBackup()} busy={busy} />}
       </main>
     </div>
@@ -381,7 +397,7 @@ function Catalog({ items }: { items: CatalogItem[] }) {
   );
 }
 
-function RecommendationQueue({ recommendations }: { recommendations: Recommendation[] }) {
+function RecommendationQueue({ recommendations, onIgnore, busy }: { recommendations: Recommendation[]; onIgnore: (id: string) => void; busy: boolean }) {
   return (
     <section className="queue">
       {recommendations.map((rec) => (
@@ -399,6 +415,7 @@ function RecommendationQueue({ recommendations }: { recommendations: Recommendat
           <div className="rec-metrics">
             <span>{formatBytes(rec.spaceSavedBytes)}</span>
             <small>{formatConfidence(rec.confidence)} • {rec.source}</small>
+            <button className="secondary-button" disabled={busy} onClick={() => onIgnore(rec.id)}>Ignore</button>
           </div>
         </article>
       ))}
@@ -407,7 +424,7 @@ function RecommendationQueue({ recommendations }: { recommendations: Recommendat
   );
 }
 
-function Integrations({ providers, integrations }: { providers: ProviderHealth[]; integrations: Integration[] }) {
+function Integrations({ providers, integrations, aiStatus }: { providers: ProviderHealth[]; integrations: Integration[]; aiStatus: AIStatus | null }) {
   return (
     <section className="view-grid">
       <div className="grid-list">
@@ -421,6 +438,16 @@ function Integrations({ providers, integrations }: { providers: ProviderHealth[]
             <span>{integration.status}</span>
           </article>
         ))}
+        {aiStatus && (
+          <article className="status-card">
+            <Bot size={20} />
+            <div>
+              <h2>Local AI</h2>
+              <p>{aiStatus.model || 'No model configured'}</p>
+            </div>
+            <span>{aiStatus.status}</span>
+          </article>
+        )}
       </div>
       <section className="table-panel">
         <table>

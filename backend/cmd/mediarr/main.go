@@ -4,12 +4,14 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/Fishy97/mediarr/backend/internal/ai"
 	"github.com/Fishy97/mediarr/backend/internal/api"
 	"github.com/Fishy97/mediarr/backend/internal/audit"
 	"github.com/Fishy97/mediarr/backend/internal/auth"
 	"github.com/Fishy97/mediarr/backend/internal/config"
 	"github.com/Fishy97/mediarr/backend/internal/database"
 	"github.com/Fishy97/mediarr/backend/internal/filescan"
+	"github.com/Fishy97/mediarr/backend/internal/integrations"
 	"github.com/Fishy97/mediarr/backend/internal/metadata"
 	"github.com/Fishy97/mediarr/backend/internal/recommendations"
 )
@@ -39,6 +41,7 @@ func main() {
 	}
 
 	authService := auth.Service{Store: store}
+	aiClient := ai.OllamaClient{BaseURL: cfg.OllamaURL, Model: cfg.AIModel}
 
 	server := api.NewServer(api.Deps{
 		ConfigDir:   cfg.ConfigDir,
@@ -46,10 +49,19 @@ func main() {
 		Libraries:   libraries,
 		Audit:       auditLog,
 		Auth:        &authService,
+		AI:          &aiClient,
 		Providers: metadata.DefaultsWithOptions(metadata.Options{
 			TMDbToken:           cfg.TMDbToken,
 			TheTVDBAPIKey:       cfg.TheTVDBAPIKey,
 			OpenSubtitlesAPIKey: cfg.OpenSubtitlesKey,
+		}),
+		Integrations: integrations.DefaultsWithOptions(integrations.Options{
+			JellyfinURL: cfg.JellyfinURL,
+			JellyfinKey: cfg.JellyfinAPIKey,
+			PlexURL:     cfg.PlexURL,
+			PlexToken:   cfg.PlexToken,
+			EmbyURL:     cfg.EmbyURL,
+			EmbyKey:     cfg.EmbyAPIKey,
 		}),
 		Scanner: filescan.Scanner{Probe: true},
 		Engine:  recommendations.Engine{OversizedThresholdBytes: cfg.OversizedBytes},

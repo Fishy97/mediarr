@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Fishy97/mediarr/backend/internal/ai"
 	"github.com/Fishy97/mediarr/backend/internal/audit"
 	"github.com/Fishy97/mediarr/backend/internal/auth"
 	"github.com/Fishy97/mediarr/backend/internal/database"
@@ -27,6 +28,7 @@ type Deps struct {
 	Integrations    []integrations.Target
 	Audit           *audit.Logger
 	Auth            *auth.Service
+	AI              *ai.OllamaClient
 	Scanner         filescan.Scanner
 	Engine          recommendations.Engine
 	Store           *database.Store
@@ -44,6 +46,7 @@ type Server struct {
 	integrations    []integrations.Target
 	audit           *audit.Logger
 	auth            *auth.Service
+	ai              *ai.OllamaClient
 	scanner         filescan.Scanner
 	engine          recommendations.Engine
 	store           *database.Store
@@ -60,6 +63,7 @@ func NewServer(deps Deps) *Server {
 		integrations:    deps.Integrations,
 		audit:           deps.Audit,
 		auth:            deps.Auth,
+		ai:              deps.AI,
 		scanner:         deps.Scanner,
 		engine:          deps.Engine,
 		store:           deps.Store,
@@ -89,8 +93,10 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("/api/v1/catalog", server.catalogHandler)
 	server.mux.HandleFunc("/api/v1/scans", server.scansHandler)
 	server.mux.HandleFunc("/api/v1/recommendations", server.recommendationsHandler)
+	server.mux.HandleFunc("/api/v1/recommendations/", server.recommendationActionHandler)
 	server.mux.HandleFunc("/api/v1/providers", server.providersHandler)
 	server.mux.HandleFunc("/api/v1/integrations", server.integrationsHandler)
+	server.mux.HandleFunc("/api/v1/ai/status", server.aiStatusHandler)
 	server.mux.HandleFunc("/api/v1/backups", server.backupsHandler)
 	server.mux.HandleFunc("/api/v1/audit", server.auditHandler)
 	server.mux.HandleFunc("/api/v1/media/files/", methodNotAllowed)
@@ -302,6 +308,10 @@ func (server *Server) scanAll() ([]filescan.Result, []recommendations.Recommenda
 				Path:         item.Path,
 				SizeBytes:    item.SizeBytes,
 				Quality:      item.Parsed.Quality,
+				HasSubtitles: len(item.Subtitles) > 0,
+				WantsSubtitles: string(item.Parsed.Kind) == "movie" ||
+					string(item.Parsed.Kind) == "series" ||
+					string(item.Parsed.Kind) == "anime",
 			})
 		}
 	}
@@ -339,6 +349,40 @@ func (server *Server) recommendationsHandler(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, envelope{Data: server.recommendations})
 }
 
+func (server *Server) recommendationActionHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.store == nil {
+		http.Error(w, "recommendation store is not configured", http.StatusBadRequest)
+		return
+	}
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/recommendations/"), "/")
+	if len(parts) != 2 || parts[0] == "" {
+		http.NotFound(w, r)
+		return
+	}
+	switch parts[1] {
+	case "ignore":
+		if err := server.store.IgnoreRecommendation(parts[0]); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		server.record("recommendation.ignored", "Recommendation ignored", map[string]any{"id": parts[0]})
+	case "restore":
+		if err := server.store.RestoreRecommendation(parts[0]); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		server.record("recommendation.restored", "Recommendation restored", map[string]any{"id": parts[0]})
+	default:
+		http.NotFound(w, r)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: map[string]bool{"ok": true}})
+}
+
 func (server *Server) providersHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w, r)
@@ -357,6 +401,18 @@ func (server *Server) integrationsHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{Data: server.integrations})
+}
+
+func (server *Server) aiStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.ai == nil {
+		writeJSON(w, http.StatusOK, envelope{Data: ai.Health{Status: "not_configured", CheckedAt: time.Now().UTC()}})
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: server.ai.Health(r.Context())})
 }
 
 func (server *Server) backupsHandler(w http.ResponseWriter, r *http.Request) {

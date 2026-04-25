@@ -33,6 +33,17 @@ describe('api auth helpers', () => {
       headers: expect.objectContaining({ Authorization: 'Bearer session-token' }),
     }));
   });
+
+  test('recommendation actions call review queue endpoints', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ data: { ok: true } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.ignoreRecommendation('rec_1');
+    await api.restoreRecommendation('rec_1');
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/recommendations/rec_1/ignore', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/recommendations/rec_1/restore', expect.objectContaining({ method: 'POST' }));
+  });
 });
 
 function jsonResponse(body: unknown): Response {
