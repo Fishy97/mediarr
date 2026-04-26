@@ -197,16 +197,16 @@ describe('api auth helpers', () => {
       .mockResolvedValueOnce(jsonResponse({ data: { preRestoreBackup: '/config/backups/pre.zip', restored: ['mediarr.db'] } }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(api.restoreBackup('mediarr-backup.zip', true)).resolves.toMatchObject({ entries: ['mediarr.db'] });
-    await expect(api.restoreBackup('mediarr-backup.zip', false)).resolves.toMatchObject({ restored: ['mediarr.db'] });
+    await expect(api.restoreBackup('mediarr-20260426T120000.000000000Z.zip', true)).resolves.toMatchObject({ entries: ['mediarr.db'] });
+    await expect(api.restoreBackup('mediarr-20260426T120000.000000000Z.zip', false)).resolves.toMatchObject({ restored: ['mediarr.db'] });
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/backups/restore', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ name: 'mediarr-backup.zip', dryRun: true, confirmRestore: false }),
+      body: JSON.stringify({ name: 'mediarr-20260426T120000.000000000Z.zip', dryRun: true, confirmRestore: false }),
     }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/backups/restore', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ name: 'mediarr-backup.zip', dryRun: false, confirmRestore: true }),
+      body: JSON.stringify({ name: 'mediarr-20260426T120000.000000000Z.zip', dryRun: false, confirmRestore: true }),
     }));
   });
 
@@ -214,16 +214,16 @@ describe('api auth helpers', () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
         data: [{
-          name: 'mediarr-20260426.zip',
-          path: '/config/backups/mediarr-20260426.zip',
+          name: 'mediarr-20260426T120000.000000000Z.zip',
+          path: '/config/backups/mediarr-20260426T120000.000000000Z.zip',
           sizeBytes: 4096,
           createdAt: '2026-04-26T12:00:00Z',
         }],
       }))
       .mockResolvedValueOnce(jsonResponse({
         data: {
-          name: 'mediarr-20260426.zip',
-          path: '/config/backups/mediarr-20260426.zip',
+          name: 'mediarr-20260426T120000.000000000Z.zip',
+          path: '/config/backups/mediarr-20260426T120000.000000000Z.zip',
           sizeBytes: 4096,
           createdAt: '2026-04-26T12:00:00Z',
         },
@@ -231,14 +231,14 @@ describe('api auth helpers', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(api.backups()).resolves.toEqual([expect.objectContaining({
-      name: 'mediarr-20260426.zip',
+      name: 'mediarr-20260426T120000.000000000Z.zip',
       sizeBytes: 4096,
     })]);
     await expect(api.createBackup()).resolves.toMatchObject({
-      name: 'mediarr-20260426.zip',
-      path: '/config/backups/mediarr-20260426.zip',
+      name: 'mediarr-20260426T120000.000000000Z.zip',
+      path: '/config/backups/mediarr-20260426T120000.000000000Z.zip',
     });
-    expect(api.backupDownloadUrl('mediarr backup.zip')).toBe('/api/v1/backups/mediarr%20backup.zip');
+    expect(api.backupDownloadUrl('mediarr-20260426T120000.000000000Z.zip')).toBe('/api/v1/backups/mediarr-20260426T120000.000000000Z.zip');
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/backups', expect.any(Object));
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/backups', expect.objectContaining({ method: 'POST' }));
   });
@@ -247,8 +247,8 @@ describe('api auth helpers', () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
         data: {
-          name: 'mediarr-support-20260426.zip',
-          path: '/config/support/mediarr-support-20260426.zip',
+          name: 'mediarr-support-20260426T120000.000000000Z.zip',
+          path: '/config/support/mediarr-support-20260426T120000.000000000Z.zip',
           sizeBytes: 2048,
           files: ['manifest.json', 'diagnostics/jellyfin.json'],
           createdAt: '2026-04-26T12:00:00Z',
@@ -257,8 +257,8 @@ describe('api auth helpers', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(api.createSupportBundle()).resolves.toMatchObject({
-      name: 'mediarr-support-20260426.zip',
-      path: '/config/support/mediarr-support-20260426.zip',
+      name: 'mediarr-support-20260426T120000.000000000Z.zip',
+      path: '/config/support/mediarr-support-20260426T120000.000000000Z.zip',
       files: ['manifest.json', 'diagnostics/jellyfin.json'],
     });
 
@@ -269,8 +269,8 @@ describe('api auth helpers', () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
         data: [{
-          name: 'mediarr-support-20260426.zip',
-          path: '/config/support/mediarr-support-20260426.zip',
+          name: 'mediarr-support-20260426T120000.000000000Z.zip',
+          path: '/config/support/mediarr-support-20260426T120000.000000000Z.zip',
           sizeBytes: 2048,
           createdAt: '2026-04-26T12:00:00Z',
         }],
@@ -278,10 +278,10 @@ describe('api auth helpers', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(api.supportBundles()).resolves.toEqual([expect.objectContaining({
-      name: 'mediarr-support-20260426.zip',
+      name: 'mediarr-support-20260426T120000.000000000Z.zip',
       sizeBytes: 2048,
     })]);
-    expect(api.supportBundleDownloadUrl('mediarr support.zip')).toBe('/api/v1/support/bundles/mediarr%20support.zip');
+    expect(api.supportBundleDownloadUrl('mediarr-support-20260426T120000.000000000Z.zip')).toBe('/api/v1/support/bundles/mediarr-support-20260426T120000.000000000Z.zip');
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/support/bundles', expect.any(Object));
   });
 });

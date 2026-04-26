@@ -313,7 +313,7 @@ Inspect a backup before restoring it:
 curl -X POST http://localhost:8080/api/v1/backups/restore \
   -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name":"mediarr-example.zip","dryRun":true}'
+  -d '{"name":"mediarr-20260426T120000.000000000Z.zip","dryRun":true}'
 ```
 
 Restore creates a fresh pre-restore backup before replacing files under `/config`:
@@ -322,7 +322,7 @@ Restore creates a fresh pre-restore backup before replacing files under `/config
 curl -X POST http://localhost:8080/api/v1/backups/restore \
   -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name":"mediarr-example.zip","dryRun":false,"confirmRestore":true}'
+  -d '{"name":"mediarr-20260426T120000.000000000Z.zip","dryRun":false,"confirmRestore":true}'
 ```
 
 Backup download and restore paths reject unsafe archive names and path traversal. The UI uses the same selected-backup flow and asks for confirmation before restore.

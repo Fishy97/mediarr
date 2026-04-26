@@ -229,7 +229,7 @@ Restore dry-run:
 ```bash
 curl -X POST http://localhost:8080/api/v1/backups/restore \
   -H 'Content-Type: application/json' \
-  -d '{"name":"mediarr-example.zip","dryRun":true}'
+  -d '{"name":"mediarr-20260426T120000.000000000Z.zip","dryRun":true}'
 ```
 
 Restore execution creates a new pre-restore backup first:
@@ -237,7 +237,7 @@ Restore execution creates a new pre-restore backup first:
 ```bash
 curl -X POST http://localhost:8080/api/v1/backups/restore \
   -H 'Content-Type: application/json' \
-  -d '{"name":"mediarr-example.zip","dryRun":false,"confirmRestore":true}'
+  -d '{"name":"mediarr-20260426T120000.000000000Z.zip","dryRun":false,"confirmRestore":true}'
 ```
 
 ### 6. Support Bundle

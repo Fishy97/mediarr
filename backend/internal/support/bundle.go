@@ -11,9 +11,12 @@ import (
 	"time"
 
 	"github.com/Fishy97/mediarr/backend/internal/acceptance"
+	"github.com/Fishy97/mediarr/backend/internal/archivefiles"
 	"github.com/Fishy97/mediarr/backend/internal/database"
 	"github.com/Fishy97/mediarr/backend/internal/recommendations"
 )
+
+const bundleArchivePrefix = "mediarr-support-"
 
 type Config struct {
 	Store     *database.Store
@@ -30,12 +33,7 @@ type Result struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-type BundleInfo struct {
-	Name      string    `json:"name"`
-	Path      string    `json:"path"`
-	SizeBytes int64     `json:"sizeBytes"`
-	CreatedAt time.Time `json:"createdAt"`
-}
+type BundleInfo = archivefiles.Info
 
 type Manifest struct {
 	Service     string    `json:"service"`
@@ -113,66 +111,11 @@ func CreateBundle(config Config) (Result, error) {
 }
 
 func ListBundles(outputDir string) ([]BundleInfo, error) {
-	outputDir = strings.TrimSpace(outputDir)
-	if outputDir == "" {
-		return nil, errors.New("support bundle output directory is required")
-	}
-	entries, err := os.ReadDir(outputDir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return []BundleInfo{}, nil
-		}
-		return nil, err
-	}
-	bundles := []BundleInfo{}
-	for _, entry := range entries {
-		if entry.IsDir() || !validBundleName(entry.Name()) {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return nil, err
-		}
-		bundles = append(bundles, BundleInfo{
-			Name:      entry.Name(),
-			Path:      filepath.Join(outputDir, entry.Name()),
-			SizeBytes: info.Size(),
-			CreatedAt: info.ModTime().UTC(),
-		})
-	}
-	sort.Slice(bundles, func(i, j int) bool {
-		if bundles[i].CreatedAt.Equal(bundles[j].CreatedAt) {
-			return bundles[i].Name > bundles[j].Name
-		}
-		return bundles[i].CreatedAt.After(bundles[j].CreatedAt)
-	})
-	return bundles, nil
+	return archivefiles.List(outputDir, bundleArchivePrefix)
 }
 
 func ResolveBundlePath(outputDir string, name string) (string, error) {
-	outputDir = strings.TrimSpace(outputDir)
-	name = strings.TrimSpace(name)
-	if outputDir == "" {
-		return "", errors.New("support bundle output directory is required")
-	}
-	if !validBundleName(name) {
-		return "", errors.New("invalid support bundle name")
-	}
-	root, err := filepath.Abs(outputDir)
-	if err != nil {
-		return "", err
-	}
-	path, err := filepath.Abs(filepath.Join(root, name))
-	if err != nil {
-		return "", err
-	}
-	if filepath.Dir(path) != root {
-		return "", errors.New("support bundle path escapes output directory")
-	}
-	if _, err := os.Stat(path); err != nil {
-		return "", err
-	}
-	return path, nil
+	return archivefiles.Resolve(outputDir, bundleArchivePrefix, name)
 }
 
 func buildEntries(config Config, generatedAt time.Time) (map[string]any, error) {
@@ -289,12 +232,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func validBundleName(name string) bool {
-	return name != "" &&
-		filepath.Base(name) == name &&
-		!strings.Contains(name, "..") &&
-		strings.HasPrefix(name, "mediarr-support-") &&
-		strings.HasSuffix(name, ".zip")
 }

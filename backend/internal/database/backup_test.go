@@ -124,6 +124,9 @@ func TestListBackupsSortsArchivesAndResolveRejectsUnsafeNames(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(backupDir, "notes.txt"), []byte("ignore"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(backupDir, "mediarr-manual.zip"), []byte("ignore"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	olderTime := time.Date(2026, 4, 26, 11, 0, 0, 0, time.UTC)
 	newerTime := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)
 	if err := os.Chtimes(olderPath, olderTime, olderTime); err != nil {
@@ -161,7 +164,7 @@ func TestListBackupsSortsArchivesAndResolveRejectsUnsafeNames(t *testing.T) {
 	if resolved != newerPath {
 		t.Fatalf("resolved absolute path = %q, want %q", resolved, newerPath)
 	}
-	for _, name := range []string{"", "../secret.zip", "/tmp/secret.zip", "mediarr-20260426.txt", "not-mediarr.zip"} {
+	for _, name := range []string{"", "../secret.zip", "/tmp/secret.zip", "mediarr-manual.zip", "mediarr-20260426.txt", "not-mediarr.zip"} {
 		if _, err := ResolveBackupPath(backupDir, name); err == nil {
 			t.Fatalf("ResolveBackupPath(%q) succeeded; want error", name)
 		}

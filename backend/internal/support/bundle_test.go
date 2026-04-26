@@ -125,6 +125,9 @@ func TestListBundlesSortsArchivesAndResolveRejectsUnsafeNames(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("ignore"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "mediarr-support-manual.zip"), []byte("ignore"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	olderTime := time.Date(2026, 4, 26, 11, 0, 0, 0, time.UTC)
 	newerTime := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)
 	if err := os.Chtimes(olderPath, olderTime, olderTime); err != nil {
@@ -155,7 +158,7 @@ func TestListBundlesSortsArchivesAndResolveRejectsUnsafeNames(t *testing.T) {
 	if resolved != newerPath {
 		t.Fatalf("resolved path = %q, want %q", resolved, newerPath)
 	}
-	for _, name := range []string{"", "../secret.zip", "/tmp/secret.zip", "mediarr-support-20260426.txt", "not-mediarr-support.zip"} {
+	for _, name := range []string{"", "../secret.zip", "/tmp/secret.zip", "mediarr-support-manual.zip", "mediarr-support-20260426.txt", "not-mediarr-support.zip"} {
 		if _, err := ResolveBundlePath(dir, name); err == nil {
 			t.Fatalf("ResolveBundlePath(%q) succeeded; want error", name)
 		}

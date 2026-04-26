@@ -6,22 +6,20 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
+
+	"github.com/Fishy97/mediarr/backend/internal/archivefiles"
 )
+
+const backupArchivePrefix = "mediarr-"
 
 type RestoreResult struct {
 	PreRestoreBackup string   `json:"preRestoreBackup"`
 	Restored         []string `json:"restored"`
 }
 
-type BackupInfo struct {
-	Name      string    `json:"name"`
-	Path      string    `json:"path"`
-	SizeBytes int64     `json:"sizeBytes"`
-	CreatedAt time.Time `json:"createdAt"`
-}
+type BackupInfo = archivefiles.Info
 
 func CreateBackup(configDir string, backupDir string) (string, error) {
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
@@ -75,88 +73,15 @@ func CreateBackup(configDir string, backupDir string) (string, error) {
 }
 
 func ListBackups(backupDir string) ([]BackupInfo, error) {
-	backupDir = strings.TrimSpace(backupDir)
-	if backupDir == "" {
-		return nil, errors.New("backup directory is required")
-	}
-	entries, err := os.ReadDir(backupDir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return []BackupInfo{}, nil
-		}
-		return nil, err
-	}
-	backups := []BackupInfo{}
-	for _, entry := range entries {
-		if entry.IsDir() || !validBackupName(entry.Name()) {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return nil, err
-		}
-		backups = append(backups, BackupInfo{
-			Name:      entry.Name(),
-			Path:      filepath.Join(backupDir, entry.Name()),
-			SizeBytes: info.Size(),
-			CreatedAt: info.ModTime().UTC(),
-		})
-	}
-	sortBackupInfos(backups)
-	return backups, nil
+	return archivefiles.List(backupDir, backupArchivePrefix)
 }
 
 func ResolveBackupPath(backupDir string, locator string) (string, error) {
-	backupDir = strings.TrimSpace(backupDir)
-	locator = strings.TrimSpace(locator)
-	if backupDir == "" {
-		return "", errors.New("backup directory is required")
-	}
-	if locator == "" {
-		return "", errors.New("backup path or name is required")
-	}
-	root, err := filepath.Abs(backupDir)
-	if err != nil {
-		return "", err
-	}
-	var candidate string
-	if filepath.IsAbs(locator) {
-		candidate, err = filepath.Abs(locator)
-	} else {
-		if filepath.Base(locator) != locator {
-			return "", errors.New("invalid backup name")
-		}
-		candidate, err = filepath.Abs(filepath.Join(root, locator))
-	}
-	if err != nil {
-		return "", err
-	}
-	if filepath.Dir(candidate) != root {
-		return "", errors.New("backup path escapes backup directory")
-	}
-	if !validBackupName(filepath.Base(candidate)) {
-		return "", errors.New("invalid backup name")
-	}
-	if _, err := os.Stat(candidate); err != nil {
-		return "", err
-	}
-	return candidate, nil
+	return archivefiles.Resolve(backupDir, backupArchivePrefix, locator)
 }
 
 func BackupInfoForPath(path string) (BackupInfo, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return BackupInfo{}, err
-	}
-	if info.IsDir() || !validBackupName(filepath.Base(path)) {
-		return BackupInfo{}, errors.New("invalid backup path")
-	}
-	return BackupInfo{
-		Name:      filepath.Base(path),
-		Path:      path,
-		SizeBytes: info.Size(),
-		CreatedAt: info.ModTime().UTC(),
-	}, nil
+	return archivefiles.InfoForPath(path, backupArchivePrefix)
 }
 
 func InspectBackup(backupPath string) ([]string, error) {
@@ -254,21 +179,4 @@ func addFile(archive *zip.Writer, source string, name string) error {
 	}
 	_, err = io.Copy(output, input)
 	return err
-}
-
-func validBackupName(name string) bool {
-	return name != "" &&
-		filepath.Base(name) == name &&
-		!strings.Contains(name, "..") &&
-		strings.HasPrefix(name, "mediarr-") &&
-		strings.HasSuffix(name, ".zip")
-}
-
-func sortBackupInfos(backups []BackupInfo) {
-	sort.Slice(backups, func(i, j int) bool {
-		if backups[i].CreatedAt.Equal(backups[j].CreatedAt) {
-			return backups[i].Name > backups[j].Name
-		}
-		return backups[i].CreatedAt.After(backups[j].CreatedAt)
-	})
 }
