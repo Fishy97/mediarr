@@ -32,7 +32,14 @@ Only locally verified storage should be treated as confirmed disk savings. Serve
 
 ## Confidence
 
-Confidence is a deterministic rule score. It combines the media-server match confidence with the storage evidence level. It is not an AI score, and it is not a promise that the media is safe to remove.
+Confidence is a deterministic rule score. It combines the media-server match confidence, storage evidence level, distance beyond the review threshold, affected file count, and activity history. It is not an AI score, and it is not a promise that the media is safe to remove.
+
+The score is intentionally contextual:
+
+- old never-watched media scores higher than media that only just crossed the threshold
+- locally verified evidence scores higher than server-reported evidence
+- previously popular media with many plays or watched users scores more cautiously
+- series-level recommendations account for the number of affected files instead of treating every episode as an identical suggestion
 
 Low-confidence, favorite/protected, recently watched, active-series, or unmapped items should be suppressed or kept in a blocking review state instead of appearing as normal cleanup candidates.
 

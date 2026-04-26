@@ -3,6 +3,7 @@ package recommendations
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -318,13 +319,23 @@ func (engine Engine) GenerateActivity(items []ActivityMedia, now time.Time) []Re
 		if item.FavoriteCount > 0 {
 			continue
 		}
-		confidence := activityConfidence(item.MatchConfidence, item.Verification)
-		if confidence < 0.65 {
-			continue
-		}
 		if item.PlayCount == 0 && !item.AddedAt.IsZero() {
 			ageDays := int(now.Sub(item.AddedAt).Hours() / 24)
 			if ageDays >= neverWatchedDays {
+				confidenceFactors := activityConfidenceFactors{
+					MatchConfidence: item.MatchConfidence,
+					Verification:    item.Verification,
+					Action:          ActionReviewNeverWatchedMovie,
+					EvidenceDays:    ageDays,
+					ThresholdDays:   neverWatchedDays,
+					ItemCount:       1,
+					PlayCount:       item.PlayCount,
+					UniqueUsers:     item.UniqueUsers,
+				}
+				confidence := activityRecommendationConfidence(confidenceFactors)
+				if confidence < 0.65 {
+					continue
+				}
 				recs = append(recs, Recommendation{
 					ID:              stableID("activity-never-watched:" + item.ServerID + ":" + item.ExternalItemID + ":" + item.Path),
 					Action:          ActionReviewNeverWatchedMovie,
@@ -341,7 +352,7 @@ func (engine Engine) GenerateActivity(items []ActivityMedia, now time.Time) []Re
 					UniqueUsers:     item.UniqueUsers,
 					FavoriteCount:   item.FavoriteCount,
 					Verification:    item.Verification,
-					Evidence: storageEvidenceMap(item.Verification, item.SizeBytes, map[string]string{
+					Evidence: activityEvidenceMap(item.Verification, item.SizeBytes, confidenceFactors, map[string]string{
 						"ageDays":       strconv.Itoa(ageDays),
 						"thresholdDays": strconv.Itoa(neverWatchedDays),
 						"itemCount":     "1",
@@ -355,6 +366,20 @@ func (engine Engine) GenerateActivity(items []ActivityMedia, now time.Time) []Re
 		if item.PlayCount > 0 && !item.LastPlayedAt.IsZero() {
 			inactiveForDays := int(now.Sub(item.LastPlayedAt).Hours() / 24)
 			if inactiveForDays >= inactiveDays {
+				confidenceFactors := activityConfidenceFactors{
+					MatchConfidence: item.MatchConfidence,
+					Verification:    item.Verification,
+					Action:          ActionReviewInactiveMovie,
+					EvidenceDays:    inactiveForDays,
+					ThresholdDays:   inactiveDays,
+					ItemCount:       1,
+					PlayCount:       item.PlayCount,
+					UniqueUsers:     item.UniqueUsers,
+				}
+				confidence := activityRecommendationConfidence(confidenceFactors)
+				if confidence < 0.65 {
+					continue
+				}
 				recs = append(recs, Recommendation{
 					ID:              stableID("activity-inactive:" + item.ServerID + ":" + item.ExternalItemID + ":" + item.Path),
 					Action:          ActionReviewInactiveMovie,
@@ -372,7 +397,7 @@ func (engine Engine) GenerateActivity(items []ActivityMedia, now time.Time) []Re
 					UniqueUsers:     item.UniqueUsers,
 					FavoriteCount:   item.FavoriteCount,
 					Verification:    item.Verification,
-					Evidence: storageEvidenceMap(item.Verification, item.SizeBytes, map[string]string{
+					Evidence: activityEvidenceMap(item.Verification, item.SizeBytes, confidenceFactors, map[string]string{
 						"inactiveDays":  strconv.Itoa(inactiveForDays),
 						"thresholdDays": strconv.Itoa(inactiveDays),
 						"itemCount":     "1",
@@ -394,21 +419,21 @@ func (engine Engine) GenerateActivity(items []ActivityMedia, now time.Time) []Re
 }
 
 type seriesActivityGroup struct {
-	serverID      string
-	externalID    string
-	title         string
-	libraryName   string
-	sizeBytes     int64
-	paths         []string
-	latestAddedAt time.Time
-	lastPlayedAt  time.Time
-	playCount     int
-	uniqueUsers   int
-	favoriteCount int
-	verification  string
-	confidence    float64
-	matchCount    int
-	isAnime       bool
+	serverID        string
+	externalID      string
+	title           string
+	libraryName     string
+	sizeBytes       int64
+	paths           []string
+	latestAddedAt   time.Time
+	lastPlayedAt    time.Time
+	playCount       int
+	uniqueUsers     int
+	favoriteCount   int
+	verification    string
+	matchConfidence float64
+	matchCount      int
+	isAnime         bool
 }
 
 func (engine Engine) generateSeriesActivity(items []ActivityMedia, now time.Time, neverWatchedDays int, inactiveDays int, activeSeriesGraceDays int) []Recommendation {
@@ -425,13 +450,13 @@ func (engine Engine) generateSeriesActivity(items []ActivityMedia, now time.Time
 		group := groups[key]
 		if group == nil {
 			group = &seriesActivityGroup{
-				serverID:     item.ServerID,
-				externalID:   externalID,
-				title:        firstActivityValue(item.ParentTitle, item.Title),
-				libraryName:  item.LibraryName,
-				verification: strings.TrimSpace(item.Verification),
-				confidence:   1,
-				isAnime:      activityLooksAnime(item),
+				serverID:        item.ServerID,
+				externalID:      externalID,
+				title:           firstActivityValue(item.ParentTitle, item.Title),
+				libraryName:     item.LibraryName,
+				verification:    strings.TrimSpace(item.Verification),
+				matchConfidence: 1,
+				isAnime:         activityLooksAnime(item),
 			}
 			groups[key] = group
 		}
@@ -456,10 +481,9 @@ func (engine Engine) generateSeriesActivity(items []ActivityMedia, now time.Time
 		}
 		group.favoriteCount += item.FavoriteCount
 		group.verification = weakerVerification(group.verification, item.Verification)
-		confidence := activityConfidence(item.MatchConfidence, item.Verification)
-		if confidence > 0 {
-			if group.matchCount == 0 || confidence < group.confidence {
-				group.confidence = confidence
+		if item.MatchConfidence > 0 {
+			if group.matchCount == 0 || item.MatchConfidence < group.matchConfidence {
+				group.matchConfidence = item.MatchConfidence
 			}
 			group.matchCount++
 		}
@@ -474,10 +498,7 @@ func (engine Engine) generateSeriesActivity(items []ActivityMedia, now time.Time
 			continue
 		}
 		if group.matchCount == 0 {
-			group.confidence = activityConfidence(0, group.verification)
-		}
-		if group.confidence < 0.65 {
-			continue
+			group.matchConfidence = 0
 		}
 		sort.Strings(group.paths)
 		if !group.latestAddedAt.IsZero() {
@@ -495,13 +516,27 @@ func (engine Engine) generateSeriesActivity(items []ActivityMedia, now time.Time
 		if group.playCount == 0 && !group.latestAddedAt.IsZero() {
 			ageDays := int(now.Sub(group.latestAddedAt).Hours() / 24)
 			if ageDays >= neverWatchedDays {
+				confidenceFactors := activityConfidenceFactors{
+					MatchConfidence: group.matchConfidence,
+					Verification:    group.verification,
+					Action:          ActionReviewAbandonedSeries,
+					EvidenceDays:    ageDays,
+					ThresholdDays:   neverWatchedDays,
+					ItemCount:       len(group.paths),
+					PlayCount:       group.playCount,
+					UniqueUsers:     group.uniqueUsers,
+				}
+				confidence := activityRecommendationConfidence(confidenceFactors)
+				if confidence < 0.65 {
+					continue
+				}
 				recs = append(recs, Recommendation{
 					ID:              stableID("activity-abandoned-series:" + group.serverID + ":" + group.externalID + ":" + strings.Join(group.paths, "|")),
 					Action:          ActionReviewAbandonedSeries,
 					Title:           group.title,
 					Explanation:     group.title + " has no imported play activity and all known files are older than the review threshold. Review the series before reclaiming storage.",
 					SpaceSavedBytes: group.sizeBytes,
-					Confidence:      group.confidence,
+					Confidence:      confidence,
 					Source:          "rule:activity-abandoned-series",
 					AffectedPaths:   group.paths,
 					Destructive:     false,
@@ -511,7 +546,7 @@ func (engine Engine) generateSeriesActivity(items []ActivityMedia, now time.Time
 					UniqueUsers:     group.uniqueUsers,
 					FavoriteCount:   group.favoriteCount,
 					Verification:    group.verification,
-					Evidence: storageEvidenceMap(group.verification, group.sizeBytes, map[string]string{
+					Evidence: activityEvidenceMap(group.verification, group.sizeBytes, confidenceFactors, map[string]string{
 						"ageDays":       strconv.Itoa(ageDays),
 						"thresholdDays": strconv.Itoa(neverWatchedDays),
 						"itemCount":     strconv.Itoa(len(group.paths)),
@@ -527,13 +562,27 @@ func (engine Engine) generateSeriesActivity(items []ActivityMedia, now time.Time
 		if group.playCount > 0 && !group.lastPlayedAt.IsZero() {
 			inactiveForDays := int(now.Sub(group.lastPlayedAt).Hours() / 24)
 			if inactiveForDays >= inactiveDays {
+				confidenceFactors := activityConfidenceFactors{
+					MatchConfidence: group.matchConfidence,
+					Verification:    group.verification,
+					Action:          ActionReviewInactiveSeries,
+					EvidenceDays:    inactiveForDays,
+					ThresholdDays:   inactiveDays,
+					ItemCount:       len(group.paths),
+					PlayCount:       group.playCount,
+					UniqueUsers:     group.uniqueUsers,
+				}
+				confidence := activityRecommendationConfidence(confidenceFactors)
+				if confidence < 0.65 {
+					continue
+				}
 				recs = append(recs, Recommendation{
 					ID:              stableID("activity-inactive-series:" + group.serverID + ":" + group.externalID + ":" + strings.Join(group.paths, "|")),
 					Action:          ActionReviewInactiveSeries,
 					Title:           group.title,
 					Explanation:     group.title + " has not been watched recently by any imported media-server user. Review the full series before reclaiming storage.",
 					SpaceSavedBytes: group.sizeBytes,
-					Confidence:      group.confidence,
+					Confidence:      confidence,
 					Source:          "rule:activity-inactive-series",
 					AffectedPaths:   group.paths,
 					Destructive:     false,
@@ -544,7 +593,7 @@ func (engine Engine) generateSeriesActivity(items []ActivityMedia, now time.Time
 					UniqueUsers:     group.uniqueUsers,
 					FavoriteCount:   group.favoriteCount,
 					Verification:    group.verification,
-					Evidence: storageEvidenceMap(group.verification, group.sizeBytes, map[string]string{
+					Evidence: activityEvidenceMap(group.verification, group.sizeBytes, confidenceFactors, map[string]string{
 						"inactiveDays":  strconv.Itoa(inactiveForDays),
 						"thresholdDays": strconv.Itoa(inactiveDays),
 						"itemCount":     strconv.Itoa(len(group.paths)),
@@ -641,6 +690,23 @@ func suppressionReasons(rec Recommendation) []string {
 	return reasons
 }
 
+type activityConfidenceFactors struct {
+	MatchConfidence float64
+	Verification    string
+	Action          Action
+	EvidenceDays    int
+	ThresholdDays   int
+	ItemCount       int
+	PlayCount       int
+	UniqueUsers     int
+}
+
+func activityEvidenceMap(verification string, estimatedSavingsBytes int64, factors activityConfidenceFactors, values map[string]string) map[string]string {
+	values = storageEvidenceMap(verification, estimatedSavingsBytes, values)
+	values["confidenceBasis"] = confidenceBasisLabel(factors)
+	return values
+}
+
 func storageEvidenceMap(verification string, estimatedSavingsBytes int64, values map[string]string) map[string]string {
 	if values == nil {
 		values = map[string]string{}
@@ -727,22 +793,114 @@ func activityLabel(rec Recommendation) string {
 }
 
 func activityConfidence(matchConfidence float64, verification string) float64 {
+	return activityRecommendationConfidence(activityConfidenceFactors{
+		MatchConfidence: matchConfidence,
+		Verification:    verification,
+		ItemCount:       1,
+	})
+}
+
+func activityRecommendationConfidence(factors activityConfidenceFactors) float64 {
+	matchConfidence := clampFloat(factors.MatchConfidence, 0, 1)
 	if matchConfidence <= 0 {
 		matchConfidence = 0.7
 	}
-	verificationConfidence := 0.72
-	switch verification {
+
+	score := 0.50 + matchConfidence*0.18
+	score += verificationConfidenceAdjustment(factors.Verification)
+	score += actionConfidenceAdjustment(factors.Action)
+
+	if factors.ThresholdDays > 0 && factors.EvidenceDays > factors.ThresholdDays {
+		ratio := float64(factors.EvidenceDays) / float64(factors.ThresholdDays)
+		score += clampFloat((ratio-1)*0.035, 0, 0.12)
+	}
+	if factors.ItemCount > 1 {
+		score += clampFloat(math.Log1p(float64(factors.ItemCount))*0.012, 0, 0.05)
+	}
+	if factors.PlayCount > 0 {
+		score -= clampFloat(math.Log1p(float64(factors.PlayCount))*0.018, 0, 0.09)
+	}
+	if factors.UniqueUsers > 1 {
+		score -= clampFloat(float64(factors.UniqueUsers-1)*0.012, 0, 0.05)
+	}
+
+	floor, ceiling := confidenceBounds(factors.Verification)
+	return math.Round(clampFloat(score, floor, ceiling)*100) / 100
+}
+
+func verificationConfidenceAdjustment(verification string) float64 {
+	switch strings.TrimSpace(verification) {
 	case "local_verified":
-		verificationConfidence = 0.92
+		return 0.18
 	case "path_mapped":
-		verificationConfidence = 0.86
+		return 0.11
 	case "server_reported":
-		verificationConfidence = 0.72
+		return 0.03
+	case "unmapped":
+		return -0.14
+	default:
+		return -0.02
 	}
-	if matchConfidence < verificationConfidence {
-		return matchConfidence
+}
+
+func actionConfidenceAdjustment(action Action) float64 {
+	switch action {
+	case ActionReviewNeverWatchedMovie:
+		return 0.02
+	case ActionReviewAbandonedSeries:
+		return 0.03
+	case ActionReviewInactiveMovie:
+		return -0.015
+	case ActionReviewInactiveSeries:
+		return -0.005
+	default:
+		return 0
 	}
-	return verificationConfidence
+}
+
+func confidenceBounds(verification string) (float64, float64) {
+	switch strings.TrimSpace(verification) {
+	case "local_verified":
+		return 0.70, 0.97
+	case "path_mapped":
+		return 0.66, 0.90
+	case "server_reported":
+		return 0.60, 0.82
+	case "unmapped":
+		return 0, 0.55
+	default:
+		return 0.50, 0.76
+	}
+}
+
+func confidenceBasisLabel(factors activityConfidenceFactors) string {
+	parts := []string{verificationLabel(factors.Verification)}
+	if factors.ThresholdDays > 0 {
+		parts = append(parts, strconv.Itoa(factors.EvidenceDays)+" days vs "+strconv.Itoa(factors.ThresholdDays)+" day threshold")
+	}
+	if factors.ItemCount > 1 {
+		parts = append(parts, strconv.Itoa(factors.ItemCount)+" affected files")
+	}
+	if factors.PlayCount > 0 {
+		parts = append(parts, strconv.Itoa(factors.PlayCount)+" prior plays")
+	}
+	if factors.UniqueUsers > 0 {
+		parts = append(parts, strconv.Itoa(factors.UniqueUsers)+" watched users")
+	}
+	if factors.MatchConfidence > 0 {
+		parts = append(parts, "provider match "+strconv.Itoa(int(math.Round(clampFloat(factors.MatchConfidence, 0, 1)*100)))+"%")
+	}
+	return strings.Join(parts, "; ")
+}
+
+func clampFloat(value float64, minimum float64, maximum float64) float64 {
+	if value < minimum {
+		return minimum
+	}
+	if value > maximum {
+		return maximum
+	}
+	return value
 }
 
 func stableID(value string) string {

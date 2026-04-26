@@ -169,7 +169,16 @@ func TestStorageCertaintyEvidence(t *testing.T) {
 				t.Fatalf("recommendations = %#v, want one recommendation", recs)
 			}
 			rec := recs[0]
-			if rec.Confidence != activityConfidence(tc.confidence, tc.verification) {
+			ageDays := int(now.Sub(now.AddDate(0, -8, 0)).Hours() / 24)
+			wantConfidence := activityRecommendationConfidence(activityConfidenceFactors{
+				MatchConfidence: tc.confidence,
+				Verification:    tc.verification,
+				Action:          ActionReviewNeverWatchedMovie,
+				EvidenceDays:    ageDays,
+				ThresholdDays:   180,
+				ItemCount:       1,
+			})
+			if rec.Confidence != wantConfidence {
 				t.Fatalf("confidence = %f, want deterministic confidence", rec.Confidence)
 			}
 			if rec.Evidence["storageBasis"] != tc.verification {
@@ -195,6 +204,92 @@ func TestStorageCertaintyEvidence(t *testing.T) {
 				t.Fatalf("storage certainty = %q, want %q", evidence.Storage.Certainty, tc.wantCertainty)
 			}
 		})
+	}
+}
+
+func TestActivityRecommendationConfidenceIsContextual(t *testing.T) {
+	engine := Engine{}
+	now := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)
+
+	recs := engine.GenerateActivity([]ActivityMedia{
+		{
+			ServerID:        "jellyfin",
+			ExternalItemID:  "just_over_threshold",
+			Kind:            "movie",
+			Title:           "Just Over Threshold",
+			Path:            "/srv/movies/Just Over Threshold.mkv",
+			SizeBytes:       10_000_000_000,
+			AddedAt:         now.AddDate(0, 0, -181),
+			PlayCount:       0,
+			Verification:    "server_reported",
+			MatchConfidence: 0.68,
+		},
+		{
+			ServerID:        "jellyfin",
+			ExternalItemID:  "deep_archive",
+			Kind:            "movie",
+			Title:           "Deep Archive",
+			Path:            "/srv/movies/Deep Archive.mkv",
+			SizeBytes:       11_000_000_000,
+			AddedAt:         now.AddDate(-4, 0, 0),
+			PlayCount:       0,
+			Verification:    "server_reported",
+			MatchConfidence: 0.68,
+		},
+		{
+			ServerID:        "jellyfin",
+			ExternalItemID:  "locally_verified_archive",
+			Kind:            "movie",
+			Title:           "Locally Verified Archive",
+			Path:            "/media/movies/Locally Verified Archive.mkv",
+			SizeBytes:       12_000_000_000,
+			AddedAt:         now.AddDate(-4, 0, 0),
+			PlayCount:       0,
+			Verification:    "local_verified",
+			MatchConfidence: 0.95,
+		},
+		{
+			ServerID:        "jellyfin",
+			ExternalItemID:  "popular_but_inactive",
+			Kind:            "movie",
+			Title:           "Popular But Inactive",
+			Path:            "/media/movies/Popular But Inactive.mkv",
+			SizeBytes:       13_000_000_000,
+			LastPlayedAt:    now.AddDate(-3, 0, 0),
+			PlayCount:       18,
+			UniqueUsers:     4,
+			Verification:    "local_verified",
+			MatchConfidence: 0.95,
+		},
+	}, now)
+
+	byTitle := map[string]Recommendation{}
+	for _, rec := range recs {
+		byTitle[rec.Title] = rec
+	}
+
+	justOver := byTitle["Just Over Threshold"]
+	deepArchive := byTitle["Deep Archive"]
+	localArchive := byTitle["Locally Verified Archive"]
+	popularInactive := byTitle["Popular But Inactive"]
+
+	if justOver.Confidence == 0 || deepArchive.Confidence == 0 || localArchive.Confidence == 0 || popularInactive.Confidence == 0 {
+		t.Fatalf("missing expected recommendations: %#v", byTitle)
+	}
+	if justOver.Confidence == deepArchive.Confidence {
+		t.Fatalf("server-reported confidence was flat at %.2f for different evidence strength", justOver.Confidence)
+	}
+	if deepArchive.Confidence <= justOver.Confidence {
+		t.Fatalf("deep archive confidence = %.2f, want greater than just-over-threshold %.2f", deepArchive.Confidence, justOver.Confidence)
+	}
+	if localArchive.Confidence <= deepArchive.Confidence {
+		t.Fatalf("local archive confidence = %.2f, want greater than server-reported archive %.2f", localArchive.Confidence, deepArchive.Confidence)
+	}
+	if popularInactive.Confidence >= localArchive.Confidence {
+		t.Fatalf("popular inactive confidence = %.2f, want below never-watched local archive %.2f", popularInactive.Confidence, localArchive.Confidence)
+	}
+	if deepArchive.Evidence["confidenceBasis"] == "" || localArchive.Evidence["confidenceBasis"] == "" {
+		t.Fatalf("confidence basis evidence missing: %#v %#v", deepArchive.Evidence, localArchive.Evidence)
 	}
 }
 

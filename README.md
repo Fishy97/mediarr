@@ -41,7 +41,7 @@ Mediarr remains deliberately conservative: it does not delete media, does not do
 - React/TypeScript frontend for dashboard, libraries, catalog, review queue, integrations, provider health, settings, backups, and support bundles
 - Read-only media mounts by default
 - Suggest-only cleanup recommendations with affected paths, confidence, source, and recoverable storage
-- Evidence-first recommendation cards with grouped affected files, confidence, activity proof, estimated savings, and verified savings
+- Evidence-first recommendation cards with grouped affected files, contextual confidence scoring, activity proof, estimated savings, and verified savings
 - Provider health and credential surfaces for TMDb, AniList, TheTVDB, OpenSubtitles, and local sidecars
 - Integration status, refresh actions, and inventory/activity sync for Jellyfin, Plex, and Emby
 - Path evidence labels that distinguish locally verified, path-mapped, and server-reported savings

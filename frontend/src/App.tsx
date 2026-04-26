@@ -1015,6 +1015,7 @@ function RecommendationQueue({
                 <div className="rec-title-row">
                   <h2>{rec.title}</h2>
                   <div className="rec-badges">
+                    <span className={`confidence-pill ${confidenceTone(rec.confidence)}`}>{formatConfidence(rec.confidence)} confidence</span>
                     <span className="action-pill">{formatRecommendationAction(rec.action)}</span>
                     <span className="status-pill">{formatRecommendationState(rec.state)}</span>
                   </div>
@@ -1070,6 +1071,7 @@ function RecommendationQueue({
                 </div>
                 <div className="proof-summary">
                   <ProofRow label="Why suggested" value={recommendationWhySuggested(rec)} />
+                  <ProofRow label="Confidence basis" value={rec.evidence?.confidenceBasis || recommendationConfidenceBasis(rec)} />
                   <ProofRow label="Storage certainty" value={storageCertaintyDefinition(rec.verification || rec.evidence?.storageBasis || storageCertainty)} />
                   <ProofRow label="Activity proof" value={recommendationActivityProof(rec)} />
                   <ProofRow label="Safety" value="Mediarr will not delete this. Accepting marks it for manual action only." />
@@ -1129,6 +1131,7 @@ function RecommendationEvidencePanel({ evidence }: { evidence: RecommendationEvi
         <Signal label="Favorites/protection" value={evidence.activity.favoriteCount > 0 ? `${evidence.activity.favoriteCount} signal(s)` : 'None imported'} />
       </div>
       <ProofRow label="Storage certainty" value={storageDefinition} />
+      {evidence.raw.confidenceBasis && <ProofRow label="Confidence basis" value={evidence.raw.confidenceBasis} />}
       <ProofRow label="Safety" value="Mediarr will not delete this. Accepting marks it for manual action only." />
       <div className="proof-grid">
         {evidence.proof.map((point) => (
@@ -1439,6 +1442,7 @@ function IntegrationDiagnosticsPanel({ diagnostics }: { diagnostics: Integration
         <div className="diagnostics-top">
           <span>Top suggestion</span>
           <strong>{formatBytes(diagnostics.topRecommendations[0].spaceSavedBytes)}</strong>
+          <span>{formatConfidence(diagnostics.topRecommendations[0].confidence)}</span>
           <span>{formatVerification(diagnostics.topRecommendations[0].verification)}</span>
         </div>
       )}
@@ -1594,6 +1598,21 @@ function recommendationWhySuggested(rec: Recommendation): string {
     return `${action} rule from ${rec.source}; threshold older than ${thresholdDays} days.`;
   }
   return `${action} rule from ${rec.source}.`;
+}
+
+function recommendationConfidenceBasis(rec: Recommendation): string {
+  const parts = [formatVerification(rec.verification)];
+  if (rec.evidence?.thresholdDays) {
+    const days = rec.evidence.ageDays || rec.evidence.inactiveDays;
+    parts.push(days ? `${days} days vs ${rec.evidence.thresholdDays} day threshold` : `${rec.evidence.thresholdDays} day threshold`);
+  }
+  if (rec.playCount && rec.playCount > 0) {
+    parts.push(`${rec.playCount} prior plays`);
+  }
+  if (rec.uniqueUsers && rec.uniqueUsers > 0) {
+    parts.push(`${rec.uniqueUsers} watched users`);
+  }
+  return parts.join('; ');
 }
 
 function recommendationActivityProof(rec: Recommendation): string {
@@ -2070,6 +2089,16 @@ function formatRecommendationAction(value: Recommendation['action']): string {
     default:
       return 'Review item';
   }
+}
+
+function confidenceTone(value: number): string {
+  if (value >= 0.85) {
+    return 'strong';
+  }
+  if (value >= 0.72) {
+    return 'moderate';
+  }
+  return 'caution';
 }
 
 function recommendationItemCount(rec: Recommendation): number {

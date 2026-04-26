@@ -62,7 +62,7 @@ No media file deletion route is provided.
 
 Long-running scan and sync requests return a job object immediately. Poll `/jobs/{id}` for `status`, `phase`, `message`, `processed`, `total`, `currentLabel`, imported counts, and recent events. Jobs support `queued`, `running`, `completed`, `failed`, `canceled`, and `stale` states. Listing jobs marks old queued/running rows stale after 24 hours without progress.
 
-Recommendation evidence is intentionally verbose. Clients should display storage verification separately from confidence and separate estimated savings from verified savings. Evidence responses include `storage.estimatedSavingsBytes`, `storage.verifiedSavingsBytes`, `storage.verification`, `storage.certainty`, activity rollups, source rule, and proof points.
+Recommendation evidence is intentionally verbose. Clients should display storage verification separately from confidence and separate estimated savings from verified savings. Evidence responses include `storage.estimatedSavingsBytes`, `storage.verifiedSavingsBytes`, `storage.verification`, `storage.certainty`, activity rollups, source rule, and proof points. Activity recommendation evidence may include `confidenceBasis`, which explains the deterministic inputs behind the displayed confidence percentage.
 
 Storage certainty labels have fixed meanings:
 

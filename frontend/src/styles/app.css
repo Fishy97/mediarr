@@ -781,6 +781,32 @@ code {
   font-size: 0.78rem;
 }
 
+.confidence-pill {
+  border-radius: 999px;
+  padding: 4px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.confidence-pill.strong {
+  background: rgba(45, 212, 191, 0.14);
+  border-color: rgba(45, 212, 191, 0.34);
+  color: #99f6e4;
+}
+
+.confidence-pill.moderate {
+  background: rgba(34, 211, 238, 0.12);
+  border-color: rgba(34, 211, 238, 0.3);
+  color: #a5f3fc;
+}
+
+.confidence-pill.caution {
+  background: rgba(250, 204, 21, 0.12);
+  border-color: rgba(250, 204, 21, 0.28);
+  color: #fde68a;
+}
+
 .rec-main {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr);
