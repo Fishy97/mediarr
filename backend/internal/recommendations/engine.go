@@ -328,7 +328,7 @@ func (engine Engine) GenerateActivity(items []ActivityMedia, now time.Time) []Re
 				recs = append(recs, Recommendation{
 					ID:              stableID("activity-never-watched:" + item.ServerID + ":" + item.ExternalItemID + ":" + item.Path),
 					Action:          ActionReviewNeverWatchedMovie,
-					Title:           "Review never-watched movie",
+					Title:           item.Title,
 					Explanation:     item.Title + " has not been watched by any imported media-server user since it was added. Review whether it is still worth keeping before reclaiming storage.",
 					SpaceSavedBytes: item.SizeBytes,
 					Confidence:      confidence,
@@ -344,6 +344,9 @@ func (engine Engine) GenerateActivity(items []ActivityMedia, now time.Time) []Re
 					Evidence: storageEvidenceMap(item.Verification, item.SizeBytes, map[string]string{
 						"ageDays":       strconv.Itoa(ageDays),
 						"thresholdDays": strconv.Itoa(neverWatchedDays),
+						"itemCount":     "1",
+						"subjectKind":   "movie",
+						"subjectTitle":  item.Title,
 					}),
 				})
 			}
@@ -355,7 +358,7 @@ func (engine Engine) GenerateActivity(items []ActivityMedia, now time.Time) []Re
 				recs = append(recs, Recommendation{
 					ID:              stableID("activity-inactive:" + item.ServerID + ":" + item.ExternalItemID + ":" + item.Path),
 					Action:          ActionReviewInactiveMovie,
-					Title:           "Review inactive movie",
+					Title:           item.Title,
 					Explanation:     item.Title + " has not been watched recently by any imported media-server user. Review activity and quality before reclaiming storage.",
 					SpaceSavedBytes: item.SizeBytes,
 					Confidence:      confidence,
@@ -372,6 +375,9 @@ func (engine Engine) GenerateActivity(items []ActivityMedia, now time.Time) []Re
 					Evidence: storageEvidenceMap(item.Verification, item.SizeBytes, map[string]string{
 						"inactiveDays":  strconv.Itoa(inactiveForDays),
 						"thresholdDays": strconv.Itoa(inactiveDays),
+						"itemCount":     "1",
+						"subjectKind":   "movie",
+						"subjectTitle":  item.Title,
 					}),
 				})
 			}
@@ -481,8 +487,10 @@ func (engine Engine) generateSeriesActivity(items []ActivityMedia, now time.Time
 			}
 		}
 		category := "series"
+		subjectKind := "series"
 		if group.isAnime {
 			category = "anime"
+			subjectKind = "anime"
 		}
 		if group.playCount == 0 && !group.latestAddedAt.IsZero() {
 			ageDays := int(now.Sub(group.latestAddedAt).Hours() / 24)
@@ -490,7 +498,7 @@ func (engine Engine) generateSeriesActivity(items []ActivityMedia, now time.Time
 				recs = append(recs, Recommendation{
 					ID:              stableID("activity-abandoned-series:" + group.serverID + ":" + group.externalID + ":" + strings.Join(group.paths, "|")),
 					Action:          ActionReviewAbandonedSeries,
-					Title:           "Review abandoned series",
+					Title:           group.title,
 					Explanation:     group.title + " has no imported play activity and all known files are older than the review threshold. Review the series before reclaiming storage.",
 					SpaceSavedBytes: group.sizeBytes,
 					Confidence:      group.confidence,
@@ -508,6 +516,9 @@ func (engine Engine) generateSeriesActivity(items []ActivityMedia, now time.Time
 						"thresholdDays": strconv.Itoa(neverWatchedDays),
 						"itemCount":     strconv.Itoa(len(group.paths)),
 						"category":      category,
+						"seriesTitle":   group.title,
+						"subjectKind":   subjectKind,
+						"subjectTitle":  group.title,
 					}),
 				})
 			}
@@ -519,7 +530,7 @@ func (engine Engine) generateSeriesActivity(items []ActivityMedia, now time.Time
 				recs = append(recs, Recommendation{
 					ID:              stableID("activity-inactive-series:" + group.serverID + ":" + group.externalID + ":" + strings.Join(group.paths, "|")),
 					Action:          ActionReviewInactiveSeries,
-					Title:           "Review inactive series",
+					Title:           group.title,
 					Explanation:     group.title + " has not been watched recently by any imported media-server user. Review the full series before reclaiming storage.",
 					SpaceSavedBytes: group.sizeBytes,
 					Confidence:      group.confidence,
@@ -538,6 +549,9 @@ func (engine Engine) generateSeriesActivity(items []ActivityMedia, now time.Time
 						"thresholdDays": strconv.Itoa(inactiveDays),
 						"itemCount":     strconv.Itoa(len(group.paths)),
 						"category":      category,
+						"seriesTitle":   group.title,
+						"subjectKind":   subjectKind,
+						"subjectTitle":  group.title,
 					}),
 				})
 			}

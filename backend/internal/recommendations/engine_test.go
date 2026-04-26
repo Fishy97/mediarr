@@ -285,6 +285,59 @@ func TestEngineAggregatesInactiveSeriesActivityRecommendation(t *testing.T) {
 	}
 }
 
+func TestActivityRecommendationsUseSubjectTitles(t *testing.T) {
+	engine := Engine{}
+	now := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)
+
+	recs := engine.GenerateActivity([]ActivityMedia{
+		{
+			ServerID:        "jellyfin",
+			ExternalItemID:  "movie_1",
+			Kind:            "movie",
+			Title:           "Arrival",
+			Path:            "/media/movies/Arrival (2016).mkv",
+			SizeBytes:       42_000_000_000,
+			AddedAt:         now.AddDate(-1, 0, 0),
+			PlayCount:       0,
+			Verification:    "server_reported",
+			MatchConfidence: 0.68,
+		},
+		{
+			ServerID:             "jellyfin",
+			ExternalItemID:       "episode_1",
+			ParentExternalItemID: "series_1",
+			ParentTitle:          "The Sopranos",
+			Kind:                 "episode",
+			Title:                "Pilot",
+			Path:                 "/media/series/The Sopranos/Season 1/The Sopranos - S01E01.mkv",
+			SizeBytes:            10_000_000_000,
+			AddedAt:              now.AddDate(-1, 0, 0),
+			PlayCount:            0,
+			Verification:         "server_reported",
+			MatchConfidence:      0.68,
+		},
+	}, now)
+
+	if len(recs) != 2 {
+		t.Fatalf("recommendations = %#v, want movie and series recommendations", recs)
+	}
+	byAction := map[Action]Recommendation{}
+	for _, rec := range recs {
+		byAction[rec.Action] = rec
+	}
+	movie := byAction[ActionReviewNeverWatchedMovie]
+	if movie.Title != "Arrival" || movie.Evidence["subjectTitle"] != "Arrival" || movie.Evidence["subjectKind"] != "movie" || movie.Evidence["itemCount"] != "1" {
+		t.Fatalf("movie subject evidence = %#v", movie)
+	}
+	series := byAction[ActionReviewAbandonedSeries]
+	if series.Title != "The Sopranos" || series.Evidence["seriesTitle"] != "The Sopranos" || series.Evidence["subjectTitle"] != "The Sopranos" || series.Evidence["subjectKind"] != "series" {
+		t.Fatalf("series subject evidence = %#v", series)
+	}
+	if series.Evidence["itemCount"] != "1" || series.Action != ActionReviewAbandonedSeries {
+		t.Fatalf("series item/action evidence = %#v", series)
+	}
+}
+
 func TestEngineCreatesAbandonedAnimeSeriesRecommendation(t *testing.T) {
 	engine := Engine{}
 	now := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)

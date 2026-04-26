@@ -766,6 +766,21 @@ code {
   gap: 10px;
 }
 
+.rec-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.action-pill {
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: rgba(34, 211, 238, 0.12);
+  color: #a5f3fc;
+  font-size: 0.78rem;
+}
+
 .rec-main {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr);
@@ -790,6 +805,56 @@ code {
 .path-list {
   display: grid;
   gap: 6px;
+}
+
+.affected-media {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.affected-media-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #cbd5e1;
+  font-size: 0.86rem;
+}
+
+.compact-button {
+  min-height: 34px;
+  padding: 7px 10px;
+  white-space: nowrap;
+}
+
+.path-groups {
+  display: grid;
+  gap: 10px;
+}
+
+.path-group {
+  display: grid;
+  gap: 8px;
+}
+
+.path-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #e2e8f0;
+  font-size: 0.84rem;
+}
+
+.path-group-header span,
+.path-overflow {
+  color: #94a3b8;
+  font-size: 0.78rem;
+}
+
+.path-overflow {
+  padding: 2px 4px;
 }
 
 code {
@@ -1059,5 +1124,16 @@ code {
   .brand span,
   .eyebrow {
     display: none;
+  }
+
+  .rec-title-row,
+  .affected-media-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .compact-button {
+    width: 100%;
+    justify-content: center;
   }
 }

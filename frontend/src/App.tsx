@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { api, getAuthToken } from './lib/api';
 import { formatBytes, formatConfidence, formatVerification, storageCertaintyDescription, storageCertaintyForVerification } from './lib/format';
+import { groupAffectedPaths } from './lib/pathGroups';
 import type {
   AIStatus,
   ActivityRollup,
@@ -991,6 +992,8 @@ function RecommendationQueue({
   onIgnore: (id: string) => void;
   busy: boolean;
 }) {
+  const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>({});
+
   return (
     <section className="queue">
       {recommendations.map((rec) => {
@@ -998,6 +1001,12 @@ function RecommendationQueue({
         const estimatedSavingsBytes = recommendationEstimatedSavings(rec);
         const verifiedSavingsBytes = recommendationVerifiedSavings(rec);
         const storageCertainty = rec.evidence?.storageCertainty || storageCertaintyForVerification(rec.verification);
+        const subjectKind = rec.evidence?.subjectKind;
+        const itemCount = recommendationItemCount(rec);
+        const pathGroups = groupAffectedPaths(rec.affectedPaths, subjectKind);
+        const isExpanded = Boolean(expandedPaths[rec.id]);
+        const previewPaths = rec.affectedPaths.slice(0, 3);
+        const hiddenPathCount = Math.max(rec.affectedPaths.length - previewPaths.length, 0);
         return (
           <article className="recommendation-card" key={rec.id}>
             <div className="rec-main">
@@ -1005,14 +1014,52 @@ function RecommendationQueue({
               <div>
                 <div className="rec-title-row">
                   <h2>{rec.title}</h2>
-                  <span className="status-pill">{formatRecommendationState(rec.state)}</span>
+                  <div className="rec-badges">
+                    <span className="action-pill">{formatRecommendationAction(rec.action)}</span>
+                    <span className="status-pill">{formatRecommendationState(rec.state)}</span>
+                  </div>
                 </div>
                 <p>{rec.explanation}</p>
-                <div className="path-list">
-                  {rec.affectedPaths.map((path) => <code key={path}>{path}</code>)}
+                <div className="affected-media">
+                  <div className="affected-media-header">
+                    <span>{formatAffectedSummary(itemCount, pathGroups.length, subjectKind)}</span>
+                    {rec.affectedPaths.length > 0 && (
+                      <button
+                        className="secondary-button compact-button"
+                        type="button"
+                        aria-expanded={isExpanded}
+                        onClick={() => setExpandedPaths((current) => ({ ...current, [rec.id]: !isExpanded }))}
+                      >
+                        <FolderOpen size={15} />
+                        {isExpanded ? 'Hide affected files' : `Show ${rec.affectedPaths.length} affected files`}
+                      </button>
+                    )}
+                  </div>
+                  {isExpanded ? (
+                    <div className="path-groups">
+                      {pathGroups.map((group) => (
+                        <div className="path-group" key={group.label}>
+                          <div className="path-group-header">
+                            <strong>{group.label}</strong>
+                            <span>{formatFileCount(group.count)}</span>
+                          </div>
+                          <div className="path-list">
+                            {group.paths.map((path) => <code key={path}>{path}</code>)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="path-list path-list-preview">
+                      {previewPaths.map((path) => <code key={path}>{path}</code>)}
+                      {hiddenPathCount > 0 && <span className="path-overflow">+{hiddenPathCount} more affected files hidden</span>}
+                    </div>
+                  )}
                 </div>
                 <div className="rec-evidence">
                   <Signal label="Source" value={rec.serverId || 'Local scan'} />
+                  <Signal label="Scope" value={formatFileCount(itemCount)} />
+                  <Signal label="Groups" value={formatGroupCount(pathGroups.length, subjectKind)} />
                   <Signal label="Last Played" value={rec.lastPlayedAt ? formatDateTime(rec.lastPlayedAt) : rec.serverId ? 'Never' : 'N/A'} />
                   <Signal label="Plays" value={String(rec.playCount ?? 0)} />
                   <Signal label="Users" value={String(rec.uniqueUsers ?? 0)} />
@@ -1944,6 +1991,50 @@ function formatRecommendationState(value?: string): string {
     default:
       return 'New';
   }
+}
+
+function formatRecommendationAction(value: Recommendation['action']): string {
+  switch (value) {
+    case 'review_abandoned_series':
+      return 'Abandoned series';
+    case 'review_inactive_series':
+      return 'Inactive series';
+    case 'review_inactive_movie':
+      return 'Inactive movie';
+    case 'review_never_watched_movie':
+      return 'Never-watched movie';
+    case 'review_duplicate':
+      return 'Duplicate candidate';
+    case 'review_unwatched_duplicate':
+      return 'Unwatched duplicate';
+    case 'review_oversized':
+      return 'Oversized file';
+    case 'review_missing_subtitles':
+      return 'Missing subtitles';
+    default:
+      return 'Review item';
+  }
+}
+
+function recommendationItemCount(rec: Recommendation): number {
+  return parseEvidenceNumber(rec.evidence?.itemCount, rec.affectedPaths.length || 1);
+}
+
+function formatAffectedSummary(itemCount: number, groupCount: number, subjectKind?: string): string {
+  const itemLabel = formatFileCount(itemCount);
+  if (groupCount <= 1) {
+    return itemLabel;
+  }
+  return `${itemLabel} across ${formatGroupCount(groupCount, subjectKind)}`;
+}
+
+function formatFileCount(count: number): string {
+  return `${count} ${count === 1 ? 'file' : 'files'}`;
+}
+
+function formatGroupCount(count: number, subjectKind?: string): string {
+  const groupLabel = subjectKind === 'movie' ? 'group' : 'season/group';
+  return `${count} ${count === 1 ? groupLabel : `${groupLabel}s`}`;
 }
 
 function titleFor(view: View): string {
