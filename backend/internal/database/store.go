@@ -69,20 +69,24 @@ type ProviderSettingInput struct {
 }
 
 type IntegrationSetting struct {
-	Integration      string    `json:"integration"`
-	BaseURL          string    `json:"baseUrl,omitempty"`
-	APIKey           string    `json:"-"`
-	APIKeyConfigured bool      `json:"apiKeyConfigured"`
-	APIKeyLast4      string    `json:"apiKeyLast4,omitempty"`
-	UpdatedAt        time.Time `json:"updatedAt"`
+	Integration             string    `json:"integration"`
+	BaseURL                 string    `json:"baseUrl,omitempty"`
+	APIKey                  string    `json:"-"`
+	APIKeyConfigured        bool      `json:"apiKeyConfigured"`
+	APIKeyLast4             string    `json:"apiKeyLast4,omitempty"`
+	AutoSyncEnabled         bool      `json:"autoSyncEnabled"`
+	AutoSyncIntervalMinutes int       `json:"autoSyncIntervalMinutes"`
+	UpdatedAt               time.Time `json:"updatedAt"`
 }
 
 type IntegrationSettingInput struct {
-	Integration  string `json:"integration"`
-	BaseURL      string `json:"baseUrl"`
-	APIKey       string `json:"apiKey"`
-	ClearAPIKey  bool   `json:"clearApiKey"`
-	ClearBaseURL bool   `json:"clearBaseUrl"`
+	Integration             string `json:"integration"`
+	BaseURL                 string `json:"baseUrl"`
+	APIKey                  string `json:"apiKey"`
+	ClearAPIKey             bool   `json:"clearApiKey"`
+	ClearBaseURL            bool   `json:"clearBaseUrl"`
+	AutoSyncEnabled         *bool  `json:"autoSyncEnabled,omitempty"`
+	AutoSyncIntervalMinutes int    `json:"autoSyncIntervalMinutes,omitempty"`
 }
 
 type CatalogCorrection struct {
@@ -429,6 +433,8 @@ func (store *Store) migrate() error {
 			integration TEXT PRIMARY KEY,
 			base_url TEXT NOT NULL DEFAULT '',
 			api_key TEXT NOT NULL DEFAULT '',
+			auto_sync_enabled INTEGER NOT NULL DEFAULT 1,
+			auto_sync_interval_minutes INTEGER NOT NULL DEFAULT 360,
 			updated_at TEXT NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS jobs (
@@ -567,6 +573,17 @@ func (store *Store) migrate() error {
 	}
 	if err := store.ensureColumn("media_files", "year", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
+	}
+	for _, column := range []struct {
+		name       string
+		definition string
+	}{
+		{name: "auto_sync_enabled", definition: "INTEGER NOT NULL DEFAULT 1"},
+		{name: "auto_sync_interval_minutes", definition: "INTEGER NOT NULL DEFAULT 360"},
+	} {
+		if err := store.ensureColumn("integration_settings", column.name, column.definition); err != nil {
+			return err
+		}
 	}
 	for _, column := range []struct {
 		name       string
@@ -2158,12 +2175,12 @@ func (store *Store) UpsertIntegrationSetting(input IntegrationSettingInput) (Int
 		return IntegrationSetting{}, errors.New("unknown integration")
 	}
 
-	current := IntegrationSetting{}
+	current := IntegrationSetting{AutoSyncEnabled: true, AutoSyncIntervalMinutes: defaultAutoSyncIntervalMinutes()}
 	var updatedAtRaw string
 	err := store.DB.QueryRow(
-		`SELECT integration, base_url, api_key, updated_at FROM integration_settings WHERE integration = ?`,
+		`SELECT integration, base_url, api_key, auto_sync_enabled, auto_sync_interval_minutes, updated_at FROM integration_settings WHERE integration = ?`,
 		integration,
-	).Scan(&current.Integration, &current.BaseURL, &current.APIKey, &updatedAtRaw)
+	).Scan(&current.Integration, &current.BaseURL, &current.APIKey, &current.AutoSyncEnabled, &current.AutoSyncIntervalMinutes, &updatedAtRaw)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return IntegrationSetting{}, err
 	}
@@ -2178,30 +2195,45 @@ func (store *Store) UpsertIntegrationSetting(input IntegrationSettingInput) (Int
 	} else if strings.TrimSpace(input.APIKey) != "" {
 		apiKey = strings.TrimSpace(input.APIKey)
 	}
+	autoSyncEnabled := current.AutoSyncEnabled
+	if input.AutoSyncEnabled != nil {
+		autoSyncEnabled = *input.AutoSyncEnabled
+	}
+	autoSyncInterval := current.AutoSyncIntervalMinutes
+	if autoSyncInterval <= 0 {
+		autoSyncInterval = defaultAutoSyncIntervalMinutes()
+	}
+	if input.AutoSyncIntervalMinutes > 0 {
+		autoSyncInterval = normalizeAutoSyncIntervalMinutes(input.AutoSyncIntervalMinutes)
+	}
 
 	updatedAt := time.Now().UTC()
 	_, err = store.DB.Exec(
-		`INSERT INTO integration_settings (integration, base_url, api_key, updated_at) VALUES (?, ?, ?, ?)
+		`INSERT INTO integration_settings (integration, base_url, api_key, auto_sync_enabled, auto_sync_interval_minutes, updated_at) VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(integration) DO UPDATE SET
 			base_url = excluded.base_url,
 			api_key = excluded.api_key,
+			auto_sync_enabled = excluded.auto_sync_enabled,
+			auto_sync_interval_minutes = excluded.auto_sync_interval_minutes,
 			updated_at = excluded.updated_at`,
 		integration,
 		baseURL,
 		apiKey,
+		boolInt(autoSyncEnabled),
+		autoSyncInterval,
 		updatedAt.Format(time.RFC3339Nano),
 	)
 	if err != nil {
 		return IntegrationSetting{}, err
 	}
-	return redactedIntegrationSetting(integration, baseURL, apiKey, updatedAt), nil
+	return redactedIntegrationSetting(integration, baseURL, apiKey, autoSyncEnabled, autoSyncInterval, updatedAt), nil
 }
 
 func (store *Store) ListIntegrationSettings() ([]IntegrationSetting, error) {
 	if store == nil || store.DB == nil {
 		return nil, errors.New("nil database store")
 	}
-	rows, err := store.DB.Query(`SELECT integration, base_url, api_key, updated_at FROM integration_settings ORDER BY integration`)
+	rows, err := store.DB.Query(`SELECT integration, base_url, api_key, auto_sync_enabled, auto_sync_interval_minutes, updated_at FROM integration_settings ORDER BY integration`)
 	if err != nil {
 		return nil, err
 	}
@@ -2211,11 +2243,11 @@ func (store *Store) ListIntegrationSettings() ([]IntegrationSetting, error) {
 	for rows.Next() {
 		var setting IntegrationSetting
 		var updatedAtRaw string
-		if err := rows.Scan(&setting.Integration, &setting.BaseURL, &setting.APIKey, &updatedAtRaw); err != nil {
+		if err := rows.Scan(&setting.Integration, &setting.BaseURL, &setting.APIKey, &setting.AutoSyncEnabled, &setting.AutoSyncIntervalMinutes, &updatedAtRaw); err != nil {
 			return nil, err
 		}
 		setting.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAtRaw)
-		settings = append(settings, redactedIntegrationSetting(setting.Integration, setting.BaseURL, setting.APIKey, setting.UpdatedAt))
+		settings = append(settings, redactedIntegrationSetting(setting.Integration, setting.BaseURL, setting.APIKey, setting.AutoSyncEnabled, normalizeAutoSyncIntervalMinutes(setting.AutoSyncIntervalMinutes), setting.UpdatedAt))
 	}
 	return settings, rows.Err()
 }
@@ -2224,7 +2256,7 @@ func (store *Store) ListIntegrationSettingSecrets() ([]IntegrationSetting, error
 	if store == nil || store.DB == nil {
 		return nil, errors.New("nil database store")
 	}
-	rows, err := store.DB.Query(`SELECT integration, base_url, api_key, updated_at FROM integration_settings ORDER BY integration`)
+	rows, err := store.DB.Query(`SELECT integration, base_url, api_key, auto_sync_enabled, auto_sync_interval_minutes, updated_at FROM integration_settings ORDER BY integration`)
 	if err != nil {
 		return nil, err
 	}
@@ -2234,12 +2266,13 @@ func (store *Store) ListIntegrationSettingSecrets() ([]IntegrationSetting, error
 	for rows.Next() {
 		var setting IntegrationSetting
 		var updatedAtRaw string
-		if err := rows.Scan(&setting.Integration, &setting.BaseURL, &setting.APIKey, &updatedAtRaw); err != nil {
+		if err := rows.Scan(&setting.Integration, &setting.BaseURL, &setting.APIKey, &setting.AutoSyncEnabled, &setting.AutoSyncIntervalMinutes, &updatedAtRaw); err != nil {
 			return nil, err
 		}
 		setting.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAtRaw)
 		setting.APIKeyConfigured = strings.TrimSpace(setting.APIKey) != ""
 		setting.APIKeyLast4 = last4(setting.APIKey)
+		setting.AutoSyncIntervalMinutes = normalizeAutoSyncIntervalMinutes(setting.AutoSyncIntervalMinutes)
 		settings = append(settings, setting)
 	}
 	return settings, rows.Err()
@@ -2337,14 +2370,40 @@ func redactedProviderSetting(provider string, baseURL string, apiKey string, upd
 	}
 }
 
-func redactedIntegrationSetting(integration string, baseURL string, apiKey string, updatedAt time.Time) IntegrationSetting {
+func redactedIntegrationSetting(integration string, baseURL string, apiKey string, autoSyncEnabled bool, autoSyncIntervalMinutes int, updatedAt time.Time) IntegrationSetting {
 	return IntegrationSetting{
-		Integration:      integration,
-		BaseURL:          baseURL,
-		APIKeyConfigured: strings.TrimSpace(apiKey) != "",
-		APIKeyLast4:      last4(apiKey),
-		UpdatedAt:        updatedAt,
+		Integration:             integration,
+		BaseURL:                 baseURL,
+		APIKeyConfigured:        strings.TrimSpace(apiKey) != "",
+		APIKeyLast4:             last4(apiKey),
+		AutoSyncEnabled:         autoSyncEnabled,
+		AutoSyncIntervalMinutes: normalizeAutoSyncIntervalMinutes(autoSyncIntervalMinutes),
+		UpdatedAt:               updatedAt,
 	}
+}
+
+func defaultAutoSyncIntervalMinutes() int {
+	return 360
+}
+
+func normalizeAutoSyncIntervalMinutes(minutes int) int {
+	if minutes <= 0 {
+		return defaultAutoSyncIntervalMinutes()
+	}
+	if minutes < 15 {
+		return 15
+	}
+	if minutes > 10080 {
+		return 10080
+	}
+	return minutes
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func last4(value string) string {

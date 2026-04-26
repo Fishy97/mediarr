@@ -6,7 +6,7 @@ It deliberately does not search for, download, torrent, index, or acquire media.
 
 ## Project Status
 
-Mediarr 1.3 is a Docker-hosted library scanner, catalog, and review dashboard for already-downloaded media. It can:
+Mediarr 1.4 is a Docker-hosted library scanner, catalog, and review dashboard for already-downloaded media. It can:
 
 - scan movie, series, and anime folders mounted read-only
 - parse common movie, series, and anime filename patterns
@@ -17,6 +17,7 @@ Mediarr 1.3 is a Docker-hosted library scanner, catalog, and review dashboard fo
 - configure provider credentials without returning secrets through the API
 - request Jellyfin, Plex, and Emby library refreshes as sync targets
 - sync Jellyfin, Plex, and Emby inventory, file evidence, and user activity into a normalized activity model
+- automatically queue the first media-server sync after connection and keep integrations fresh on a schedule
 - resume Plex watch-history imports from the last stored cursor while preserving prior rollups
 - show durable background-job telemetry for filesystem scans and media-server syncs, including phase, counters, current item, and recent events
 - cancel, retry, and mark stale background work so long-running scans and syncs remain transparent
@@ -111,7 +112,7 @@ curl -X PUT http://localhost:8080/api/v1/integration-settings/emby \
   -d '{"baseUrl":"http://emby:8096","apiKey":"your-emby-api-key"}'
 ```
 
-Then sync from the UI Integrations screen, or with:
+Mediarr automatically queues the first sync after a valid connection is saved, then keeps the integration fresh on the configured schedule. Manual Sync remains available from the UI Integrations screen, or with:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/integrations/jellyfin/sync
@@ -120,6 +121,8 @@ curl -X POST http://localhost:8080/api/v1/integrations/emby/sync
 ```
 
 `refresh` asks the media server to rescan its own libraries. `sync` imports inventory and activity into Mediarr so it can create cleanup suggestions. Activity data can reveal household viewing behavior, so Mediarr stores only the normalized fields needed for recommendations and never returns media-server tokens through the API.
+
+Auto-sync is enabled by default and runs every 6 hours. You can disable it or change the interval per integration in the Integrations screen.
 
 If Jellyfin, Plex, or Emby reports paths that differ from Mediarr's container mounts, use **Integrations > Path Mapping** to map the server prefix to the Mediarr-visible prefix. Mediarr can then verify mapped files against the local filesystem and raise evidence from `server_reported` to `path_mapped` or `local_verified`.
 

@@ -201,9 +201,11 @@ curl -X POST http://localhost:8080/api/v1/integrations/plex/sync
 curl -X POST http://localhost:8080/api/v1/integrations/emby/sync
 ```
 
-Syncs also run as background jobs. The Integrations screen shows the active phase, current item/title, imported counts, unmapped count, retry policy, and recent events while a media server is being read.
+Syncs also run as background jobs. The Integrations screen shows the active phase, current item/title, imported counts, unmapped count, retry policy, auto-sync interval, next sync estimate, and recent events while a media server is being read.
 
 Mediarr imports media-server inventory, file paths, file sizes, and activity rollups such as play count and last played date. It uses those signals to create suggest-only cleanup recommendations for inactive or never-watched media.
+
+Auto-sync is enabled by default. Saving a valid Jellyfin, Plex, or Emby connection queues the first sync immediately, and Mediarr checks for due integrations on startup and on a background schedule. The default interval is 6 hours. You can disable auto-sync or change the interval per integration from the UI.
 
 Use path mappings when Jellyfin, Plex, or Emby sees a different path than the Mediarr container. For example, if Plex reports `/mnt/media/movies` but Mediarr sees `/media/movies`, create a mapping from `/mnt/media` to `/media` in the Integrations screen.
 

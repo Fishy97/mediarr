@@ -32,7 +32,7 @@ All API routes are rooted at `/api/v1`.
 | GET | `/provider-settings` | Redacted provider credential and base URL settings |
 | PUT | `/provider-settings/{provider}` | Update provider base URL, API key, or clear stored key |
 | GET | `/integration-settings` | Redacted Jellyfin, Plex, and Emby connection settings |
-| PUT | `/integration-settings/{id}` | Update media-server base URL, API key/token, or clear stored key |
+| PUT | `/integration-settings/{id}` | Update media-server base URL, API key/token, auto-sync settings, or clear stored key |
 | GET | `/integrations` | Media-server and AI integration status |
 | POST | `/integrations/{id}/refresh` | Request a Jellyfin, Plex, or Emby library refresh |
 | POST | `/integrations/{id}/sync` | Queue a background Jellyfin, Plex, or Emby inventory/activity sync job |
@@ -59,3 +59,5 @@ Long-running scan and sync requests return a job object immediately. Poll `/jobs
 Recommendation evidence is intentionally verbose. Clients should display storage verification separately from confidence: `local_verified` means Mediarr found a matching local file, `path_mapped` means a mapping resolved the server path, `server_reported` means savings came from the media server, and `unmapped` is blocked from cleanup recommendations.
 
 Provider and media-server API calls use bounded retry behavior for `429` and `5xx` responses. `Retry-After` is honored when present, capped to avoid wedging background jobs indefinitely.
+
+Integration settings include `autoSyncEnabled` and `autoSyncIntervalMinutes`. Auto-sync defaults to enabled at 360 minutes. Saving a valid URL and API key/token queues the first sync immediately, and the backend scheduler keeps due integrations fresh while avoiding duplicate active jobs.

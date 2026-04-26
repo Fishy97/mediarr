@@ -1182,20 +1182,31 @@ function MediaServerCard({
 }) {
   const [baseUrl, setBaseURL] = useState(setting?.baseUrl || '');
   const [apiKey, setAPIKey] = useState('');
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(setting?.autoSyncEnabled ?? true);
+  const [autoSyncIntervalMinutes, setAutoSyncIntervalMinutes] = useState(String(setting?.autoSyncIntervalMinutes ?? 360));
   const displayJob = activeJob ?? syncJobToJob(job);
+  const effectiveAutoSyncEnabled = setting?.autoSyncEnabled ?? autoSyncEnabled;
+  const effectiveAutoSyncInterval = setting?.autoSyncIntervalMinutes ?? (Number.parseInt(autoSyncIntervalMinutes, 10) || 360);
+  const nextSync = nextAutoSyncAt(job?.completedAt, effectiveAutoSyncInterval, effectiveAutoSyncEnabled && (setting?.apiKeyConfigured || integration.status === 'configured'));
 
   useEffect(() => {
     setBaseURL(setting?.baseUrl || '');
     setAPIKey('');
-  }, [setting?.baseUrl, setting?.apiKeyConfigured]);
+    setAutoSyncEnabled(setting?.autoSyncEnabled ?? true);
+    setAutoSyncIntervalMinutes(String(setting?.autoSyncIntervalMinutes ?? 360));
+  }, [setting?.baseUrl, setting?.apiKeyConfigured, setting?.autoSyncEnabled, setting?.autoSyncIntervalMinutes]);
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
+    const interval = clampAutoSyncInterval(Number.parseInt(autoSyncIntervalMinutes, 10));
     onUpdate(integration.id, {
       baseUrl,
       apiKey,
       clearApiKey: apiKey === '' ? undefined : false,
+      autoSyncEnabled,
+      autoSyncIntervalMinutes: interval,
     });
+    setAutoSyncIntervalMinutes(String(interval));
     setAPIKey('');
   }
 
@@ -1216,6 +1227,8 @@ function MediaServerCard({
           <Signal label="Unmapped" value={String(job?.unmappedItems ?? 0)} />
           <Signal label="Credential" value={setting?.apiKeyConfigured ? `Key ...${setting.apiKeyLast4 || ''}` : 'Not set'} />
           <Signal label="Backoff" value={integration.retryPolicy || 'standard'} />
+          <Signal label="Auto Sync" value={effectiveAutoSyncEnabled ? `Every ${formatMinutes(effectiveAutoSyncInterval)}` : 'Disabled'} />
+          <Signal label="Next Sync" value={nextSync || 'After connect'} />
         </div>
         <form className="integration-config" onSubmit={submit}>
           <label>
@@ -1226,8 +1239,16 @@ function MediaServerCard({
             API key or token
             <input value={apiKey} onChange={(event) => setAPIKey(event.target.value)} type="password" placeholder={setting?.apiKeyConfigured ? `Configured ...${setting.apiKeyLast4 || ''}` : 'Paste token'} />
           </label>
+          <label className="checkbox-row">
+            <input checked={autoSyncEnabled} onChange={(event) => setAutoSyncEnabled(event.target.checked)} type="checkbox" />
+            Auto-sync after connection and on schedule
+          </label>
+          <label>
+            Auto-sync interval
+            <input value={autoSyncIntervalMinutes} onChange={(event) => setAutoSyncIntervalMinutes(event.target.value)} type="number" min={15} max={10080} step={15} />
+          </label>
           <div className="button-row">
-            <button className="secondary-button" type="submit" disabled={busy || (!baseUrl && !apiKey)}>
+            <button className="secondary-button" type="submit" disabled={busy || (!baseUrl && !apiKey && !setting)}>
               <Save size={16} />
               Save
             </button>
@@ -1696,6 +1717,46 @@ function jobKindLabel(job: Job): string {
     default:
       return job.kind.replaceAll('_', ' ');
   }
+}
+
+function clampAutoSyncInterval(minutes: number): number {
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    return 360;
+  }
+  if (minutes < 15) {
+    return 15;
+  }
+  if (minutes > 10080) {
+    return 10080;
+  }
+  return minutes;
+}
+
+function formatMinutes(minutes: number): string {
+  if (minutes % 1440 === 0) {
+    const days = minutes / 1440;
+    return `${days}d`;
+  }
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${hours}h`;
+  }
+  return `${minutes}m`;
+}
+
+function nextAutoSyncAt(completedAt: string | undefined, intervalMinutes: number, enabled: boolean): string {
+  if (!enabled) {
+    return 'Disabled';
+  }
+  if (!completedAt) {
+    return 'Queued after save';
+  }
+  const completed = new Date(completedAt);
+  if (Number.isNaN(completed.getTime())) {
+    return 'Pending';
+  }
+  const next = new Date(completed.getTime() + clampAutoSyncInterval(intervalMinutes) * 60_000);
+  return formatDateTime(next.toISOString());
 }
 
 function syncJobToJob(job: IntegrationSyncJob | null): Job | undefined {

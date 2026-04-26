@@ -149,12 +149,12 @@ describe('api auth helpers', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(api.integrationSettings()).resolves.toHaveLength(1);
-    await api.updateIntegrationSetting('jellyfin', { baseUrl: 'http://jellyfin:8096', apiKey: 'secret-abcd' });
+    await api.updateIntegrationSetting('jellyfin', { baseUrl: 'http://jellyfin:8096', apiKey: 'secret-abcd', autoSyncEnabled: true, autoSyncIntervalMinutes: 360 });
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/integration-settings', expect.any(Object));
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/integration-settings/jellyfin', expect.objectContaining({
       method: 'PUT',
-      body: JSON.stringify({ baseUrl: 'http://jellyfin:8096', apiKey: 'secret-abcd' }),
+      body: JSON.stringify({ baseUrl: 'http://jellyfin:8096', apiKey: 'secret-abcd', autoSyncEnabled: true, autoSyncIntervalMinutes: 360 }),
     }));
   });
 

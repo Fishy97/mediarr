@@ -871,6 +871,11 @@ func (server *Server) integrationSettingHandler(w http.ResponseWriter, r *http.R
 	server.integrations = integrations.DefaultsWithOptions(server.integrationOptions)
 	server.mu.Unlock()
 	server.record("integration.updated", "Media-server integration settings updated", map[string]any{"integration": setting.Integration, "apiKeyConfigured": setting.APIKeyConfigured})
+	if setting.AutoSyncEnabled && setting.APIKeyConfigured && setting.BaseURL != "" {
+		if job, queued, err := server.queueIntegrationSync(setting.Integration, "Initial media-server auto-sync queued"); err == nil && queued {
+			server.record("integration.auto_sync_queued", "Initial media-server auto-sync queued", map[string]any{"targetId": setting.Integration, "jobId": job.ID})
+		}
+	}
 	writeJSON(w, http.StatusOK, envelope{Data: setting})
 }
 
@@ -942,22 +947,8 @@ func (server *Server) integrationSyncHandler(w http.ResponseWriter, r *http.Requ
 		}
 		writeJSON(w, http.StatusOK, envelope{Data: job})
 	case http.MethodPost:
-		jobKind := integrationJobKind(targetID)
-		if jobKind == "" {
-			http.Error(w, "integration sync is not supported for this target", http.StatusBadRequest)
-			return
-		}
-		job, err := server.store.CreateJob(database.JobInput{
-			Kind:     jobKind,
-			TargetID: targetID,
-			Phase:    "queued",
-			Message:  "Media-server sync queued",
-		})
+		job, _, err := server.queueIntegrationSync(targetID, "Media-server sync queued")
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if err := server.startJob(job); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -965,6 +956,124 @@ func (server *Server) integrationSyncHandler(w http.ResponseWriter, r *http.Requ
 	default:
 		methodNotAllowed(w, r)
 	}
+}
+
+func (server *Server) QueueDueAutoSyncs() ([]database.Job, error) {
+	return server.queueDueAutoSyncs(time.Now().UTC())
+}
+
+func (server *Server) StartAutoSync(ctx context.Context, checkEvery time.Duration) {
+	if server.store == nil {
+		return
+	}
+	if checkEvery <= 0 {
+		checkEvery = time.Minute
+	}
+	go func() {
+		_, _ = server.QueueDueAutoSyncs()
+		ticker := time.NewTicker(checkEvery)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				_, _ = server.QueueDueAutoSyncs()
+			}
+		}
+	}()
+}
+
+func (server *Server) queueDueAutoSyncs(now time.Time) ([]database.Job, error) {
+	if server.store == nil {
+		return nil, errors.New("integration store is not configured")
+	}
+	if err := server.refreshIntegrationOptionsFromStore(); err != nil {
+		return nil, err
+	}
+	settings, err := server.store.ListIntegrationSettingSecrets()
+	if err != nil {
+		return nil, err
+	}
+	byIntegration := map[string]database.IntegrationSetting{}
+	for _, setting := range settings {
+		byIntegration[setting.Integration] = setting
+	}
+	targets := []struct {
+		id       string
+		baseURL  string
+		apiKey   string
+		setting  database.IntegrationSetting
+		hasStore bool
+	}{
+		{id: "jellyfin", baseURL: server.integrationOptions.JellyfinURL, apiKey: server.integrationOptions.JellyfinKey},
+		{id: "plex", baseURL: server.integrationOptions.PlexURL, apiKey: server.integrationOptions.PlexToken},
+		{id: "emby", baseURL: server.integrationOptions.EmbyURL, apiKey: server.integrationOptions.EmbyKey},
+	}
+	queued := []database.Job{}
+	for _, target := range targets {
+		target.setting, target.hasStore = byIntegration[target.id]
+		if strings.TrimSpace(target.baseURL) == "" || strings.TrimSpace(target.apiKey) == "" {
+			continue
+		}
+		autoEnabled := true
+		intervalMinutes := 360
+		if target.hasStore {
+			autoEnabled = target.setting.AutoSyncEnabled
+			intervalMinutes = target.setting.AutoSyncIntervalMinutes
+		}
+		if !autoEnabled {
+			continue
+		}
+		if active, err := server.store.ListJobs(database.JobFilter{Kind: integrationJobKind(target.id), TargetID: target.id, Active: true, Limit: 1}); err != nil {
+			return nil, err
+		} else if len(active) > 0 {
+			continue
+		}
+		if latest, err := server.store.LatestMediaSyncJob(target.id); err == nil && latest.CompletedAt.Add(time.Duration(intervalMinutes)*time.Minute).After(now) {
+			continue
+		}
+		job, didQueue, err := server.queueIntegrationSync(target.id, "Automatic media-server sync queued")
+		if err != nil {
+			return nil, err
+		}
+		if didQueue {
+			server.record("integration.auto_sync_queued", "Automatic media-server sync queued", map[string]any{"targetId": target.id, "jobId": job.ID})
+			queued = append(queued, job)
+		}
+	}
+	return queued, nil
+}
+
+func (server *Server) queueIntegrationSync(targetID string, message string) (database.Job, bool, error) {
+	if server.store == nil {
+		return database.Job{}, false, errors.New("integration store is not configured")
+	}
+	jobKind := integrationJobKind(targetID)
+	if jobKind == "" {
+		return database.Job{}, false, errors.New("integration sync is not supported for this target")
+	}
+	if jobs, err := server.store.ListJobs(database.JobFilter{Kind: jobKind, TargetID: targetID, Active: true, Limit: 1}); err == nil && len(jobs) > 0 {
+		return jobs[0], false, nil
+	} else if err != nil {
+		return database.Job{}, false, err
+	}
+	if strings.TrimSpace(message) == "" {
+		message = "Media-server sync queued"
+	}
+	job, err := server.store.CreateJob(database.JobInput{
+		Kind:     jobKind,
+		TargetID: targetID,
+		Phase:    "queued",
+		Message:  message,
+	})
+	if err != nil {
+		return database.Job{}, false, err
+	}
+	if err := server.startJob(job); err != nil {
+		return database.Job{}, false, err
+	}
+	return job, true, nil
 }
 
 func (server *Server) runIntegrationSyncJob(jobID string, targetID string) {

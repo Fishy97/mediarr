@@ -130,6 +130,8 @@ export type IntegrationSetting = {
   baseUrl?: string;
   apiKeyConfigured: boolean;
   apiKeyLast4?: string;
+  autoSyncEnabled: boolean;
+  autoSyncIntervalMinutes: number;
   updatedAt?: string;
 };
 
@@ -138,6 +140,8 @@ export type IntegrationSettingInput = {
   apiKey?: string;
   clearApiKey?: boolean;
   clearBaseUrl?: boolean;
+  autoSyncEnabled?: boolean;
+  autoSyncIntervalMinutes?: number;
 };
 
 export type IntegrationSyncJob = {

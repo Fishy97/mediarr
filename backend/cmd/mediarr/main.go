@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/Fishy97/mediarr/backend/internal/ai"
 	"github.com/Fishy97/mediarr/backend/internal/api"
@@ -70,6 +72,7 @@ func main() {
 		Store:              store,
 	})
 	handler := auth.Middleware{AdminToken: cfg.AdminToken, Service: &authService}.Wrap(server)
+	server.StartAutoSync(context.Background(), time.Minute)
 
 	log.Printf("Mediarr listening on %s", cfg.Addr)
 	if err := http.ListenAndServe(cfg.Addr, handler); err != nil {

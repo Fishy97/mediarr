@@ -634,6 +634,18 @@ code {
   font: inherit;
 }
 
+.integration-config .checkbox-row {
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+}
+
+.integration-config .checkbox-row input {
+  min-height: 18px;
+  width: 18px;
+  padding: 0;
+  accent-color: #22d3ee;
+}
+
 .integration-config .button-row {
   grid-column: 1 / -1;
 }
