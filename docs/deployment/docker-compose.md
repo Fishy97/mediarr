@@ -264,6 +264,14 @@ Optional controls:
 
 Read the generated Markdown report first. It summarizes movies, series, episodes, anime-library items, file sizes, local verification coverage, unmapped paths, last-used activity rollups, and top suggestions.
 
+Use the in-app Review Queue after the same sync to validate the operator experience:
+
+- large series should appear as one recommendation titled with the series name, not as a wall of episode rows
+- cards should show confidence, estimated savings, verified savings, and storage certainty
+- server-reported recommendations should warn that savings are estimated until path mappings are verified
+- expanding a series should group affected files by season or parent folder
+- accepting a recommendation should mark it for manual action only and must not delete media
+
 ## Reverse Proxy And TLS
 
 For internet-adjacent access, place Mediarr behind a trusted reverse proxy such as Caddy, Traefik, or Nginx and terminate TLS there. Do not expose port `8080` directly to the public internet.

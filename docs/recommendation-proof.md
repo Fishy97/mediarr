@@ -47,3 +47,14 @@ After a mapping is saved, Mediarr can verify whether the translated files exist 
 Mediarr will not delete this. Accepting marks it for manual action only.
 
 Recommendation actions record intent and audit history. They do not move, delete, quarantine, or overwrite media files. Future writable workflows must remain opt-in, dry-run first, and auditable.
+
+## Acceptance Checklist
+
+For a real Jellyfin NAS sync, a production operator should be able to confirm:
+
+- job telemetry moves through profile discovery, inventory import, activity import, recommendation generation, and completion
+- no household profile name is presented as a movie or series title
+- a series recommendation is grouped by series, with affected paths collapsed until expanded
+- the card shows confidence, estimated savings, verified savings, activity proof, and storage certainty
+- server-reported savings are labeled as estimates, while locally verified savings are the only confirmed disk values
+- manual acceptance, protection, and ignore actions create audit history without deleting media
