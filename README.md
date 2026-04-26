@@ -6,7 +6,7 @@ It deliberately does not search for, download, torrent, index, or acquire media.
 
 ## Project Status
 
-Mediarr 1.1 is a Docker-hosted library scanner, catalog, and review dashboard for already-downloaded media. It can:
+Mediarr 1.2 is a Docker-hosted library scanner, catalog, and review dashboard for already-downloaded media. It can:
 
 - scan movie, series, and anime folders mounted read-only
 - parse common movie, series, and anime filename patterns
@@ -18,7 +18,11 @@ Mediarr 1.1 is a Docker-hosted library scanner, catalog, and review dashboard fo
 - request Jellyfin, Plex, and Emby library refreshes as sync targets
 - sync Jellyfin and Plex inventory, file evidence, and user activity into a normalized activity model
 - show durable background-job telemetry for filesystem scans and Jellyfin/Plex syncs, including phase, counters, current item, and recent events
+- cancel, retry, and mark stale background work so long-running scans and syncs remain transparent
 - create activity-aware cleanup recommendations for inactive and never-watched media
+- show recommendation proof with trust state, storage verification, activity evidence, source rule, and audit-backed actions
+- protect recommendations or accept them for manual action without enabling permanent deletion
+- review unmapped Jellyfin/Plex paths, save path mappings, and verify mappings against local files
 - attach optional local AI rationales to deterministic recommendations when the Ollama sidecar is enabled
 - expose a web UI and REST API
 
@@ -34,6 +38,8 @@ Mediarr remains deliberately conservative: it does not delete media, does not do
 - Provider health and credential surfaces for TMDb, AniList, TheTVDB, OpenSubtitles, and local sidecars
 - Integration status, refresh actions, and inventory/activity sync for Jellyfin and Plex
 - Path evidence labels that distinguish locally verified, path-mapped, and server-reported savings
+- Path mapping workbench for resolving server-reported paths to Mediarr-visible container paths
+- Recommendation trust states: new, reviewing, protected, ignored, and accepted for manual action
 - Catalog correction workflow with user overrides taking precedence over scan guesses
 
 ## Quick Start
@@ -81,6 +87,8 @@ Scan and sync requests return a background job immediately. Track progress from 
 ```bash
 curl "http://localhost:8080/api/v1/jobs?active=true"
 curl http://localhost:8080/api/v1/jobs/<job-id>
+curl -X POST http://localhost:8080/api/v1/jobs/<job-id>/cancel
+curl -X POST http://localhost:8080/api/v1/jobs/<job-id>/retry
 ```
 
 Connect Jellyfin or Plex from **Integrations** in the web UI by entering the server URL and API key/token. Mediarr stores those credentials in `/config/mediarr.db` and only returns redacted key status to the browser.
@@ -105,6 +113,10 @@ curl -X POST http://localhost:8080/api/v1/integrations/plex/sync
 ```
 
 `refresh` asks the media server to rescan its own libraries. `sync` imports inventory and activity into Mediarr so it can create cleanup suggestions. Activity data can reveal household viewing behavior, so Mediarr stores only the normalized fields needed for recommendations and never returns media-server tokens through the API.
+
+If Jellyfin or Plex reports paths that differ from Mediarr's container mounts, use **Integrations > Path Mapping** to map the server prefix to the Mediarr-visible prefix. Mediarr can then verify mapped files against the local filesystem and raise evidence from `server_reported` to `path_mapped` or `local_verified`.
+
+Recommendation cards are evidence-first. Use **Proof** to inspect the rule, storage verification, activity signals, and risk level; use **Manual** to mark a recommendation accepted for human action; use **Protect** to keep the media out of the open queue.
 
 ## Ubuntu Server Deployment
 

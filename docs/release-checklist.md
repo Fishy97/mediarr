@@ -14,6 +14,10 @@ Use this checklist before tagging a public Mediarr release.
 - `/api/v1/setup/status` returns setup state
 - unauthenticated private API routes return `401`
 - no endpoint permanently deletes media files
+- recommendation evidence, protect, and accept-manual routes work
+- path mapping unmapped and verify routes work
+- background job cancel, retry, and stale recovery routes work
+- GHCR image workflow is present for tagged releases
 - `docker compose --profile ai up -d` starts the optional Ollama sidecar and model init service
 - README and deployment docs include both launch modes:
 

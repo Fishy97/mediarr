@@ -14,6 +14,8 @@ All API routes are rooted at `/api/v1`.
 | POST | `/libraries` | Add a library |
 | GET | `/jobs` | Recent background jobs; supports `?active=true`, `?kind=`, `?targetId=`, and `?limit=` |
 | GET | `/jobs/{id}` | Job progress plus recent job events |
+| POST | `/jobs/{id}/cancel` | Cancel a queued or running background job |
+| POST | `/jobs/{id}/retry` | Queue a new job from a completed, failed, canceled, or stale job |
 | GET | `/catalog` | Persisted media catalog |
 | PUT | `/catalog/{mediaFileId}/correction` | Apply a user-approved metadata correction |
 | DELETE | `/catalog/{mediaFileId}/correction` | Clear a metadata correction |
@@ -21,8 +23,11 @@ All API routes are rooted at `/api/v1`.
 | POST | `/scans` | Queue a background filesystem scan job |
 | GET | `/scans/active` | Active filesystem scan jobs |
 | GET | `/recommendations` | Open cleanup review items |
+| GET | `/recommendations/{id}/evidence` | Structured recommendation proof with storage, activity, source, and risk evidence |
 | POST | `/recommendations/{id}/ignore` | Hide an advisory recommendation |
 | POST | `/recommendations/{id}/restore` | Restore an ignored advisory recommendation |
+| POST | `/recommendations/{id}/protect` | Protect the item and remove it from the open recommendation queue |
+| POST | `/recommendations/{id}/accept-manual` | Mark the suggestion accepted for manual action |
 | GET | `/providers` | Metadata provider health and attribution |
 | GET | `/provider-settings` | Redacted provider credential and base URL settings |
 | PUT | `/provider-settings/{provider}` | Update provider base URL, API key, or clear stored key |
@@ -35,8 +40,10 @@ All API routes are rooted at `/api/v1`.
 | GET | `/integrations/{id}/items` | Imported media-server items; supports `?unmapped=true` |
 | GET | `/activity/rollups` | Normalized media activity rollups; supports `?serverId=` |
 | GET | `/path-mappings` | Path prefix mappings used to resolve server paths to Mediarr paths |
+| GET | `/path-mappings/unmapped` | Imported server items that still lack usable local path evidence; supports `?serverId=` |
 | POST | `/path-mappings` | Create a path mapping |
 | PUT | `/path-mappings/{id}` | Update a path mapping |
+| POST | `/path-mappings/{id}/verify` | Verify mapped server files against local paths and update evidence labels |
 | DELETE | `/path-mappings/{id}` | Delete a path mapping |
 | GET | `/ai/status` | Optional local AI health and model availability |
 | POST | `/backups` | Create a `/config` backup |
@@ -47,4 +54,6 @@ No media file deletion route is provided.
 
 `refresh` and `sync` are intentionally different. `refresh` tells a media server to refresh its own library. `sync` pulls inventory, file paths, file sizes, and activity signals into Mediarr for suggest-only cleanup recommendations.
 
-Long-running scan and sync requests return a job object immediately. Poll `/jobs/{id}` for `status`, `phase`, `message`, `processed`, `total`, `currentLabel`, imported counts, and recent events.
+Long-running scan and sync requests return a job object immediately. Poll `/jobs/{id}` for `status`, `phase`, `message`, `processed`, `total`, `currentLabel`, imported counts, and recent events. Jobs support `queued`, `running`, `completed`, `failed`, `canceled`, and `stale` states. Listing jobs marks old queued/running rows stale after 24 hours without progress.
+
+Recommendation evidence is intentionally verbose. Clients should display storage verification separately from confidence: `local_verified` means Mediarr found a matching local file, `path_mapped` means a mapping resolved the server path, `server_reported` means savings came from the media server, and `unmapped` is blocked from cleanup recommendations.

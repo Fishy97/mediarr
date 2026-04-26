@@ -158,6 +158,13 @@ curl "http://localhost:8080/api/v1/jobs?active=true"
 curl http://localhost:8080/api/v1/jobs/<job-id>
 ```
 
+Jobs can be canceled or retried from the web UI. The same controls are available through the API:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/jobs/<job-id>/cancel
+curl -X POST http://localhost:8080/api/v1/jobs/<job-id>/retry
+```
+
 When the job completes, view the catalog:
 
 ```bash
@@ -193,9 +200,30 @@ Syncs also run as background jobs. The Integrations screen shows the active phas
 
 Mediarr imports media-server inventory, file paths, file sizes, and activity rollups such as play count and last played date. It uses those signals to create suggest-only cleanup recommendations for inactive or never-watched media.
 
-Use path mappings when Jellyfin or Plex sees a different path than the Mediarr container. For example, if Plex reports `/mnt/media/movies` but Mediarr sees `/media/movies`, create a mapping from `/mnt/media` to `/media`. Recommendations label storage savings as `local_verified`, `path_mapped`, or `server_reported` so the user can see how trustworthy the size calculation is.
+Use path mappings when Jellyfin or Plex sees a different path than the Mediarr container. For example, if Plex reports `/mnt/media/movies` but Mediarr sees `/media/movies`, create a mapping from `/mnt/media` to `/media` in the Integrations screen.
+
+After saving a mapping, run **Verify**. Mediarr checks mapped files against the local filesystem and updates the evidence label:
+
+- `local_verified`: mapped path exists and the size matches the server-reported file
+- `path_mapped`: prefix mapping resolved the path but the file could not be fully verified
+- `server_reported`: no usable local mapping exists yet
+- `unmapped`: the item remains in the path review queue and is blocked from cleanup recommendations
+
+The unmapped queue is deliberate. Mediarr should not tell an admin to remove something unless it can explain exactly where the file is and how the savings were calculated.
 
 Activity data can expose household viewing behavior. Keep Mediarr behind authentication, avoid exposing it directly to the public internet, and treat imported activity as local operational data.
+
+## Reverse Proxy And TLS
+
+For internet-adjacent access, place Mediarr behind a trusted reverse proxy such as Caddy, Traefik, or Nginx and terminate TLS there. Do not expose port `8080` directly to the public internet.
+
+Minimum proxy guidance:
+
+- forward `Host`, `X-Forwarded-For`, and `X-Forwarded-Proto`
+- keep Mediarr on a private Docker or LAN network
+- require HTTPS at the proxy
+- keep first-run admin setup private until the admin account exists
+- back up `./config` before upgrades
 
 ## 8. Backups
 
