@@ -7,12 +7,24 @@ cd "$ROOT_DIR"
 search_regex() {
   local pattern="$1"
   if command -v rg >/dev/null 2>&1; then
-    rg -n --glob '!frontend/node_modules/**' --glob '!frontend/dist/**' --glob '!*verify-no-delete.sh' "$pattern" .
+    rg -n \
+      --glob '!frontend/node_modules/**' \
+      --glob '!frontend/dist/**' \
+      --glob '!config/**' \
+      --glob '!acceptance-reports/**' \
+      --glob '!.superpowers/**' \
+      --glob '!tmp/**' \
+      --glob '!*verify-no-delete.sh' \
+      "$pattern" .
   else
     grep -RInE \
       --exclude-dir=.git \
       --exclude-dir=node_modules \
       --exclude-dir=dist \
+      --exclude-dir=config \
+      --exclude-dir=acceptance-reports \
+      --exclude-dir=.superpowers \
+      --exclude-dir=tmp \
       --exclude=verify-no-delete.sh \
       "$pattern" .
   fi

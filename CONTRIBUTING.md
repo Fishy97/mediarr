@@ -16,7 +16,7 @@ Mediarr is intended to be community-run infrastructure for self-hosters.
 make ci
 ```
 
-`make ci` runs backend tests, frontend tests/build, `go vet`, the no-delete safety invariant, Docker Compose config checks for both launch modes, and a local `mediarr` image build.
+`make ci` installs locked frontend dependencies, runs backend tests, frontend tests/build, `go vet`, the no-delete safety invariant, Docker Compose config checks for both launch modes, and a local `mediarr` image build.
 
 ## Provider Policy
 

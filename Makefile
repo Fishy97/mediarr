@@ -1,4 +1,7 @@
-.PHONY: test test-backend test-frontend vet build verify docker-validate docker-build docker-up docker-down ci
+.PHONY: frontend-deps test test-backend test-frontend vet build verify docker-validate docker-build docker-up docker-down ci
+
+frontend-deps:
+	npm --prefix frontend ci
 
 test: test-backend test-frontend
 
@@ -31,4 +34,4 @@ docker-up:
 docker-down:
 	docker compose down
 
-ci: test vet build verify docker-validate docker-build
+ci: frontend-deps test vet build verify docker-validate docker-build
