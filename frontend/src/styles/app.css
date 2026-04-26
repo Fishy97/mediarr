@@ -240,6 +240,7 @@ h2 {
   background: rgba(255, 255, 255, 0.06);
   color: #e0f2fe;
   cursor: pointer;
+  text-decoration: none;
 }
 
 .secondary-button:disabled {
@@ -903,9 +904,26 @@ code {
 .compact-row {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 12px;
   padding: 9px 0;
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.bundle-row > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.bundle-row strong,
+.bundle-row span {
+  overflow-wrap: anywhere;
+}
+
+.bundle-row span {
+  color: #94a3b8;
+  font-size: 0.82rem;
 }
 
 .plain-list {

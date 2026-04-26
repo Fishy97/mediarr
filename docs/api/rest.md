@@ -49,7 +49,9 @@ All API routes are rooted at `/api/v1`.
 | GET | `/ai/status` | Optional local AI health and model availability |
 | POST | `/backups` | Create a `/config` backup |
 | POST | `/backups/restore` | Inspect or restore a `/config` backup |
+| GET | `/support/bundles` | List redacted support bundles under `/config/support` |
 | POST | `/support/bundles` | Create a redacted diagnostics archive under `/config/support` |
+| GET | `/support/bundles/{name}` | Download one support bundle by safe archive name |
 | GET | `/audit` | Audit log lines |
 
 No media file deletion route is provided.
@@ -66,4 +68,4 @@ Integration settings include `autoSyncEnabled` and `autoSyncIntervalMinutes`. Au
 
 Integration diagnostics reuse the same evidence model as the live Jellyfin acceptance suite. They summarize persisted imported data, not raw provider payloads: movie/series/episode counts, file counts, server-reported bytes, locally verified bytes, unmapped files, activity rollups, warning messages, and top recommendations.
 
-Support bundles package redacted provider and integration settings, path mappings, recent jobs, recommendation state, ingestion diagnostics, and safety proof into a zip archive. They intentionally exclude media files, the raw SQLite database, raw provider payloads, and API keys. The archive may still include media titles and paths because those are necessary to troubleshoot ingestion evidence.
+Support bundles package redacted provider and integration settings, path mappings, recent jobs, recommendation state, ingestion diagnostics, and safety proof into a zip archive. They intentionally exclude media files, the raw SQLite database, raw provider payloads, and API keys. Download paths only accept generated `mediarr-support-*.zip` archive names and reject path traversal. The archive may still include media titles and paths because those are necessary to troubleshoot ingestion evidence.

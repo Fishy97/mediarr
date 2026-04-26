@@ -214,6 +214,7 @@ describe('api auth helpers', () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
         data: {
+          name: 'mediarr-support-20260426.zip',
           path: '/config/support/mediarr-support-20260426.zip',
           sizeBytes: 2048,
           files: ['manifest.json', 'diagnostics/jellyfin.json'],
@@ -223,11 +224,32 @@ describe('api auth helpers', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(api.createSupportBundle()).resolves.toMatchObject({
+      name: 'mediarr-support-20260426.zip',
       path: '/config/support/mediarr-support-20260426.zip',
       files: ['manifest.json', 'diagnostics/jellyfin.json'],
     });
 
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/support/bundles', expect.objectContaining({ method: 'POST' }));
+  });
+
+  test('support bundle listing exposes downloadable archive names', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        data: [{
+          name: 'mediarr-support-20260426.zip',
+          path: '/config/support/mediarr-support-20260426.zip',
+          sizeBytes: 2048,
+          createdAt: '2026-04-26T12:00:00Z',
+        }],
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.supportBundles()).resolves.toEqual([expect.objectContaining({
+      name: 'mediarr-support-20260426.zip',
+      sizeBytes: 2048,
+    })]);
+    expect(api.supportBundleDownloadUrl('mediarr support.zip')).toBe('/api/v1/support/bundles/mediarr%20support.zip');
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/support/bundles', expect.any(Object));
   });
 });
 

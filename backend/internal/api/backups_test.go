@@ -88,6 +88,72 @@ func TestSupportBundleRouteCreatesRedactedArchive(t *testing.T) {
 	}
 }
 
+func TestSupportBundleRouteListsAndDownloadsArchives(t *testing.T) {
+	configDir := t.TempDir()
+	store, err := database.Open(configDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	server := NewServer(Deps{ConfigDir: configDir, Store: store})
+	createRes := httptest.NewRecorder()
+	server.ServeHTTP(createRes, httptest.NewRequest(http.MethodPost, "/api/v1/support/bundles", nil))
+	if createRes.Code != http.StatusCreated {
+		t.Fatalf("support bundle create status = %d, want 201: %s", createRes.Code, createRes.Body.String())
+	}
+	var createBody struct {
+		Data struct {
+			Path string `json:"path"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(createRes.Body).Decode(&createBody); err != nil {
+		t.Fatal(err)
+	}
+	name := filepath.Base(createBody.Data.Path)
+
+	listRes := httptest.NewRecorder()
+	server.ServeHTTP(listRes, httptest.NewRequest(http.MethodGet, "/api/v1/support/bundles", nil))
+	if listRes.Code != http.StatusOK {
+		t.Fatalf("support bundle list status = %d, want 200: %s", listRes.Code, listRes.Body.String())
+	}
+	var listBody struct {
+		Data []struct {
+			Name      string `json:"name"`
+			Path      string `json:"path"`
+			SizeBytes int64  `json:"sizeBytes"`
+			CreatedAt string `json:"createdAt"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(listRes.Body).Decode(&listBody); err != nil {
+		t.Fatal(err)
+	}
+	if len(listBody.Data) != 1 || listBody.Data[0].Name != name || listBody.Data[0].SizeBytes <= 0 || listBody.Data[0].CreatedAt == "" {
+		t.Fatalf("support bundle list body = %#v", listBody.Data)
+	}
+
+	downloadRes := httptest.NewRecorder()
+	server.ServeHTTP(downloadRes, httptest.NewRequest(http.MethodGet, "/api/v1/support/bundles/"+name, nil))
+	if downloadRes.Code != http.StatusOK {
+		t.Fatalf("support bundle download status = %d, want 200: %s", downloadRes.Code, downloadRes.Body.String())
+	}
+	if got := downloadRes.Header().Get("Content-Type"); got != "application/zip" {
+		t.Fatalf("download content-type = %q, want application/zip", got)
+	}
+	if !strings.Contains(downloadRes.Header().Get("Content-Disposition"), name) {
+		t.Fatalf("download content-disposition = %q", downloadRes.Header().Get("Content-Disposition"))
+	}
+	if !bytes.Contains(downloadRes.Body.Bytes(), []byte("manifest.json")) {
+		t.Fatalf("downloaded archive does not look like a support bundle")
+	}
+
+	unsafeRes := httptest.NewRecorder()
+	server.ServeHTTP(unsafeRes, httptest.NewRequest(http.MethodGet, "/api/v1/support/bundles/..%2Fmediarr.db", nil))
+	if unsafeRes.Code != http.StatusBadRequest {
+		t.Fatalf("unsafe support bundle download status = %d, want 400", unsafeRes.Code)
+	}
+}
+
 func readZipArchive(t *testing.T, path string) string {
 	t.Helper()
 	reader, err := zip.OpenReader(path)

@@ -245,9 +245,10 @@ Use the Settings screen or:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/support/bundles
+curl http://localhost:8080/api/v1/support/bundles
 ```
 
-Support bundles are written under `./config/support`. They include redacted provider and media-server settings, path mappings, recent jobs, recommendations, ingestion diagnostics, and safety proof. They do not include media files, the raw SQLite database, raw provider payloads, or API keys.
+Support bundles are written under `./config/support` and can be downloaded from the Settings screen. They include redacted provider and media-server settings, path mappings, recent jobs, recommendations, ingestion diagnostics, and safety proof. They do not include media files, the raw SQLite database, raw provider payloads, or API keys.
 
 ## Local Development
 

@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -135,6 +137,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("/api/v1/ai/status", server.aiStatusHandler)
 	server.mux.HandleFunc("/api/v1/backups", server.backupsHandler)
 	server.mux.HandleFunc("/api/v1/backups/restore", server.backupRestoreHandler)
+	server.mux.HandleFunc("/api/v1/support/bundles/", server.supportBundleFileHandler)
 	server.mux.HandleFunc("/api/v1/support/bundles", server.supportBundlesHandler)
 	server.mux.HandleFunc("/api/v1/audit", server.auditHandler)
 	server.mux.HandleFunc("/api/v1/media/files/", methodNotAllowed)
@@ -1444,7 +1447,46 @@ func (server *Server) backupRestoreHandler(w http.ResponseWriter, r *http.Reques
 }
 
 func (server *Server) supportBundlesHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+	switch r.Method {
+	case http.MethodGet:
+		if server.configDir == "" {
+			http.Error(w, "config directory not configured", http.StatusBadRequest)
+			return
+		}
+		bundles, err := support.ListBundles(filepath.Join(server.configDir, "support"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, envelope{Data: bundles})
+	case http.MethodPost:
+		if server.configDir == "" {
+			http.Error(w, "config directory not configured", http.StatusBadRequest)
+			return
+		}
+		if server.store == nil {
+			http.Error(w, "database store not configured", http.StatusBadRequest)
+			return
+		}
+		result, err := support.CreateBundle(support.Config{
+			Store:     server.store,
+			OutputDir: filepath.Join(server.configDir, "support"),
+			Service:   "mediarr",
+			Version:   "1.5.0",
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		server.record("support_bundle.created", "Support bundle created", map[string]any{"path": result.Path, "files": len(result.Files), "sizeBytes": result.SizeBytes})
+		writeJSON(w, http.StatusCreated, envelope{Data: result})
+	default:
+		methodNotAllowed(w, r)
+	}
+}
+
+func (server *Server) supportBundleFileHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
 		methodNotAllowed(w, r)
 		return
 	}
@@ -1452,22 +1494,27 @@ func (server *Server) supportBundlesHandler(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "config directory not configured", http.StatusBadRequest)
 		return
 	}
-	if server.store == nil {
-		http.Error(w, "database store not configured", http.StatusBadRequest)
+	escaped := strings.TrimPrefix(r.URL.EscapedPath(), "/api/v1/support/bundles/")
+	name, err := url.PathUnescape(escaped)
+	if err != nil || strings.TrimSpace(name) == "" {
+		http.Error(w, "invalid support bundle name", http.StatusBadRequest)
 		return
 	}
-	result, err := support.CreateBundle(support.Config{
-		Store:     server.store,
-		OutputDir: filepath.Join(server.configDir, "support"),
-		Service:   "mediarr",
-		Version:   "1.5.0",
-	})
+	path, err := support.ResolveBundlePath(filepath.Join(server.configDir, "support"), name)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		if errors.Is(err, os.ErrNotExist) {
+			http.Error(w, "support bundle not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	server.record("support_bundle.created", "Support bundle created", map[string]any{"path": result.Path, "files": len(result.Files), "sizeBytes": result.SizeBytes})
-	writeJSON(w, http.StatusCreated, envelope{Data: result})
+	filename := filepath.Base(path)
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.ServeFile(w, r, path)
 }
 
 func (server *Server) auditHandler(w http.ResponseWriter, r *http.Request) {

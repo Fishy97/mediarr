@@ -327,13 +327,28 @@ curl -X POST http://localhost:8080/api/v1/support/bundles \
   -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN"
 ```
 
+List available support bundles:
+
+```bash
+curl http://localhost:8080/api/v1/support/bundles \
+  -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN"
+```
+
+Download one by the generated archive name:
+
+```bash
+curl -o mediarr-support.zip \
+  -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN" \
+  http://localhost:8080/api/v1/support/bundles/mediarr-support-20260426T120000.000000000Z.zip
+```
+
 Archives are written to:
 
 ```text
 ./config/support
 ```
 
-Support bundles include redacted provider and media-server settings, path mappings, recent jobs, recommendations, ingestion diagnostics, and safety proof. They do not include media files, the raw SQLite database, raw provider payloads, or API keys. They can include media titles and paths, so treat them as private operational artifacts.
+Support bundles include redacted provider and media-server settings, path mappings, recent jobs, recommendations, ingestion diagnostics, and safety proof. They do not include media files, the raw SQLite database, raw provider payloads, or API keys. Download paths reject unsafe archive names and path traversal. Bundles can include media titles and paths, so treat them as private operational artifacts.
 
 ## 10. Upgrades
 

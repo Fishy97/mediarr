@@ -4,6 +4,8 @@ import (
 	"archive/zip"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -105,6 +107,58 @@ func TestCreateBundleRedactsSecretsAndIncludesDiagnostics(t *testing.T) {
 	}
 	if manifest.Service != "mediarr" || manifest.Version != "test" || manifest.GeneratedAt.IsZero() {
 		t.Fatalf("manifest = %#v", manifest)
+	}
+}
+
+func TestListBundlesSortsArchivesAndResolveRejectsUnsafeNames(t *testing.T) {
+	dir := t.TempDir()
+	olderName := "mediarr-support-20260426T110000.000000000Z.zip"
+	newerName := "mediarr-support-20260426T120000.000000000Z.zip"
+	olderPath := filepath.Join(dir, olderName)
+	newerPath := filepath.Join(dir, newerName)
+	if err := os.WriteFile(olderPath, []byte("older"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newerPath, []byte("newer"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("ignore"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	olderTime := time.Date(2026, 4, 26, 11, 0, 0, 0, time.UTC)
+	newerTime := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(olderPath, olderTime, olderTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(newerPath, newerTime, newerTime); err != nil {
+		t.Fatal(err)
+	}
+
+	bundles, err := ListBundles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bundles) != 2 {
+		t.Fatalf("bundle count = %d, want 2: %#v", len(bundles), bundles)
+	}
+	if bundles[0].Name != newerName || bundles[1].Name != olderName {
+		t.Fatalf("bundle order = %#v", bundles)
+	}
+	if bundles[0].Path != newerPath || bundles[0].SizeBytes != int64(len("newer")) || !bundles[0].CreatedAt.Equal(newerTime) {
+		t.Fatalf("newest bundle metadata = %#v", bundles[0])
+	}
+
+	resolved, err := ResolveBundlePath(dir, newerName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != newerPath {
+		t.Fatalf("resolved path = %q, want %q", resolved, newerPath)
+	}
+	for _, name := range []string{"", "../secret.zip", "/tmp/secret.zip", "mediarr-support-20260426.txt", "not-mediarr-support.zip"} {
+		if _, err := ResolveBundlePath(dir, name); err == nil {
+			t.Fatalf("ResolveBundlePath(%q) succeeded; want error", name)
+		}
 	}
 }
 

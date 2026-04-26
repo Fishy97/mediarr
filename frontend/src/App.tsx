@@ -6,6 +6,7 @@ import {
   Bot,
   Check,
   Database,
+  Download,
   FolderOpen,
   Gauge,
   HardDrive,
@@ -51,6 +52,7 @@ import type {
   Recommendation,
   RecommendationEvidence,
   ScanResult,
+  SupportBundle,
 } from './types';
 
 type View = 'dashboard' | 'libraries' | 'catalog' | 'recommendations' | 'integrations' | 'settings';
@@ -78,6 +80,7 @@ export function App() {
   const [status, setStatus] = useState('Loading');
   const [error, setError] = useState<string | null>(null);
   const [backupNotice, setBackupNotice] = useState<string | null>(null);
+  const [supportBundles, setSupportBundles] = useState<SupportBundle[]>([]);
   const [busy, setBusy] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [setupRequired, setSetupRequired] = useState(false);
@@ -86,7 +89,7 @@ export function App() {
 
   async function refresh() {
     try {
-      const [health, libs, catalogRows, scanRows, recs, providerRows, providerSettingRows, integrationSettingRows, integrationRows, ai] = await Promise.all([
+      const [health, libs, catalogRows, scanRows, recs, providerRows, providerSettingRows, integrationSettingRows, integrationRows, ai, bundleRows] = await Promise.all([
         api.health(),
         api.libraries(),
         api.catalog(),
@@ -97,6 +100,7 @@ export function App() {
         api.integrationSettings(),
         api.integrations(),
         api.aiStatus(),
+        api.supportBundles(),
       ]);
       setStatus(health.status);
       setLibraries(libs);
@@ -108,6 +112,7 @@ export function App() {
       setIntegrationSettings(integrationSettingRows);
       setIntegrations(integrationRows);
       setAIStatus(ai);
+      setSupportBundles(bundleRows);
       await refreshIntegrationActivity(integrationRows);
       setError(null);
     } catch (caught) {
@@ -241,6 +246,7 @@ export function App() {
     try {
       const result = await api.createSupportBundle();
       setBackupNotice(`Support bundle created: ${result.path} (${result.files.length} files, ${formatBytes(result.sizeBytes)}).`);
+      setSupportBundles(await api.supportBundles());
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Support bundle failed');
@@ -609,6 +615,7 @@ export function App() {
             onBackup={() => void createBackup()}
             onSupportBundle={() => void createSupportBundle()}
             onRestore={(path, dryRun) => void restoreBackup(path, dryRun)}
+            supportBundles={supportBundles}
             notice={backupNotice}
             busy={busy}
           />
@@ -1631,12 +1638,14 @@ function SettingsView({
   onBackup,
   onSupportBundle,
   onRestore,
+  supportBundles,
   notice,
   busy,
 }: {
   onBackup: () => void;
   onSupportBundle: () => void;
   onRestore: (path: string, dryRun: boolean) => void;
+  supportBundles: SupportBundle[];
   notice: string | null;
   busy: boolean;
 }) {
@@ -1678,6 +1687,21 @@ function SettingsView({
           <ShieldCheck size={16} />
           Create support bundle
         </button>
+        <div className="compact-list">
+          {supportBundles.length === 0 && <p className="muted-copy">No support bundles have been created yet.</p>}
+          {supportBundles.slice(0, 5).map((bundle) => (
+            <div className="compact-row bundle-row" key={bundle.name}>
+              <div>
+                <strong>{bundle.name}</strong>
+                <span>{formatBytes(bundle.sizeBytes)} • {formatDateTime(bundle.createdAt)}</span>
+              </div>
+              <a className="secondary-button compact-action" href={api.supportBundleDownloadUrl(bundle.name)} download>
+                <Download size={16} />
+                Download
+              </a>
+            </div>
+          ))}
+        </div>
       </div>
       <div className="panel">
         <div className="panel-heading">

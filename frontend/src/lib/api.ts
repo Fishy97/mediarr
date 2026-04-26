@@ -25,6 +25,7 @@ import type {
   ScanResult,
   SetupStatus,
   PathMappingVerification,
+  SupportBundle,
   SupportBundleResult,
 } from '../types';
 
@@ -229,6 +230,12 @@ export const api = {
   },
   async createSupportBundle(): Promise<SupportBundleResult> {
     return (await request<Envelope<SupportBundleResult>>('/api/v1/support/bundles', { method: 'POST' })).data;
+  },
+  async supportBundles(): Promise<SupportBundle[]> {
+    return (await request<Envelope<SupportBundle[]>>('/api/v1/support/bundles')).data;
+  },
+  supportBundleDownloadUrl(name: string): string {
+    return `/api/v1/support/bundles/${encodeURIComponent(name)}`;
   },
   async restoreBackup(path: string, dryRun: boolean): Promise<BackupRestoreResult> {
     return (await request<Envelope<BackupRestoreResult>>('/api/v1/backups/restore', {

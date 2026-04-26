@@ -55,6 +55,7 @@ Mitigations:
 - Tokens are stored server-side in `/config/mediarr.db`.
 - Job telemetry uses titles and basenames instead of full raw paths when possible.
 - Support bundles redact stored provider and media-server API keys and exclude raw provider payloads, media files, and the raw SQLite database.
+- Support bundle download routes only accept generated archive names and reject path traversal.
 - Admin sessions use HTTP-only cookies, SameSite Lax, and Secure when the request is HTTPS or arrives through an HTTPS reverse proxy.
 - Operators are instructed to protect `/config`, `/config/backups`, and `/config/support`.
 
