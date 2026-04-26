@@ -43,6 +43,20 @@ The score is intentionally contextual:
 
 Low-confidence, favorite/protected, recently watched, active-series, or unmapped items should be suppressed or kept in a blocking review state instead of appearing as normal cleanup candidates.
 
+## Stewardship Campaigns
+
+Campaigns are saved rule sets evaluated against the normalized activity and file-evidence model. They are intended for deliberate review workflows such as cold movies, deep archive series, anime backlog, or locally verified high-storage candidates.
+
+A campaign simulation is read-only. It reports matched items, suppressed items, confidence ranges, estimated savings, and verified savings without changing the review queue. A campaign run records a durable run summary and creates ordinary `review_campaign_match` recommendations. Those recommendations are still advisory, include campaign evidence, and are never destructive.
+
+Campaign output should preserve the same proof boundaries as built-in rules:
+
+- favorite/protected items are suppressed
+- items below the campaign confidence threshold are suppressed
+- items without affected paths or usable storage estimates are suppressed
+- server-reported savings remain estimates until path mapping or local verification improves the evidence
+- re-running a campaign must not erase ignored, protected, or accepted-for-manual decisions
+
 ## Path Mapping
 
 Media servers often see NAS paths such as `/volume1/media`, while Mediarr sees Docker paths such as `/media`. Path mappings translate one prefix into the other.

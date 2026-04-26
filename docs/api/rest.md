@@ -28,6 +28,14 @@ All API routes are rooted at `/api/v1`.
 | POST | `/recommendations/{id}/restore` | Restore an ignored advisory recommendation |
 | POST | `/recommendations/{id}/protect` | Protect the item and remove it from the open recommendation queue |
 | POST | `/recommendations/{id}/accept-manual` | Mark the suggestion accepted for manual action |
+| GET | `/campaigns` | Saved stewardship campaigns |
+| POST | `/campaigns` | Create a stewardship campaign |
+| GET | `/campaigns/{id}` | Fetch one campaign definition |
+| PUT | `/campaigns/{id}` | Update one campaign definition |
+| DELETE | `/campaigns/{id}` | Delete the campaign definition and run history without deleting media |
+| POST | `/campaigns/{id}/simulate` | Evaluate a campaign against imported media-server activity without changing recommendations |
+| POST | `/campaigns/{id}/run` | Record a campaign run and create suggest-only campaign recommendations |
+| GET | `/campaigns/{id}/runs` | Campaign run history |
 | GET | `/providers` | Metadata provider health and attribution |
 | GET | `/provider-settings` | Redacted provider credential and base URL settings |
 | PUT | `/provider-settings/{provider}` | Update provider base URL, API key, or clear stored key |
@@ -72,6 +80,8 @@ Storage certainty labels have fixed meanings:
 - `unmapped`: Mediarr cannot connect the server path to a local file path yet.
 
 Recommendation actions are suggest-only. `accept-manual` records that an administrator accepted the suggestion for manual action; it does not delete, move, quarantine, or overwrite media files.
+
+Campaign actions are also suggest-only. Campaign simulation returns matched items, suppressed items, estimated savings, verified savings, and confidence ranges without writing recommendations. Campaign runs create recommendations with action `review_campaign_match`, source `campaign:{id}`, `destructive=false`, and evidence fields such as `campaignId`, `campaignName`, `campaignRunId`, `matchedRules`, `estimatedSavingsBytes`, and `verifiedSavingsBytes`. Re-running a campaign replaces only open recommendations from the same campaign source and preserves ignored, protected, and accepted-for-manual decisions.
 
 Provider and media-server API calls use bounded retry behavior for `429` and `5xx` responses. `Retry-After` is honored when present, capped to avoid wedging background jobs indefinitely.
 

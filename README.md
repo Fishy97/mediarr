@@ -24,6 +24,7 @@ Mediarr 1.5 is a Docker-hosted library scanner, catalog, and review dashboard fo
 - cancel, retry, and mark stale background work so long-running scans and syncs remain transparent
 - retry provider and media-server requests with bounded, Retry-After-aware backoff
 - create activity-aware cleanup recommendations for inactive and never-watched movies, series, and anime-style libraries
+- create stewardship campaigns: saved rules that simulate against imported Jellyfin/Plex/Emby activity before producing suggest-only review items
 - run an opt-in live Jellyfin acceptance suite against real NAS libraries without modifying media
 - show in-app ingestion diagnostics with imported counts, local verification coverage, unmapped paths, warnings, and top suggestions
 - show recommendation proof with trust state, estimated savings, verified savings, storage certainty, activity evidence, source rule, and audit-backed actions
@@ -47,6 +48,7 @@ Mediarr remains deliberately conservative: it does not delete media, does not do
 - Path evidence labels that distinguish locally verified, path-mapped, and server-reported savings
 - Path mapping workbench for resolving server-reported paths to Mediarr-visible container paths
 - Recommendation trust states: new, reviewing, protected, ignored, and accepted for manual action
+- Stewardship campaign builder with rule editing, simulation totals, suppression reasons, run history, and campaign-generated review suggestions
 - Catalog correction workflow with user overrides taking precedence over scan guesses
 
 ## Quick Start
@@ -131,6 +133,8 @@ Auto-sync is enabled by default and runs every 6 hours. You can disable it or ch
 If Jellyfin, Plex, or Emby reports paths that differ from Mediarr's container mounts, use **Integrations > Path Mapping** to map the server prefix to the Mediarr-visible prefix. Mediarr can then verify mapped files against the local filesystem and raise evidence from `server_reported` to `path_mapped` or `local_verified`.
 
 Recommendation cards are evidence-first. Use **Proof** to inspect the rule, threshold, storage certainty, activity signals, and risk level. The card separates **estimated savings** from **verified savings** so a server-reported value cannot be mistaken for guaranteed disk recovery. Use **Manual** to mark a recommendation accepted for human action; use **Protect** to keep the media out of the open queue. Mediarr will not delete media files.
+
+Use **Campaigns** to create saved stewardship rules over the normalized media-server activity model. A campaign can target movies, series, or anime, require one or all rules, set minimum confidence and storage thresholds, and suppress favorite/protected or low-evidence matches. **Simulate** previews matched and suppressed items without changing the review queue. **Run campaign** records a run and creates ordinary non-destructive review recommendations with campaign evidence attached.
 
 ### Live Jellyfin Acceptance Suite
 
