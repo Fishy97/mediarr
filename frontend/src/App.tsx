@@ -1631,7 +1631,7 @@ function ProgressPanel({
         <span style={{ width: job.total > 0 ? `${percent}%` : isActiveJob(job) ? '36%' : '100%' }} />
       </div>
       <div className="progress-meta">
-        <span>{job.currentLabel || 'Preparing'}</span>
+        <span>{job.currentLabel || formatJobPhase(job.phase)}</span>
         <span>{job.itemsImported ? `${job.itemsImported} imported` : job.rollupsImported ? `${job.rollupsImported} activity rows` : formatElapsed(job.startedAt, job.completedAt)}</span>
         {job.unmappedItems > 0 && <span>{job.unmappedItems} unmapped</span>}
       </div>
@@ -1639,7 +1639,7 @@ function ProgressPanel({
         <div className="event-feed">
           {visibleEvents.map((event) => (
             <div key={event.id} className="event-row">
-              <span>{event.phase}</span>
+              <span>{formatJobPhase(event.phase)}</span>
               <strong>{event.currentLabel || event.message}</strong>
             </div>
           ))}
@@ -1959,6 +1959,31 @@ function jobKindLabel(job: Job): string {
       return 'Emby Sync';
     default:
       return job.kind.replaceAll('_', ' ');
+  }
+}
+
+function formatJobPhase(phase?: string): string {
+  switch (phase) {
+    case 'users':
+      return 'Reading profiles';
+    case 'inventory':
+      return 'Importing media';
+    case 'activity':
+      return 'Importing watch activity';
+    case 'recommendations':
+      return 'Building review queue';
+    case 'connecting':
+      return 'Connecting';
+    case 'complete':
+      return 'Complete';
+    case 'canceled':
+      return 'Canceled';
+    case 'failed':
+      return 'Failed';
+    case 'queued':
+      return 'Queued';
+    default:
+      return phase ? phase.replaceAll('_', ' ') : 'Preparing';
   }
 }
 

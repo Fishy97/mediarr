@@ -354,6 +354,77 @@ func TestJellyfinSyncCreatesServerReportedActivityRecommendations(t *testing.T) 
 	}
 }
 
+func TestJellyfinSyncReportsRecommendationGenerationPhase(t *testing.T) {
+	jellyfin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Emby-Token") != "jellyfin-key" {
+			http.Error(w, "missing token", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/System/Info":
+			_, _ = w.Write([]byte(`{"ServerName":"Jellyfin Test"}`))
+		case "/Users":
+			_, _ = w.Write([]byte(`[{"Id":"user_1","Name":"Alex"}]`))
+		case "/Items":
+			_, _ = w.Write([]byte(`{
+				"Items": [{
+					"Id": "item_cold",
+					"Name": "Cold Movie",
+					"Type": "Movie",
+					"ProductionYear": 2020,
+					"Path": "/Volume1/Media/Movies/Cold Movie (2020).mkv",
+					"DateCreated": "2020-01-01T00:00:00Z",
+					"MediaSources": [{"Path":"/Volume1/Media/Movies/Cold Movie (2020).mkv","Size":64000000000,"Container":"mkv"}],
+					"UserData": {"PlayCount":0,"Played":false,"IsFavorite":false}
+				}],
+				"TotalRecordCount": 1
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer jellyfin.Close()
+
+	store, err := database.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	server := NewServer(Deps{
+		Store: store,
+		IntegrationOptions: integrations.Options{
+			JellyfinURL: jellyfin.URL,
+			JellyfinKey: "jellyfin-key",
+		},
+	})
+
+	res := httptest.NewRecorder()
+	server.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/api/v1/integrations/jellyfin/sync", nil))
+	if res.Code != http.StatusAccepted {
+		t.Fatalf("sync status = %d, want 202: %s", res.Code, res.Body.String())
+	}
+	var syncBody struct {
+		Data database.MediaSyncJob `json:"data"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&syncBody); err != nil {
+		t.Fatal(err)
+	}
+	waitForJobStatus(t, store, syncBody.Data.ID, "completed")
+
+	events, err := store.ListJobEvents(syncBody.Data.ID, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Phase == "recommendations" && event.Message == "Generating evidence-based recommendations" && event.CurrentLabel == "Deterministic review rules" {
+			return
+		}
+	}
+	t.Fatalf("missing recommendation generation event: %#v", events)
+}
+
 func TestIntegrationDiagnosticsRouteSummarizesPersistedIngestion(t *testing.T) {
 	store, err := database.Open(t.TempDir())
 	if err != nil {

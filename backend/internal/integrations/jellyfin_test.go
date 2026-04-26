@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Fishy97/mediarr/backend/internal/database"
@@ -207,4 +208,84 @@ func TestSyncJellyfinReportsProgress(t *testing.T) {
 	if last.Phase != "complete" || last.ItemsImported != 1 || last.RollupsImported != 1 {
 		t.Fatalf("last event = %#v", last)
 	}
+}
+
+func TestSyncJellyfinReportsClearProgressPhases(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Emby-Token") != "jellyfin-key" {
+			http.Error(w, "missing token", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/System/Info":
+			_, _ = w.Write([]byte(`{"ServerName":"Test Jellyfin"}`))
+		case "/Users":
+			_, _ = w.Write([]byte(`[{"Id":"user_1","Name":"Hugo"},{"Id":"user_2","Name":"Alex"}]`))
+		case "/Items":
+			playCount := 0
+			played := "false"
+			if r.URL.Query().Get("userId") == "user_2" {
+				playCount = 2
+				played = "true"
+			}
+			_, _ = w.Write([]byte(`{
+				"Items": [{
+					"Id": "item_1",
+					"Name": "The Apothecary",
+					"Type": "Episode",
+					"Path": "/mnt/media/series/The Apothecary/Season 1/The Apothecary - S01E01.mkv",
+					"SeriesId": "series_1",
+					"MediaSources": [{"Path":"/mnt/media/series/The Apothecary/Season 1/The Apothecary - S01E01.mkv","Size":1200000000,"Container":"mkv"}],
+					"UserData": {"PlayCount":` + intString(playCount) + `,"Played":` + played + `}
+				}],
+				"TotalRecordCount": 1
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	var events []Progress
+	_, err := SyncJellyfin(context.Background(), Options{
+		JellyfinURL: server.URL,
+		JellyfinKey: "jellyfin-key",
+		Progress: func(progress Progress) {
+			events = append(events, progress)
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !hasProgressEvent(events, "users", "Reading Jellyfin users", "") {
+		t.Fatalf("missing users progress event: %#v", events)
+	}
+	if !hasProgressEvent(events, "inventory", "Reading Jellyfin inventory for profile 1 of 2", "Profile 1 of 2") {
+		t.Fatalf("missing privacy-safe inventory profile event: %#v", events)
+	}
+	if !hasProgressEvent(events, "inventory", "Imported The Apothecary", "The Apothecary") {
+		t.Fatalf("missing media-title inventory import event: %#v", events)
+	}
+	if !hasProgressEvent(events, "activity", "Reading Jellyfin activity for profile 2 of 2", "Profile 2 of 2") {
+		t.Fatalf("missing privacy-safe activity profile event: %#v", events)
+	}
+	for _, event := range events {
+		if event.Phase == "activity" && event.CurrentLabel == "The Apothecary" {
+			t.Fatalf("activity progress must not show media titles: %#v", event)
+		}
+		if event.CurrentLabel == "Hugo" || event.CurrentLabel == "Alex" || strings.Contains(event.Message, "Hugo") || strings.Contains(event.Message, "Alex") {
+			t.Fatalf("progress leaked profile name: %#v", event)
+		}
+	}
+}
+
+func hasProgressEvent(events []Progress, phase string, message string, currentLabel string) bool {
+	for _, event := range events {
+		if event.Phase == phase && event.Message == message && event.CurrentLabel == currentLabel {
+			return true
+		}
+	}
+	return false
 }

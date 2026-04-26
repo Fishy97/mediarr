@@ -243,13 +243,17 @@ func syncEmbyFamily(ctx context.Context, options Options, targetID string, rawBa
 	itemByID := map[string]database.MediaServerItem{}
 	fileByKey := map[string]database.MediaServerFile{}
 	rollupByItemID := map[string]*database.MediaActivityRollup{}
-	for _, user := range jellyfinUsers {
-		label := strings.TrimSpace(user.Name)
-		if label == "" {
-			label = "server"
+	for index, user := range jellyfinUsers {
+		profileLabel := mediaServerProfileLabel(index, len(jellyfinUsers))
+		messageProfileLabel := strings.ToLower(profileLabel)
+		phase := "activity"
+		message := "Reading " + defaultName + " activity for " + messageProfileLabel
+		if index == 0 {
+			phase = "inventory"
+			message = "Reading " + defaultName + " inventory for " + messageProfileLabel
 		}
-		reportProgress(options, Progress{TargetID: targetID, Phase: "items", Message: "Reading " + defaultName + " items for " + label, CurrentLabel: label})
-		if err := syncEmbyFamilyItemsForUser(ctx, options, targetID, baseURL, token, user.ID, mappings, itemByID, fileByKey, rollupByItemID); err != nil {
+		reportProgress(options, Progress{TargetID: targetID, Phase: phase, Message: message, CurrentLabel: profileLabel, Processed: index + 1, Total: len(jellyfinUsers), ItemsImported: len(itemByID), RollupsImported: len(rollupByItemID)})
+		if err := syncEmbyFamilyItemsForUser(ctx, options, targetID, baseURL, token, user.ID, mappings, itemByID, fileByKey, rollupByItemID, phase, profileLabel); err != nil {
 			return database.MediaServerSnapshot{}, err
 		}
 	}
@@ -503,7 +507,7 @@ func SyncPlex(ctx context.Context, options Options, mappings []database.PathMapp
 	}, nil
 }
 
-func syncEmbyFamilyItemsForUser(ctx context.Context, options Options, targetID string, baseURL string, token string, userID string, mappings []database.PathMapping, itemByID map[string]database.MediaServerItem, fileByKey map[string]database.MediaServerFile, rollupByItemID map[string]*database.MediaActivityRollup) error {
+func syncEmbyFamilyItemsForUser(ctx context.Context, options Options, targetID string, baseURL string, token string, userID string, mappings []database.PathMapping, itemByID map[string]database.MediaServerItem, fileByKey map[string]database.MediaServerFile, rollupByItemID map[string]*database.MediaActivityRollup, phase string, profileLabel string) error {
 	const limit = 200
 	for start := 0; ; start += limit {
 		values := url.Values{}
@@ -525,17 +529,28 @@ func syncEmbyFamilyItemsForUser(ctx context.Context, options Options, targetID s
 			if strings.TrimSpace(sourceItem.ID) == "" {
 				continue
 			}
+			_, alreadyImported := itemByID[sourceItem.ID]
+			itemsImported := len(itemByID)
+			if !alreadyImported {
+				itemsImported++
+			}
+			message := "Imported activity for " + profileLabel
+			currentLabel := profileLabel
+			if phase == "inventory" {
+				message = "Imported " + strings.TrimSpace(sourceItem.Name)
+				currentLabel = strings.TrimSpace(sourceItem.Name)
+			}
 			reportProgress(options, Progress{
 				TargetID:        targetID,
-				Phase:           "items",
-				Message:         "Imported " + strings.TrimSpace(sourceItem.Name),
-				CurrentLabel:    strings.TrimSpace(sourceItem.Name),
+				Phase:           phase,
+				Message:         message,
+				CurrentLabel:    currentLabel,
 				Processed:       start + index + 1,
 				Total:           response.TotalRecordCount,
-				ItemsImported:   len(itemByID) + 1,
+				ItemsImported:   itemsImported,
 				RollupsImported: len(rollupByItemID),
 			})
-			if _, exists := itemByID[sourceItem.ID]; !exists {
+			if !alreadyImported {
 				itemByID[sourceItem.ID] = database.MediaServerItem{
 					ServerID:          targetID,
 					ExternalID:        sourceItem.ID,
@@ -607,6 +622,13 @@ func syncEmbyFamilyItemsForUser(ctx context.Context, options Options, targetID s
 		}
 	}
 	return nil
+}
+
+func mediaServerProfileLabel(index int, total int) string {
+	if total <= 0 {
+		total = 1
+	}
+	return "Profile " + intString(index+1) + " of " + intString(total)
 }
 
 func reportProgress(options Options, progress Progress) {

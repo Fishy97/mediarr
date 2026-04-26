@@ -1144,6 +1144,13 @@ func (server *Server) runIntegrationSyncJob(jobID string, targetID string) {
 		reporter.update(database.JobUpdate{Status: "failed", Phase: "failed", Message: "Unable to persist media-server snapshot", Error: err.Error(), Completed: true}, true)
 		return
 	}
+	reporter.update(database.JobUpdate{
+		Phase:        "recommendations",
+		Message:      "Generating evidence-based recommendations",
+		CurrentLabel: "Deterministic review rules",
+		Processed:    intPtr(0),
+		Total:        intPtr(0),
+	}, true)
 	if err := server.regenerateRecommendationsFromCatalog(ctx); err != nil {
 		reporter.update(database.JobUpdate{Status: "failed", Phase: "failed", Message: "Unable to regenerate recommendations", Error: err.Error(), Completed: true}, true)
 		return
