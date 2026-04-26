@@ -171,11 +171,11 @@ When the job completes, view the catalog:
 curl http://localhost:8080/api/v1/catalog
 ```
 
-## 7. Sync Jellyfin Or Plex Activity
+## 7. Sync Jellyfin, Plex, Or Emby Activity
 
-Open the Integrations screen, choose Jellyfin or Plex, and enter the media-server URL plus API key/token. Mediarr stores the settings in `/config/mediarr.db` and shows only redacted credential status in the browser.
+Open the Integrations screen, choose Jellyfin, Plex, or Emby, and enter the media-server URL plus API key/token. Mediarr stores the settings in `/config/mediarr.db` and shows only redacted credential status in the browser.
 
-Environment variables such as `MEDIARR_JELLYFIN_URL`, `MEDIARR_JELLYFIN_API_KEY`, `MEDIARR_PLEX_URL`, and `MEDIARR_PLEX_TOKEN` are still supported for automation, but they are not required for normal setup.
+Environment variables such as `MEDIARR_JELLYFIN_URL`, `MEDIARR_JELLYFIN_API_KEY`, `MEDIARR_PLEX_URL`, `MEDIARR_PLEX_TOKEN`, `MEDIARR_EMBY_URL`, and `MEDIARR_EMBY_API_KEY` are still supported for automation, but they are not required for normal setup.
 
 You can also configure integrations through the API:
 
@@ -187,6 +187,10 @@ curl -X PUT http://localhost:8080/api/v1/integration-settings/jellyfin \
 curl -X PUT http://localhost:8080/api/v1/integration-settings/plex \
   -H "Content-Type: application/json" \
   -d '{"baseUrl":"http://plex:32400","apiKey":"your-plex-token"}'
+
+curl -X PUT http://localhost:8080/api/v1/integration-settings/emby \
+  -H "Content-Type: application/json" \
+  -d '{"baseUrl":"http://emby:8096","apiKey":"your-emby-api-key"}'
 ```
 
 From the API:
@@ -194,13 +198,14 @@ From the API:
 ```bash
 curl -X POST http://localhost:8080/api/v1/integrations/jellyfin/sync
 curl -X POST http://localhost:8080/api/v1/integrations/plex/sync
+curl -X POST http://localhost:8080/api/v1/integrations/emby/sync
 ```
 
-Syncs also run as background jobs. The Integrations screen shows the active phase, current item/title, imported counts, unmapped count, and recent events while Jellyfin or Plex is being read.
+Syncs also run as background jobs. The Integrations screen shows the active phase, current item/title, imported counts, unmapped count, retry policy, and recent events while a media server is being read.
 
 Mediarr imports media-server inventory, file paths, file sizes, and activity rollups such as play count and last played date. It uses those signals to create suggest-only cleanup recommendations for inactive or never-watched media.
 
-Use path mappings when Jellyfin or Plex sees a different path than the Mediarr container. For example, if Plex reports `/mnt/media/movies` but Mediarr sees `/media/movies`, create a mapping from `/mnt/media` to `/media` in the Integrations screen.
+Use path mappings when Jellyfin, Plex, or Emby sees a different path than the Mediarr container. For example, if Plex reports `/mnt/media/movies` but Mediarr sees `/media/movies`, create a mapping from `/mnt/media` to `/media` in the Integrations screen.
 
 After saving a mapping, run **Verify**. Mediarr checks mapped files against the local filesystem and updates the evidence label:
 
@@ -212,6 +217,8 @@ After saving a mapping, run **Verify**. Mediarr checks mapped files against the 
 The unmapped queue is deliberate. Mediarr should not tell an admin to remove something unless it can explain exactly where the file is and how the savings were calculated.
 
 Activity data can expose household viewing behavior. Keep Mediarr behind authentication, avoid exposing it directly to the public internet, and treat imported activity as local operational data.
+
+Plex syncs store the most recent imported watch-history cursor. Later syncs request history at or after that cursor and preserve prior rollups, so large Plex libraries do not need to rebuild playback activity from scratch on every run.
 
 ## Reverse Proxy And TLS
 

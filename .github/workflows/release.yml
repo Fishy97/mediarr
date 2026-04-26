@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 jobs:
   ghcr:
@@ -31,8 +34,15 @@ jobs:
             type=ref,event=branch
             type=sha
       - uses: docker/build-push-action@v7
+        id: build
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+      - name: Generate signed image provenance
+        uses: actions/attest@v4
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/mediarr
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

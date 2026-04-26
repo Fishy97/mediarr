@@ -6,7 +6,7 @@ It deliberately does not search for, download, torrent, index, or acquire media.
 
 ## Project Status
 
-Mediarr 1.2 is a Docker-hosted library scanner, catalog, and review dashboard for already-downloaded media. It can:
+Mediarr 1.3 is a Docker-hosted library scanner, catalog, and review dashboard for already-downloaded media. It can:
 
 - scan movie, series, and anime folders mounted read-only
 - parse common movie, series, and anime filename patterns
@@ -16,13 +16,15 @@ Mediarr 1.2 is a Docker-hosted library scanner, catalog, and review dashboard fo
 - protect the API with first-run admin setup, password login, sessions, and bearer-token automation
 - configure provider credentials without returning secrets through the API
 - request Jellyfin, Plex, and Emby library refreshes as sync targets
-- sync Jellyfin and Plex inventory, file evidence, and user activity into a normalized activity model
-- show durable background-job telemetry for filesystem scans and Jellyfin/Plex syncs, including phase, counters, current item, and recent events
+- sync Jellyfin, Plex, and Emby inventory, file evidence, and user activity into a normalized activity model
+- resume Plex watch-history imports from the last stored cursor while preserving prior rollups
+- show durable background-job telemetry for filesystem scans and media-server syncs, including phase, counters, current item, and recent events
 - cancel, retry, and mark stale background work so long-running scans and syncs remain transparent
+- retry provider and media-server requests with bounded, Retry-After-aware backoff
 - create activity-aware cleanup recommendations for inactive and never-watched media
 - show recommendation proof with trust state, storage verification, activity evidence, source rule, and audit-backed actions
 - protect recommendations or accept them for manual action without enabling permanent deletion
-- review unmapped Jellyfin/Plex paths, save path mappings, and verify mappings against local files
+- review unmapped Jellyfin/Plex/Emby paths, save path mappings, and verify mappings against local files
 - attach optional local AI rationales to deterministic recommendations when the Ollama sidecar is enabled
 - expose a web UI and REST API
 
@@ -36,7 +38,7 @@ Mediarr remains deliberately conservative: it does not delete media, does not do
 - Read-only media mounts by default
 - Suggest-only cleanup recommendations with affected paths, confidence, source, and recoverable storage
 - Provider health and credential surfaces for TMDb, AniList, TheTVDB, OpenSubtitles, and local sidecars
-- Integration status, refresh actions, and inventory/activity sync for Jellyfin and Plex
+- Integration status, refresh actions, and inventory/activity sync for Jellyfin, Plex, and Emby
 - Path evidence labels that distinguish locally verified, path-mapped, and server-reported savings
 - Path mapping workbench for resolving server-reported paths to Mediarr-visible container paths
 - Recommendation trust states: new, reviewing, protected, ignored, and accepted for manual action
@@ -74,7 +76,7 @@ The AI sidecar is optional. When enabled, Compose starts Ollama and a one-shot m
 Set `MOVIES_DIR`, `SERIES_DIR`, and `ANIME_DIR` in `.env` to point at your media folders. The compose file mounts them read-only.
 
 For a full Ubuntu server walkthrough, see [Docker Compose Deployment Guide](docs/deployment/docker-compose.md).
-Provider behavior is documented in [Provider Guide](docs/providers.md), and optional local AI behavior is documented in [Local AI Guide](docs/ai.md).
+Provider behavior is documented in [Provider Guide](docs/providers.md), optional local AI behavior is documented in [Local AI Guide](docs/ai.md), and the production security posture is documented in [Threat Model](docs/threat-model.md).
 
 Run a scan from the UI or with:
 
@@ -91,7 +93,7 @@ curl -X POST http://localhost:8080/api/v1/jobs/<job-id>/cancel
 curl -X POST http://localhost:8080/api/v1/jobs/<job-id>/retry
 ```
 
-Connect Jellyfin or Plex from **Integrations** in the web UI by entering the server URL and API key/token. Mediarr stores those credentials in `/config/mediarr.db` and only returns redacted key status to the browser.
+Connect Jellyfin, Plex, or Emby from **Integrations** in the web UI by entering the server URL and API key/token. Mediarr stores those credentials in `/config/mediarr.db` and only returns redacted key status to the browser.
 
 You can also configure integrations through the REST API:
 
@@ -103,6 +105,10 @@ curl -X PUT http://localhost:8080/api/v1/integration-settings/jellyfin \
 curl -X PUT http://localhost:8080/api/v1/integration-settings/plex \
   -H "Content-Type: application/json" \
   -d '{"baseUrl":"http://plex:32400","apiKey":"your-plex-token"}'
+
+curl -X PUT http://localhost:8080/api/v1/integration-settings/emby \
+  -H "Content-Type: application/json" \
+  -d '{"baseUrl":"http://emby:8096","apiKey":"your-emby-api-key"}'
 ```
 
 Then sync from the UI Integrations screen, or with:
@@ -110,11 +116,12 @@ Then sync from the UI Integrations screen, or with:
 ```bash
 curl -X POST http://localhost:8080/api/v1/integrations/jellyfin/sync
 curl -X POST http://localhost:8080/api/v1/integrations/plex/sync
+curl -X POST http://localhost:8080/api/v1/integrations/emby/sync
 ```
 
 `refresh` asks the media server to rescan its own libraries. `sync` imports inventory and activity into Mediarr so it can create cleanup suggestions. Activity data can reveal household viewing behavior, so Mediarr stores only the normalized fields needed for recommendations and never returns media-server tokens through the API.
 
-If Jellyfin or Plex reports paths that differ from Mediarr's container mounts, use **Integrations > Path Mapping** to map the server prefix to the Mediarr-visible prefix. Mediarr can then verify mapped files against the local filesystem and raise evidence from `server_reported` to `path_mapped` or `local_verified`.
+If Jellyfin, Plex, or Emby reports paths that differ from Mediarr's container mounts, use **Integrations > Path Mapping** to map the server prefix to the Mediarr-visible prefix. Mediarr can then verify mapped files against the local filesystem and raise evidence from `server_reported` to `path_mapped` or `local_verified`.
 
 Recommendation cards are evidence-first. Use **Proof** to inspect the rule, storage verification, activity signals, and risk level; use **Manual** to mark a recommendation accepted for human action; use **Protect** to keep the media out of the open queue.
 
@@ -234,9 +241,12 @@ Recommended production defaults:
 - mount media folders read-only
 - set `MEDIARR_ADMIN_TOKEN`
 - put the app behind a trusted reverse proxy for TLS
+- verify release image provenance before upgrading public instances
 - back up `./config` regularly
 - use backup restore dry-run before restoring an archive
 - do not expose port `8080` directly to the public internet
+
+CI enforces the no-delete invariant with `scripts/verify-no-delete.sh`, and tagged GHCR images are published with GitHub artifact provenance attestations.
 
 ## License
 

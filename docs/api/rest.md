@@ -35,7 +35,7 @@ All API routes are rooted at `/api/v1`.
 | PUT | `/integration-settings/{id}` | Update media-server base URL, API key/token, or clear stored key |
 | GET | `/integrations` | Media-server and AI integration status |
 | POST | `/integrations/{id}/refresh` | Request a Jellyfin, Plex, or Emby library refresh |
-| POST | `/integrations/{id}/sync` | Queue a background Jellyfin or Plex inventory/activity sync job |
+| POST | `/integrations/{id}/sync` | Queue a background Jellyfin, Plex, or Emby inventory/activity sync job |
 | GET | `/integrations/{id}/sync` | Active or latest media-server sync job |
 | GET | `/integrations/{id}/items` | Imported media-server items; supports `?unmapped=true` |
 | GET | `/activity/rollups` | Normalized media activity rollups; supports `?serverId=` |
@@ -52,8 +52,10 @@ All API routes are rooted at `/api/v1`.
 
 No media file deletion route is provided.
 
-`refresh` and `sync` are intentionally different. `refresh` tells a media server to refresh its own library. `sync` pulls inventory, file paths, file sizes, and activity signals into Mediarr for suggest-only cleanup recommendations.
+`refresh` and `sync` are intentionally different. `refresh` tells a media server to refresh its own library. `sync` pulls inventory, file paths, file sizes, and activity signals into Mediarr for suggest-only cleanup recommendations. Plex sync stores a watch-history cursor and uses it on later runs while preserving existing normalized activity rollups.
 
 Long-running scan and sync requests return a job object immediately. Poll `/jobs/{id}` for `status`, `phase`, `message`, `processed`, `total`, `currentLabel`, imported counts, and recent events. Jobs support `queued`, `running`, `completed`, `failed`, `canceled`, and `stale` states. Listing jobs marks old queued/running rows stale after 24 hours without progress.
 
 Recommendation evidence is intentionally verbose. Clients should display storage verification separately from confidence: `local_verified` means Mediarr found a matching local file, `path_mapped` means a mapping resolved the server path, `server_reported` means savings came from the media server, and `unmapped` is blocked from cleanup recommendations.
+
+Provider and media-server API calls use bounded retry behavior for `429` and `5xx` responses. `Retry-After` is honored when present, capped to avoid wedging background jobs indefinitely.

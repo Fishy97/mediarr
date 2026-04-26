@@ -37,6 +37,13 @@ jobs:
       - run: npm run test -- --run
         working-directory: frontend
 
+  safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify no-delete invariant
+        run: scripts/verify-no-delete.sh
+
   docker:
     runs-on: ubuntu-latest
     steps:
