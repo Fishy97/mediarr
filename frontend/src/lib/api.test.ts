@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { api, setAuthToken } from './api';
+import type { Campaign } from '../types';
 
 describe('api auth helpers', () => {
   beforeEach(() => {
@@ -143,7 +144,7 @@ describe('api auth helpers', () => {
   });
 
   test('campaign endpoints support simulate run and history workflows', async () => {
-    const campaign = {
+    const campaign: Campaign = {
       id: 'campaign_cold_movies',
       name: 'Cold Movies',
       enabled: true,

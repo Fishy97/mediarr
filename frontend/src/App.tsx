@@ -24,6 +24,7 @@ import {
   Server,
   Settings,
   ShieldCheck,
+  SlidersHorizontal,
   Trash2,
   UserRound,
 } from 'lucide-react';
@@ -35,6 +36,12 @@ import type {
   ActivityRollup,
   AuthUser,
   Backup,
+  Campaign,
+  CampaignResult,
+  CampaignRun,
+  CampaignRule,
+  CampaignRuleField,
+  CampaignRuleOperator,
   CatalogCorrectionInput,
   CatalogItem,
   Integration,
@@ -57,7 +64,7 @@ import type {
   SupportBundle,
 } from './types';
 
-type View = 'dashboard' | 'libraries' | 'catalog' | 'recommendations' | 'integrations' | 'settings';
+type View = 'dashboard' | 'libraries' | 'catalog' | 'recommendations' | 'campaigns' | 'integrations' | 'settings';
 
 const integrationItemSampleLimit = 100;
 const unmappedItemSampleLimit = 50;
@@ -69,6 +76,9 @@ export function App() {
   const [scans, setScans] = useState<ScanResult[]>([]);
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [campaignResults, setCampaignResults] = useState<Record<string, CampaignResult>>({});
+  const [campaignRuns, setCampaignRuns] = useState<Record<string, CampaignRun[]>>({});
   const [providers, setProviders] = useState<ProviderHealth[]>([]);
   const [providerSettings, setProviderSettings] = useState<ProviderSetting[]>([]);
   const [integrationSettings, setIntegrationSettings] = useState<IntegrationSetting[]>([]);
@@ -96,12 +106,13 @@ export function App() {
 
   async function refresh() {
     try {
-      const [health, libs, catalogRows, scanRows, recs, providerRows, providerSettingRows, integrationSettingRows, integrationRows, ai, backupRows, bundleRows] = await Promise.all([
+      const [health, libs, catalogRows, scanRows, recs, campaignRows, providerRows, providerSettingRows, integrationSettingRows, integrationRows, ai, backupRows, bundleRows] = await Promise.all([
         api.health(),
         api.libraries(),
         api.catalog(),
         api.scans(),
         api.recommendations(),
+        api.campaigns(),
         api.providers(),
         api.providerSettings(),
         api.integrationSettings(),
@@ -115,6 +126,7 @@ export function App() {
       setCatalog(catalogRows);
       setScans(scanRows);
       setRecommendations(recs);
+      setCampaigns(campaignRows);
       setProviders(providerRows);
       setProviderSettings(providerSettingRows);
       setIntegrationSettings(integrationSettingRows);
@@ -123,6 +135,7 @@ export function App() {
       setBackups(backupRows);
       setSupportBundles(bundleRows);
       await refreshIntegrationActivity(integrationRows);
+      await refreshCampaignRuns(campaignRows);
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to load Mediarr');
@@ -184,6 +197,14 @@ export function App() {
     setIntegrationItems(itemRows.flat());
     setSyncJobs(Object.fromEntries(jobRows));
     setIntegrationDiagnostics(Object.fromEntries(diagnosticRows));
+  }
+
+  async function refreshCampaignRuns(campaignRows = campaigns) {
+    const rows = await Promise.all(campaignRows.map(async (campaign) => {
+      const runs = await api.campaignRuns(campaign.id).catch(() => [] as CampaignRun[]);
+      return [campaign.id, runs] as const;
+    }));
+    setCampaignRuns(Object.fromEntries(rows));
   }
 
   useEffect(() => {
@@ -473,6 +494,78 @@ export function App() {
     }
   }
 
+  async function saveCampaign(campaign: Campaign) {
+    setBusy(true);
+    try {
+      const saved = campaigns.some((row) => row.id === campaign.id)
+        ? await api.updateCampaign(campaign.id, campaign)
+        : await api.createCampaign(campaign);
+      const rows = await api.campaigns();
+      setCampaigns(rows);
+      await refreshCampaignRuns(rows);
+      setCampaignResults((current) => ({ ...current, [saved.id]: current[saved.id] ?? emptyCampaignResult(saved.id) }));
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to save campaign');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function simulateCampaign(id: string) {
+    setBusy(true);
+    try {
+      const result = await api.simulateCampaign(id);
+      setCampaignResults((current) => ({ ...current, [id]: result }));
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to simulate campaign');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runCampaign(id: string) {
+    setBusy(true);
+    try {
+      const response = await api.runCampaign(id);
+      const [recs, rows] = await Promise.all([api.recommendations(), api.campaigns()]);
+      setRecommendations(recs);
+      setCampaigns(rows);
+      setCampaignResults((current) => ({ ...current, [id]: response.result }));
+      await refreshCampaignRuns(rows);
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to run campaign');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteCampaign(id: string) {
+    setBusy(true);
+    try {
+      await api.deleteCampaign(id);
+      const rows = await api.campaigns();
+      setCampaigns(rows);
+      setCampaignResults((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+      setCampaignRuns((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to delete campaign');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function cancelJob(id: string) {
     try {
       const job = await api.cancelJob(id);
@@ -540,6 +633,7 @@ export function App() {
           <NavButton icon={<FolderOpen />} label="Libraries" active={view === 'libraries'} onClick={() => setView('libraries')} />
           <NavButton icon={<Library />} label="Catalog" active={view === 'catalog'} onClick={() => setView('catalog')} />
           <NavButton icon={<Trash2 />} label="Review Queue" active={view === 'recommendations'} onClick={() => setView('recommendations')} />
+          <NavButton icon={<SlidersHorizontal />} label="Campaigns" active={view === 'campaigns'} onClick={() => setView('campaigns')} />
           <NavButton icon={<Server />} label="Integrations" active={view === 'integrations'} onClick={() => setView('integrations')} />
           <NavButton icon={<Settings />} label="Settings" active={view === 'settings'} onClick={() => setView('settings')} />
         </nav>
@@ -595,6 +689,18 @@ export function App() {
             onProtect={(id) => void protectRecommendation(id)}
             onIgnore={(id) => void ignoreRecommendation(id)}
             busy={busy}
+          />
+        )}
+        {view === 'campaigns' && (
+          <CampaignsView
+            campaigns={campaigns}
+            results={campaignResults}
+            runs={campaignRuns}
+            busy={busy}
+            onSave={(campaign) => void saveCampaign(campaign)}
+            onSimulate={(id) => void simulateCampaign(id)}
+            onRun={(id) => void runCampaign(id)}
+            onDelete={(id) => void deleteCampaign(id)}
           />
         )}
         {view === 'integrations' && (
@@ -1146,6 +1252,275 @@ function RecommendationEvidencePanel({ evidence }: { evidence: RecommendationEvi
         <div className="notice warning">{evidence.suppressionReasons.join(', ')}</div>
       )}
     </div>
+  );
+}
+
+function CampaignsView({
+  campaigns,
+  results,
+  runs,
+  busy,
+  onSave,
+  onSimulate,
+  onRun,
+  onDelete,
+}: {
+  campaigns: Campaign[];
+  results: Record<string, CampaignResult>;
+  runs: Record<string, CampaignRun[]>;
+  busy: boolean;
+  onSave: (campaign: Campaign) => void;
+  onSimulate: (id: string) => void;
+  onRun: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [selectedID, setSelectedID] = useState(campaigns[0]?.id ?? '__new__');
+  const [draft, setDraft] = useState<Campaign>(() => newCampaignDraft());
+  const selectedCampaign = campaigns.find((campaign) => campaign.id === selectedID);
+  const activeID = selectedCampaign?.id ?? draft.id;
+  const result = results[activeID];
+  const campaignRuns = runs[activeID] || [];
+
+  useEffect(() => {
+    if (selectedCampaign) {
+      setDraft(cloneCampaign(selectedCampaign));
+      return;
+    }
+    if (selectedID !== '__new__') {
+      setSelectedID(campaigns[0]?.id ?? '__new__');
+      return;
+    }
+    if (!draft.id) {
+      setDraft(newCampaignDraft());
+    }
+  }, [campaigns, selectedCampaign, selectedID, draft.id]);
+
+  function updateRule(index: number, updates: Partial<CampaignRule>) {
+    setDraft((current) => ({
+      ...current,
+      rules: current.rules.map((rule, ruleIndex) => ruleIndex === index ? { ...rule, ...updates } : rule),
+    }));
+  }
+
+  function updateRuleValue(index: number, raw: string) {
+    const rule = draft.rules[index];
+    if (!rule) {
+      return;
+    }
+    if (rule.operator === 'in' || rule.operator === 'not_in') {
+      updateRule(index, { value: '', values: raw.split(',').map((value) => value.trim()).filter(Boolean) });
+      return;
+    }
+    updateRule(index, { value: raw, values: [] });
+  }
+
+  function save(event: React.FormEvent) {
+    event.preventDefault();
+    onSave(normalizeCampaignDraft(draft));
+  }
+
+  return (
+    <section className="campaign-layout">
+      <div className="campaign-rail">
+        <div className="panel-heading">
+          <div>
+            <h2>Stewardship Campaigns</h2>
+            <span>{campaigns.length} saved</span>
+          </div>
+          <button
+            className="secondary-button compact-action"
+            type="button"
+            onClick={() => {
+              const next = newCampaignDraft();
+              setSelectedID('__new__');
+              setDraft(next);
+            }}
+          >
+            New
+          </button>
+        </div>
+        <div className="campaign-list">
+          {campaigns.map((campaign) => (
+            <button
+              className={campaign.id === selectedID ? 'campaign-list-item active' : 'campaign-list-item'}
+              type="button"
+              key={campaign.id}
+              onClick={() => setSelectedID(campaign.id)}
+            >
+              <strong>{campaign.name}</strong>
+              <span>{campaign.enabled ? 'Enabled' : 'Paused'} • {campaign.rules.length} rules</span>
+              <small>{campaign.lastRunAt ? `Last run ${formatDateTime(campaign.lastRunAt)}` : 'No runs yet'}</small>
+            </button>
+          ))}
+          {campaigns.length === 0 && <EmptyState icon={<SlidersHorizontal />} text="No campaigns saved." />}
+        </div>
+      </div>
+      <form className="campaign-editor" onSubmit={(event) => void save(event)}>
+        <div className="panel-heading">
+          <div>
+            <h2>{selectedCampaign ? 'Edit Campaign' : 'New Campaign'}</h2>
+            <span>Suggest-only • evidence-backed • media-server activity</span>
+          </div>
+          <div className="button-row">
+            {selectedCampaign && (
+              <button className="secondary-button" type="button" disabled={busy} onClick={() => onDelete(selectedCampaign.id)}>
+                <Trash2 size={16} />
+                Delete
+              </button>
+            )}
+            <button className="primary-button" type="submit" disabled={busy || !draft.name.trim()}>
+              <Save size={16} />
+              Save
+            </button>
+          </div>
+        </div>
+        <div className="campaign-form-grid">
+          <label>
+            Name
+            <input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} required />
+          </label>
+          <label>
+            ID
+            <input value={draft.id} onChange={(event) => setDraft((current) => ({ ...current, id: slugCampaignID(event.target.value) }))} required />
+          </label>
+          <label className="wide-field">
+            Description
+            <input value={draft.description || ''} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} />
+          </label>
+          <label>
+            Target
+            <select value={draft.targetKinds[0] || ''} onChange={(event) => setDraft((current) => ({ ...current, targetKinds: event.target.value ? [event.target.value] : [] }))}>
+              <option value="">All media</option>
+              <option value="movie">Movies</option>
+              <option value="series">Series</option>
+              <option value="anime">Anime</option>
+            </select>
+          </label>
+          <label>
+            Minimum confidence
+            <input value={String(Math.round((draft.minimumConfidence || 0) * 100))} onChange={(event) => setDraft((current) => ({ ...current, minimumConfidence: clampPercentInput(event.target.value) / 100 }))} type="number" min={0} max={100} />
+          </label>
+          <label>
+            Minimum storage GB
+            <input value={String(Math.round((draft.minimumStorageBytes || 0) / 1_000_000_000))} onChange={(event) => setDraft((current) => ({ ...current, minimumStorageBytes: Math.max(0, Number.parseInt(event.target.value, 10) || 0) * 1_000_000_000 }))} type="number" min={0} />
+          </label>
+          <label className="checkbox-row">
+            <input checked={draft.enabled} onChange={(event) => setDraft((current) => ({ ...current, enabled: event.target.checked }))} type="checkbox" />
+            Enabled
+          </label>
+          <label className="checkbox-row">
+            <input checked={draft.requireAllRules} onChange={(event) => setDraft((current) => ({ ...current, requireAllRules: event.target.checked }))} type="checkbox" />
+            Require all rules
+          </label>
+        </div>
+        <div className="rule-builder">
+          <div className="panel-heading">
+            <h2>Rules</h2>
+            <button className="secondary-button compact-action" type="button" onClick={() => setDraft((current) => ({ ...current, rules: [...current.rules, defaultCampaignRule()] }))}>
+              Add rule
+            </button>
+          </div>
+          {draft.rules.map((rule, index) => (
+            <div className="rule-row" key={`${index}-${rule.field}-${rule.operator}`}>
+              <select value={rule.field} onChange={(event) => updateRule(index, { field: event.target.value as CampaignRuleField })}>
+                {campaignRuleFields.map((field) => <option key={field.value} value={field.value}>{field.label}</option>)}
+              </select>
+              <select value={rule.operator} onChange={(event) => updateRule(index, { operator: event.target.value as CampaignRuleOperator })}>
+                {campaignRuleOperators.map((operator) => <option key={operator.value} value={operator.value}>{operator.label}</option>)}
+              </select>
+              <input
+                value={rule.operator === 'in' || rule.operator === 'not_in' ? (rule.values || []).join(', ') : rule.value || ''}
+                disabled={rule.operator === 'is_empty' || rule.operator === 'is_not_empty'}
+                onChange={(event) => updateRuleValue(index, event.target.value)}
+              />
+              <button className="icon-button" type="button" title="Remove rule" aria-label="Remove rule" onClick={() => setDraft((current) => ({ ...current, rules: current.rules.filter((_, ruleIndex) => ruleIndex !== index) }))}>
+                <Trash2 size={15} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="button-row campaign-run-row">
+          <button className="secondary-button" type="button" disabled={busy || !selectedCampaign} onClick={() => selectedCampaign && onSimulate(selectedCampaign.id)}>
+            <SearchCheck size={16} />
+            Simulate
+          </button>
+          <button className="primary-button" type="button" disabled={busy || !selectedCampaign} onClick={() => selectedCampaign && onRun(selectedCampaign.id)}>
+            <PlayCircle size={16} />
+            Run campaign
+          </button>
+        </div>
+      </form>
+      <CampaignResultPanel result={result} />
+      <CampaignRunsPanel runs={campaignRuns} />
+    </section>
+  );
+}
+
+function CampaignResultPanel({ result }: { result?: CampaignResult }) {
+  if (!result) {
+    return (
+      <section className="panel campaign-results">
+        <div className="panel-heading">
+          <h2>Simulation</h2>
+          <span>Pending</span>
+        </div>
+        <EmptyState icon={<SearchCheck />} text="No simulation loaded." />
+      </section>
+    );
+  }
+  return (
+    <section className="panel campaign-results">
+      <div className="panel-heading">
+        <h2>Simulation</h2>
+        <span>{result.enabled ? 'Enabled' : 'Paused'}</span>
+      </div>
+      <div className="signal-grid">
+        <Signal label="Matched" value={String(result.matched)} />
+        <Signal label="Suppressed" value={String(result.suppressed)} />
+        <Signal label="Estimated" value={formatBytes(result.totalEstimatedSavingsBytes)} />
+        <Signal label="Verified" value={formatBytes(result.totalVerifiedSavingsBytes)} />
+        <Signal label="Confidence avg" value={formatConfidence(result.confidenceAverage)} />
+        <Signal label="Confidence range" value={`${formatConfidence(result.confidenceMin)}-${formatConfidence(result.confidenceMax)}`} />
+      </div>
+      <div className="campaign-result-list">
+        {result.items.slice(0, 12).map((item) => (
+          <article className={item.suppressed ? 'campaign-result-item suppressed' : 'campaign-result-item'} key={item.candidate.key}>
+            <div>
+              <strong>{item.candidate.title}</strong>
+              <span>{item.candidate.kind} • {formatVerification(item.candidate.verification)} • {formatConfidence(item.candidate.confidence)}</span>
+            </div>
+            <div className="campaign-result-metrics">
+              <span>{formatBytes(item.candidate.estimatedSavingsBytes)}</span>
+              <small>{item.suppressed ? item.suppressionReasons.join(', ') : item.matchedRules.map((rule) => formatCampaignRule(rule.rule)).join('; ')}</small>
+            </div>
+          </article>
+        ))}
+        {result.items.length === 0 && <EmptyState icon={<ShieldCheck />} text="No media matched this campaign." />}
+      </div>
+    </section>
+  );
+}
+
+function CampaignRunsPanel({ runs }: { runs: CampaignRun[] }) {
+  return (
+    <section className="panel campaign-runs">
+      <div className="panel-heading">
+        <h2>Run History</h2>
+        <span>{runs.length} runs</span>
+      </div>
+      <div className="compact-list">
+        {runs.slice(0, 8).map((run) => (
+          <div className="compact-row" key={run.id}>
+            <div>
+              <strong>{run.status}</strong>
+              <span>{formatDateTime(run.startedAt)} • {run.matched} matched • {run.suppressed} suppressed</span>
+            </div>
+            <strong>{formatBytes(run.estimatedSavingsBytes)}</strong>
+          </div>
+        ))}
+        {runs.length === 0 && <EmptyState icon={<Archive />} text="No campaign runs recorded." />}
+      </div>
+    </section>
   );
 }
 
@@ -2045,6 +2420,136 @@ function EmptyState({ icon, text }: { icon: React.ReactNode; text: string }) {
   );
 }
 
+const campaignRuleFields: Array<{ value: CampaignRuleField; label: string }> = [
+  { value: 'kind', label: 'Kind' },
+  { value: 'libraryName', label: 'Library' },
+  { value: 'verification', label: 'Verification' },
+  { value: 'estimatedSavingsBytes', label: 'Estimated bytes' },
+  { value: 'verifiedSavingsBytes', label: 'Verified bytes' },
+  { value: 'lastPlayedDays', label: 'Last played days' },
+  { value: 'addedDays', label: 'Added days' },
+  { value: 'playCount', label: 'Play count' },
+  { value: 'uniqueUsers', label: 'Watched users' },
+  { value: 'favoriteCount', label: 'Favorites' },
+  { value: 'confidence', label: 'Confidence' },
+];
+
+const campaignRuleOperators: Array<{ value: CampaignRuleOperator; label: string }> = [
+  { value: 'equals', label: 'Equals' },
+  { value: 'not_equals', label: 'Not equals' },
+  { value: 'in', label: 'In list' },
+  { value: 'not_in', label: 'Not in list' },
+  { value: 'greater_than', label: 'Greater than' },
+  { value: 'greater_or_equal', label: 'At least' },
+  { value: 'less_than', label: 'Less than' },
+  { value: 'less_or_equal', label: 'At most' },
+  { value: 'is_empty', label: 'Is empty' },
+  { value: 'is_not_empty', label: 'Is not empty' },
+];
+
+function newCampaignDraft(): Campaign {
+  const id = `campaign_${Date.now().toString(36)}`;
+  return {
+    id,
+    name: 'Cold media review',
+    description: 'Activity-backed review candidates with local storage proof.',
+    enabled: true,
+    targetKinds: ['movie'],
+    targetLibraryNames: [],
+    requireAllRules: true,
+    minimumConfidence: 0.72,
+    minimumStorageBytes: 10_000_000_000,
+    rules: [
+      { field: 'lastPlayedDays', operator: 'greater_or_equal', value: '365' },
+      { field: 'estimatedSavingsBytes', operator: 'greater_or_equal', value: '10000000000' },
+      { field: 'favoriteCount', operator: 'equals', value: '0' },
+    ],
+  };
+}
+
+function defaultCampaignRule(): CampaignRule {
+  return { field: 'lastPlayedDays', operator: 'greater_or_equal', value: '365' };
+}
+
+function cloneCampaign(campaign: Campaign): Campaign {
+  return {
+    ...campaign,
+    targetKinds: [...(campaign.targetKinds || [])],
+    targetLibraryNames: [...(campaign.targetLibraryNames || [])],
+    rules: (campaign.rules || []).map((rule) => ({
+      ...rule,
+      values: rule.values ? [...rule.values] : [],
+    })),
+  };
+}
+
+function normalizeCampaignDraft(campaign: Campaign): Campaign {
+  const name = campaign.name.trim();
+  return {
+    ...campaign,
+    id: slugCampaignID(campaign.id || name),
+    name,
+    description: campaign.description?.trim() || '',
+    enabled: Boolean(campaign.enabled),
+    targetKinds: (campaign.targetKinds || []).map((kind) => kind.trim()).filter(Boolean),
+    targetLibraryNames: (campaign.targetLibraryNames || []).map((library) => library.trim()).filter(Boolean),
+    requireAllRules: Boolean(campaign.requireAllRules),
+    minimumConfidence: Math.min(1, Math.max(0, campaign.minimumConfidence || 0)),
+    minimumStorageBytes: Math.max(0, campaign.minimumStorageBytes || 0),
+    rules: (campaign.rules || []).map((rule) => ({
+      field: rule.field,
+      operator: rule.operator,
+      value: rule.operator === 'in' || rule.operator === 'not_in' ? '' : (rule.value || '').trim(),
+      values: rule.operator === 'in' || rule.operator === 'not_in' ? (rule.values || []).map((value) => value.trim()).filter(Boolean) : [],
+    })),
+  };
+}
+
+function emptyCampaignResult(id: string): CampaignResult {
+  return {
+    campaignId: id,
+    enabled: true,
+    matched: 0,
+    suppressed: 0,
+    totalEstimatedSavingsBytes: 0,
+    totalVerifiedSavingsBytes: 0,
+    confidenceMin: 0,
+    confidenceAverage: 0,
+    confidenceMax: 0,
+    items: [],
+  };
+}
+
+function slugCampaignID(value: string): string {
+  const slug = value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  if (!slug) {
+    return `campaign_${Date.now().toString(36)}`;
+  }
+  return slug.startsWith('campaign_') ? slug : `campaign_${slug}`;
+}
+
+function clampPercentInput(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+  return Math.min(100, Math.max(0, parsed));
+}
+
+function formatCampaignRule(rule: CampaignRule): string {
+  const field = campaignRuleFields.find((entry) => entry.value === rule.field)?.label || rule.field;
+  const operator = campaignRuleOperators.find((entry) => entry.value === rule.operator)?.label || rule.operator;
+  const value = rule.operator === 'in' || rule.operator === 'not_in' ? (rule.values || []).join(', ') : rule.value;
+  if (rule.operator === 'is_empty' || rule.operator === 'is_not_empty') {
+    return `${field} ${operator}`;
+  }
+  return `${field} ${operator} ${value || ''}`.trim();
+}
+
 function formatDateTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -2086,6 +2591,8 @@ function formatRecommendationAction(value: Recommendation['action']): string {
       return 'Oversized file';
     case 'review_missing_subtitles':
       return 'Missing subtitles';
+    case 'review_campaign_match':
+      return 'Campaign match';
     default:
       return 'Review item';
   }
@@ -2128,6 +2635,7 @@ function titleFor(view: View): string {
     libraries: 'Libraries',
     catalog: 'Catalog',
     recommendations: 'Review Queue',
+    campaigns: 'Campaigns',
     integrations: 'Integrations',
     settings: 'Settings',
   }[view];
