@@ -55,7 +55,7 @@ func CreateBundle(config Config) (Result, error) {
 		return Result{}, err
 	}
 	generatedAt := time.Now().UTC()
-	path := filepath.Join(outputDir, "mediarr-support-"+generatedAt.Format("20060102T150405.000000000Z")+".zip")
+	path := filepath.Join(outputDir, archivefiles.Name(bundleArchivePrefix, generatedAt))
 	redactor := newRedactor(config.Store)
 	files, err := buildEntries(config, generatedAt)
 	if err != nil {

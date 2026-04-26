@@ -4,11 +4,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
 )
+
+const TimestampFormat = "20060102T150405.000000000Z"
 
 type Info struct {
 	Name      string    `json:"name"`
@@ -103,12 +104,21 @@ func InfoForPath(path string, prefix string) (Info, error) {
 	}, nil
 }
 
+func Name(prefix string, createdAt time.Time) string {
+	return strings.TrimSpace(prefix) + createdAt.UTC().Format(TimestampFormat) + ".zip"
+}
+
 func ValidName(prefix string, name string) bool {
 	if name == "" || filepath.Base(name) != name || strings.Contains(name, "..") {
 		return false
 	}
-	pattern := "^" + regexp.QuoteMeta(prefix) + `\d{8}T\d{6}\.\d{9}Z\.zip$`
-	return regexp.MustCompile(pattern).MatchString(name)
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" || !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".zip") {
+		return false
+	}
+	timestamp := strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".zip")
+	parsed, err := time.Parse(TimestampFormat, timestamp)
+	return err == nil && parsed.UTC().Format(TimestampFormat) == timestamp
 }
 
 var errInvalidArchive = errors.New("invalid archive file")

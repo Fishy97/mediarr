@@ -2,6 +2,7 @@
 
 Use this checklist before tagging a public Mediarr release.
 
+- `make ci` passes locally
 - `go test ./...` passes in `backend`
 - `go vet ./...` passes in `backend`
 - `npm --prefix frontend run test -- --run` passes

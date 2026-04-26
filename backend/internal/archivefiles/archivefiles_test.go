@@ -73,3 +73,21 @@ func TestResolveRejectsUnsafeLocatorsAndSymlinks(t *testing.T) {
 		t.Fatal("InfoForPath succeeded for symlink; want error")
 	}
 }
+
+func TestValidNameRequiresGeneratedTimestamp(t *testing.T) {
+	valid := Name("mediarr-", time.Date(2026, 4, 26, 12, 0, 0, 123, time.UTC))
+	if !ValidName("mediarr-", valid) {
+		t.Fatalf("ValidName(%q) = false, want true", valid)
+	}
+	for _, name := range []string{
+		"mediarr-20261326T120000.000000000Z.zip",
+		"mediarr-20260431T120000.000000000Z.zip",
+		"mediarr-20260426T246000.000000000Z.zip",
+		"mediarr-20260426T120000Z.zip",
+		"mediarr-20260426T120000.000000000+0100.zip",
+	} {
+		if ValidName("mediarr-", name) {
+			t.Fatalf("ValidName(%q) = true, want false", name)
+		}
+	}
+}

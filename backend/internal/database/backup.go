@@ -25,7 +25,7 @@ func CreateBackup(configDir string, backupDir string) (string, error) {
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		return "", err
 	}
-	backupPath := filepath.Join(backupDir, "mediarr-"+time.Now().UTC().Format("20060102T150405.000000000Z")+".zip")
+	backupPath := filepath.Join(backupDir, archivefiles.Name(backupArchivePrefix, time.Now()))
 	file, err := os.Create(backupPath)
 	if err != nil {
 		return "", err

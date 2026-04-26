@@ -266,6 +266,12 @@ go test ./...
 go run ./cmd/mediarr
 ```
 
+Run the full local release gate before pushing production changes:
+
+```bash
+make ci
+```
+
 ## Safety Model
 
 Mediarr does not expose a permanent delete endpoint. Recommendations are review items only. A future quarantine workflow can be added behind explicit write-path configuration, but the default filesystem posture is read-only media and writable `/config`.
