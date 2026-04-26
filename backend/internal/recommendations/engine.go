@@ -22,6 +22,7 @@ const (
 	ActionReviewInactiveSeries     Action = "review_inactive_series"
 	ActionReviewAbandonedSeries    Action = "review_abandoned_series"
 	ActionReviewUnwatchedDuplicate Action = "review_unwatched_duplicate"
+	ActionReviewCampaignMatch      Action = "review_campaign_match"
 )
 
 const (
