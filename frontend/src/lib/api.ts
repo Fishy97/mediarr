@@ -5,6 +5,10 @@ import type {
   AuthUser,
   Backup,
   BackupRestoreResult,
+  Campaign,
+  CampaignResult,
+  CampaignRun,
+  CampaignRunResponse,
   CatalogCorrectionInput,
   CatalogItem,
   Integration,
@@ -219,6 +223,33 @@ export const api = {
     }
     const suffix = params.toString() ? `?${params.toString()}` : '';
     return (await request<Envelope<ActivityRollup[]>>(`/api/v1/activity/rollups${suffix}`)).data;
+  },
+  async campaigns(): Promise<Campaign[]> {
+    return (await request<Envelope<Campaign[]>>('/api/v1/campaigns')).data;
+  },
+  async createCampaign(campaign: Campaign): Promise<Campaign> {
+    return (await request<Envelope<Campaign>>('/api/v1/campaigns', {
+      method: 'POST',
+      body: JSON.stringify(campaign),
+    })).data;
+  },
+  async updateCampaign(id: string, campaign: Campaign): Promise<Campaign> {
+    return (await request<Envelope<Campaign>>(`/api/v1/campaigns/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(campaign),
+    })).data;
+  },
+  async deleteCampaign(id: string): Promise<void> {
+    await request<Envelope<{ ok: boolean }>>(`/api/v1/campaigns/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+  async simulateCampaign(id: string): Promise<CampaignResult> {
+    return (await request<Envelope<CampaignResult>>(`/api/v1/campaigns/${encodeURIComponent(id)}/simulate`, { method: 'POST' })).data;
+  },
+  async runCampaign(id: string): Promise<CampaignRunResponse> {
+    return (await request<Envelope<CampaignRunResponse>>(`/api/v1/campaigns/${encodeURIComponent(id)}/run`, { method: 'POST' })).data;
+  },
+  async campaignRuns(id: string): Promise<CampaignRun[]> {
+    return (await request<Envelope<CampaignRun[]>>(`/api/v1/campaigns/${encodeURIComponent(id)}/runs`)).data;
   },
   async pathMappings(): Promise<PathMapping[]> {
     return (await request<Envelope<PathMapping[]>>('/api/v1/path-mappings')).data;

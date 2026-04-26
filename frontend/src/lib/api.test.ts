@@ -142,6 +142,44 @@ describe('api auth helpers', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/v1/jobs/job_1/retry', expect.objectContaining({ method: 'POST' }));
   });
 
+  test('campaign endpoints support simulate run and history workflows', async () => {
+    const campaign = {
+      id: 'campaign_cold_movies',
+      name: 'Cold Movies',
+      enabled: true,
+      targetKinds: ['movie'],
+      requireAllRules: true,
+      minimumConfidence: 0.7,
+      minimumStorageBytes: 10000000000,
+      rules: [{ field: 'lastPlayedDays', operator: 'greater_or_equal', value: '365' }],
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ data: [campaign] }))
+      .mockResolvedValueOnce(jsonResponse({ data: campaign }))
+      .mockResolvedValueOnce(jsonResponse({ data: { ...campaign, name: 'Deep Archive Movies' } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { campaignId: campaign.id, matched: 1, suppressed: 0, totalEstimatedSavingsBytes: 42000000000, items: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { run: { id: 'run_1', status: 'completed', matched: 1 }, result: { campaignId: campaign.id, matched: 1, items: [] } } }))
+      .mockResolvedValueOnce(jsonResponse({ data: [{ id: 'run_1', campaignId: campaign.id, status: 'completed' }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.campaigns()).resolves.toHaveLength(1);
+    await expect(api.createCampaign(campaign)).resolves.toMatchObject({ id: campaign.id });
+    await expect(api.updateCampaign(campaign.id, { ...campaign, name: 'Deep Archive Movies' })).resolves.toMatchObject({ name: 'Deep Archive Movies' });
+    await expect(api.simulateCampaign(campaign.id)).resolves.toMatchObject({ matched: 1, totalEstimatedSavingsBytes: 42000000000 });
+    await expect(api.runCampaign(campaign.id)).resolves.toMatchObject({ run: { status: 'completed' }, result: { matched: 1 } });
+    await expect(api.campaignRuns(campaign.id)).resolves.toHaveLength(1);
+    await api.deleteCampaign(campaign.id);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/campaigns', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/campaigns', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/v1/campaigns/campaign_cold_movies', expect.objectContaining({ method: 'PUT' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/v1/campaigns/campaign_cold_movies/simulate', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/v1/campaigns/campaign_cold_movies/run', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/v1/campaigns/campaign_cold_movies/runs', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/v1/campaigns/campaign_cold_movies', expect.objectContaining({ method: 'DELETE' }));
+  });
+
   test('integration settings calls redactable media server setting endpoints', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ data: [{ integration: 'jellyfin', baseUrl: 'http://jellyfin:8096', apiKeyConfigured: true, apiKeyLast4: 'abcd' }] }))

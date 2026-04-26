@@ -15,7 +15,8 @@ export type Recommendation = {
     | 'review_never_watched_movie'
     | 'review_inactive_series'
     | 'review_abandoned_series'
-    | 'review_unwatched_duplicate';
+    | 'review_unwatched_duplicate'
+    | 'review_campaign_match';
   state?: RecommendationState;
   title: string;
   explanation: string;
@@ -77,6 +78,119 @@ export type RecommendationEvidence = {
     value: string;
     status: string;
   }>;
+};
+
+export type CampaignRuleField =
+  | 'kind'
+  | 'libraryName'
+  | 'verification'
+  | 'storageBytes'
+  | 'estimatedSavingsBytes'
+  | 'verifiedSavingsBytes'
+  | 'lastPlayedDays'
+  | 'addedDays'
+  | 'playCount'
+  | 'uniqueUsers'
+  | 'favoriteCount'
+  | 'confidence';
+
+export type CampaignRuleOperator =
+  | 'equals'
+  | 'not_equals'
+  | 'in'
+  | 'not_in'
+  | 'greater_than'
+  | 'greater_or_equal'
+  | 'less_than'
+  | 'less_or_equal'
+  | 'is_empty'
+  | 'is_not_empty';
+
+export type CampaignRule = {
+  field: CampaignRuleField;
+  operator: CampaignRuleOperator;
+  value?: string;
+  values?: string[];
+};
+
+export type Campaign = {
+  id: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  targetKinds: string[];
+  targetLibraryNames?: string[];
+  rules: CampaignRule[];
+  requireAllRules: boolean;
+  minimumConfidence: number;
+  minimumStorageBytes: number;
+  createdAt?: string;
+  updatedAt?: string;
+  lastRunAt?: string;
+};
+
+export type CampaignCandidate = {
+  key: string;
+  serverId?: string;
+  externalItemId?: string;
+  title: string;
+  kind: string;
+  libraryName?: string;
+  verification?: string;
+  estimatedSavingsBytes: number;
+  verifiedSavingsBytes: number;
+  confidence: number;
+  addedAt?: string;
+  lastPlayedAt?: string;
+  playCount: number;
+  uniqueUsers: number;
+  favoriteCount: number;
+  affectedPaths: string[];
+  evidence?: Record<string, string>;
+};
+
+export type CampaignRuleResult = {
+  rule: CampaignRule;
+  matched: boolean;
+  reason: string;
+};
+
+export type CampaignResultItem = {
+  candidate: CampaignCandidate;
+  matchedRules: CampaignRuleResult[];
+  suppressionReasons: string[];
+  suppressed: boolean;
+};
+
+export type CampaignResult = {
+  campaignId: string;
+  enabled: boolean;
+  matched: number;
+  suppressed: number;
+  totalEstimatedSavingsBytes: number;
+  totalVerifiedSavingsBytes: number;
+  confidenceMin: number;
+  confidenceAverage: number;
+  confidenceMax: number;
+  items: CampaignResultItem[];
+};
+
+export type CampaignRun = {
+  id: string;
+  campaignId: string;
+  status: string;
+  matched: number;
+  suppressed: number;
+  estimatedSavingsBytes: number;
+  verifiedSavingsBytes: number;
+  error?: string;
+  startedAt: string;
+  completedAt?: string;
+};
+
+export type CampaignRunResponse = {
+  run: CampaignRun;
+  result: CampaignResult;
 };
 
 export type ProviderHealth = {
