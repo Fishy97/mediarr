@@ -52,7 +52,11 @@ export type RecommendationEvidence = {
   raw: Record<string, string>;
   storage: {
     spaceSavedBytes: number;
+    estimatedSavingsBytes: number;
+    verifiedSavingsBytes: number;
     verification: string;
+    certainty: string;
+    basis: string;
     risk: string;
   };
   activity: {

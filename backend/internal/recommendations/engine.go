@@ -102,9 +102,13 @@ type Evidence struct {
 }
 
 type StorageEvidence struct {
-	SpaceSavedBytes int64  `json:"spaceSavedBytes"`
-	Verification    string `json:"verification"`
-	Risk            string `json:"risk"`
+	SpaceSavedBytes       int64  `json:"spaceSavedBytes"`
+	EstimatedSavingsBytes int64  `json:"estimatedSavingsBytes"`
+	VerifiedSavingsBytes  int64  `json:"verifiedSavingsBytes"`
+	Verification          string `json:"verification"`
+	Certainty             string `json:"certainty"`
+	Basis                 string `json:"basis"`
+	Risk                  string `json:"risk"`
 }
 
 type ActivityEvidence struct {
@@ -151,6 +155,10 @@ func BuildEvidence(rec Recommendation) Evidence {
 		raw[key] = value
 	}
 	storageRisk := storageRisk(rec.Verification, rec.Confidence, rec.Destructive)
+	storageBasis := firstActivityValue(raw["storageBasis"], rec.Verification)
+	storageCertainty := firstActivityValue(raw["storageCertainty"], storageCertaintyLabel(rec.Verification))
+	estimatedSavingsBytes := parseEvidenceInt64(raw["estimatedSavingsBytes"], rec.SpaceSavedBytes)
+	verifiedSavingsBytes := parseEvidenceInt64(raw["verifiedSavingsBytes"], defaultVerifiedSavingsBytes(rec.Verification, rec.SpaceSavedBytes))
 	evidence := Evidence{
 		RecommendationID:   rec.ID,
 		State:              rec.State,
@@ -162,9 +170,13 @@ func BuildEvidence(rec Recommendation) Evidence {
 		SuppressionReasons: suppressionReasons(rec),
 		Raw:                raw,
 		Storage: StorageEvidence{
-			SpaceSavedBytes: rec.SpaceSavedBytes,
-			Verification:    rec.Verification,
-			Risk:            storageRisk,
+			SpaceSavedBytes:       rec.SpaceSavedBytes,
+			EstimatedSavingsBytes: estimatedSavingsBytes,
+			VerifiedSavingsBytes:  verifiedSavingsBytes,
+			Verification:          rec.Verification,
+			Certainty:             storageCertainty,
+			Basis:                 storageBasis,
+			Risk:                  storageRisk,
 		},
 		Activity: ActivityEvidence{
 			ServerID:       rec.ServerID,
@@ -329,10 +341,10 @@ func (engine Engine) GenerateActivity(items []ActivityMedia, now time.Time) []Re
 					UniqueUsers:     item.UniqueUsers,
 					FavoriteCount:   item.FavoriteCount,
 					Verification:    item.Verification,
-					Evidence: map[string]string{
+					Evidence: storageEvidenceMap(item.Verification, item.SizeBytes, map[string]string{
 						"ageDays":       strconv.Itoa(ageDays),
 						"thresholdDays": strconv.Itoa(neverWatchedDays),
-					},
+					}),
 				})
 			}
 			continue
@@ -357,10 +369,10 @@ func (engine Engine) GenerateActivity(items []ActivityMedia, now time.Time) []Re
 					UniqueUsers:     item.UniqueUsers,
 					FavoriteCount:   item.FavoriteCount,
 					Verification:    item.Verification,
-					Evidence: map[string]string{
+					Evidence: storageEvidenceMap(item.Verification, item.SizeBytes, map[string]string{
 						"inactiveDays":  strconv.Itoa(inactiveForDays),
 						"thresholdDays": strconv.Itoa(inactiveDays),
-					},
+					}),
 				})
 			}
 		}
@@ -491,12 +503,12 @@ func (engine Engine) generateSeriesActivity(items []ActivityMedia, now time.Time
 					UniqueUsers:     group.uniqueUsers,
 					FavoriteCount:   group.favoriteCount,
 					Verification:    group.verification,
-					Evidence: map[string]string{
+					Evidence: storageEvidenceMap(group.verification, group.sizeBytes, map[string]string{
 						"ageDays":       strconv.Itoa(ageDays),
 						"thresholdDays": strconv.Itoa(neverWatchedDays),
 						"itemCount":     strconv.Itoa(len(group.paths)),
 						"category":      category,
-					},
+					}),
 				})
 			}
 			continue
@@ -521,12 +533,12 @@ func (engine Engine) generateSeriesActivity(items []ActivityMedia, now time.Time
 					UniqueUsers:     group.uniqueUsers,
 					FavoriteCount:   group.favoriteCount,
 					Verification:    group.verification,
-					Evidence: map[string]string{
+					Evidence: storageEvidenceMap(group.verification, group.sizeBytes, map[string]string{
 						"inactiveDays":  strconv.Itoa(inactiveForDays),
 						"thresholdDays": strconv.Itoa(inactiveDays),
 						"itemCount":     strconv.Itoa(len(group.paths)),
 						"category":      category,
-					},
+					}),
 				})
 			}
 		}
@@ -613,6 +625,50 @@ func suppressionReasons(rec Recommendation) []string {
 		reasons = append(reasons, "user_protected")
 	}
 	return reasons
+}
+
+func storageEvidenceMap(verification string, estimatedSavingsBytes int64, values map[string]string) map[string]string {
+	if values == nil {
+		values = map[string]string{}
+	}
+	values["storageBasis"] = strings.TrimSpace(verification)
+	values["estimatedSavingsBytes"] = strconv.FormatInt(estimatedSavingsBytes, 10)
+	values["verifiedSavingsBytes"] = strconv.FormatInt(defaultVerifiedSavingsBytes(verification, estimatedSavingsBytes), 10)
+	values["storageCertainty"] = storageCertaintyLabel(verification)
+	return values
+}
+
+func defaultVerifiedSavingsBytes(verification string, estimatedSavingsBytes int64) int64 {
+	if strings.TrimSpace(verification) == "local_verified" {
+		return estimatedSavingsBytes
+	}
+	return 0
+}
+
+func storageCertaintyLabel(verification string) string {
+	switch strings.TrimSpace(verification) {
+	case "local_verified":
+		return "verified"
+	case "path_mapped":
+		return "mapped_estimate"
+	case "server_reported":
+		return "estimate"
+	case "unmapped":
+		return "unmapped"
+	default:
+		return "estimate"
+	}
+}
+
+func parseEvidenceInt64(value string, fallback int64) int64 {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func storageRisk(verification string, confidence float64, destructive bool) string {

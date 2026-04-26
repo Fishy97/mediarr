@@ -28,7 +28,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { api, getAuthToken } from './lib/api';
-import { formatBytes, formatConfidence } from './lib/format';
+import { formatBytes, formatConfidence, formatVerification, storageCertaintyDescription, storageCertaintyForVerification } from './lib/format';
 import type {
   AIStatus,
   ActivityRollup,
@@ -995,6 +995,9 @@ function RecommendationQueue({
     <section className="queue">
       {recommendations.map((rec) => {
         const proof = evidence[rec.id];
+        const estimatedSavingsBytes = recommendationEstimatedSavings(rec);
+        const verifiedSavingsBytes = recommendationVerifiedSavings(rec);
+        const storageCertainty = rec.evidence?.storageCertainty || storageCertaintyForVerification(rec.verification);
         return (
           <article className="recommendation-card" key={rec.id}>
             <div className="rec-main">
@@ -1014,6 +1017,12 @@ function RecommendationQueue({
                   <Signal label="Plays" value={String(rec.playCount ?? 0)} />
                   <Signal label="Users" value={String(rec.uniqueUsers ?? 0)} />
                   <Signal label="Evidence" value={formatVerification(rec.verification)} />
+                  <Signal label="Confidence" value={formatConfidence(rec.confidence)} />
+                  <Signal label="Estimated savings" value={formatBytes(estimatedSavingsBytes)} />
+                  <Signal label="Verified savings" value={formatBytes(verifiedSavingsBytes)} />
+                </div>
+                <div className={storageCertainty === 'verified' ? 'notice success' : 'notice warning'}>
+                  {storageCertaintyDescription(storageCertainty)}
                 </div>
                 {proof && <RecommendationEvidencePanel evidence={proof} />}
                 {rec.aiRationale && (
@@ -1025,8 +1034,8 @@ function RecommendationQueue({
               </div>
             </div>
             <div className="rec-metrics">
-              <span>{formatBytes(rec.spaceSavedBytes)}</span>
-              <small>{formatConfidence(rec.confidence)} • {rec.source}</small>
+              <span>{formatBytes(estimatedSavingsBytes)}</span>
+              <small>{formatConfidence(rec.confidence)} • {formatVerification(rec.verification)} • {rec.source}</small>
               <div className="button-column">
                 <button className="secondary-button" disabled={busy} onClick={() => onEvidence(rec.id)}>
                   <SearchCheck size={16} />
@@ -1057,7 +1066,8 @@ function RecommendationEvidencePanel({ evidence }: { evidence: RecommendationEvi
       <div className="signal-grid">
         <Signal label="Storage" value={formatVerification(evidence.storage.verification)} />
         <Signal label="Risk" value={evidence.storage.risk} />
-        <Signal label="Saved" value={formatBytes(evidence.storage.spaceSavedBytes)} />
+        <Signal label="Estimated" value={formatBytes(evidence.storage.estimatedSavingsBytes || evidence.storage.spaceSavedBytes)} />
+        <Signal label="Verified" value={formatBytes(evidence.storage.verifiedSavingsBytes || 0)} />
         <Signal label="Rule" value={evidence.source.rule.replace('rule:', '')} />
       </div>
       <div className="proof-grid">
@@ -1499,6 +1509,23 @@ function Signal({ label, value }: { label: string; value: string }) {
   );
 }
 
+function recommendationEstimatedSavings(rec: Recommendation): number {
+  return parseEvidenceNumber(rec.evidence?.estimatedSavingsBytes, rec.spaceSavedBytes);
+}
+
+function recommendationVerifiedSavings(rec: Recommendation): number {
+  const fallback = rec.verification === 'local_verified' ? rec.spaceSavedBytes : 0;
+  return parseEvidenceNumber(rec.evidence?.verifiedSavingsBytes, fallback);
+}
+
+function parseEvidenceNumber(value: string | undefined, fallback: number): number {
+  if (!value) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function diagnosticImportedItems(diagnostics: IntegrationDiagnostics): number {
   const summary = diagnostics.summary;
   return summary.movies + summary.series + summary.episodes + summary.videos;
@@ -1902,19 +1929,6 @@ function formatDateTime(value: string): string {
     return 'Unknown';
   }
   return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-}
-
-function formatVerification(value?: string): string {
-  switch (value) {
-    case 'local_verified':
-      return 'Local';
-    case 'path_mapped':
-      return 'Mapped';
-    case 'server_reported':
-      return 'Server';
-    default:
-      return 'Unknown';
-  }
 }
 
 function formatRecommendationState(value?: string): string {

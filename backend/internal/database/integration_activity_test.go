@@ -375,7 +375,14 @@ func TestActivityRecommendationEvidencePersists(t *testing.T) {
 		UniqueUsers:     1,
 		FavoriteCount:   0,
 		Verification:    "path_mapped",
-		Evidence:        map[string]string{"inactiveDays": "600", "thresholdDays": "540"},
+		Evidence: map[string]string{
+			"inactiveDays":          "600",
+			"thresholdDays":         "540",
+			"storageBasis":          "path_mapped",
+			"estimatedSavingsBytes": "42000000000",
+			"verifiedSavingsBytes":  "0",
+			"storageCertainty":      "mapped_estimate",
+		},
 	}
 	if err := store.ReplaceRecommendations([]recommendations.Recommendation{rec}); err != nil {
 		t.Fatal(err)
@@ -394,6 +401,9 @@ func TestActivityRecommendationEvidencePersists(t *testing.T) {
 	}
 	if got.Verification != "path_mapped" || got.Evidence["inactiveDays"] != "600" {
 		t.Fatalf("evidence = %#v", got.Evidence)
+	}
+	if got.Evidence["estimatedSavingsBytes"] != "42000000000" || got.Evidence["verifiedSavingsBytes"] != "0" || got.Evidence["storageCertainty"] != "mapped_estimate" {
+		t.Fatalf("storage certainty evidence was not persisted: %#v", got.Evidence)
 	}
 	if got.LastPlayedAt.Format(time.RFC3339) != "2025-01-02T03:04:05Z" {
 		t.Fatalf("last played = %s", got.LastPlayedAt.Format(time.RFC3339))
