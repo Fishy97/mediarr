@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/Fishy97/mediarr/backend/internal/acceptance"
 	"github.com/Fishy97/mediarr/backend/internal/auth"
 	"github.com/Fishy97/mediarr/backend/internal/database"
 	"github.com/Fishy97/mediarr/backend/internal/integrations"
@@ -110,6 +112,14 @@ func TestJellyfinSyncRoutePersistsNormalizedActivity(t *testing.T) {
 	if len(rollupBody.Data) != 1 || rollupBody.Data[0].PlayCount != 1 {
 		t.Fatalf("rollups = %#v", rollupBody.Data)
 	}
+}
+
+func parseAPITestTime(value string) time.Time {
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		panic(err)
+	}
+	return parsed
 }
 
 func TestEmbySyncRoutePersistsNormalizedActivity(t *testing.T) {
@@ -262,5 +272,68 @@ func TestJellyfinSyncCreatesActivityRecommendations(t *testing.T) {
 	}
 	if body.Data[0].Destructive {
 		t.Fatal("activity recommendation must be non-destructive")
+	}
+}
+
+func TestIntegrationDiagnosticsRouteSummarizesPersistedIngestion(t *testing.T) {
+	store, err := database.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	completedAt := parseAPITestTime("2026-04-26T10:00:00Z")
+	snapshot := database.MediaServerSnapshot{
+		Server: database.MediaServer{ID: "jellyfin", Kind: "jellyfin", Name: "Jellyfin", BaseURL: "http://jellyfin.local", Status: "configured", LastSyncedAt: completedAt, UpdatedAt: completedAt},
+		Libraries: []database.MediaServerLibrary{
+			{ServerID: "jellyfin", ExternalID: "movies", Name: "Movies", Kind: "movie", ItemCount: 1},
+		},
+		Items: []database.MediaServerItem{
+			{ServerID: "jellyfin", ExternalID: "movie_1", LibraryExternalID: "movies", Kind: "movie", Title: "Arrival", Path: "/mnt/movies/Arrival.mkv", DateCreated: completedAt.AddDate(-2, 0, 0), MatchConfidence: 0.9, UpdatedAt: completedAt},
+		},
+		Files: []database.MediaServerFile{
+			{ServerID: "jellyfin", ItemExternalID: "movie_1", Path: "/mnt/movies/Arrival.mkv", LocalPath: "/media/movies/Arrival.mkv", SizeBytes: 42_000_000_000, Verification: "local_verified", MatchConfidence: 0.95},
+		},
+		Rollups: []database.MediaActivityRollup{
+			{ServerID: "jellyfin", ItemExternalID: "movie_1", PlayCount: 1, UniqueUsers: 1, WatchedUsers: 1, LastPlayedAt: completedAt.AddDate(-2, 0, 0), UpdatedAt: completedAt},
+		},
+		Job: database.MediaSyncJob{ID: "sync_1", ServerID: "jellyfin", Status: "completed", ItemsImported: 1, RollupsImported: 1, UnmappedItems: 0, StartedAt: completedAt.Add(-time.Minute), CompletedAt: completedAt},
+	}
+	if err := store.ReplaceMediaServerSnapshot(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplaceRecommendations([]recommendations.Recommendation{{
+		ID:              "rec_1",
+		Action:          recommendations.ActionReviewInactiveMovie,
+		Title:           "Review inactive movie",
+		Explanation:     "Arrival has not been watched recently.",
+		SpaceSavedBytes: 42_000_000_000,
+		Confidence:      0.9,
+		Source:          "rule:activity-inactive-movie",
+		AffectedPaths:   []string{"/media/movies/Arrival.mkv"},
+		ServerID:        "jellyfin",
+		ExternalItemID:  "movie_1",
+		Verification:    "local_verified",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	server := NewServer(Deps{Store: store})
+	res := httptest.NewRecorder()
+	server.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/api/v1/integrations/jellyfin/diagnostics", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("diagnostics status = %d, want 200: %s", res.Code, res.Body.String())
+	}
+	var body struct {
+		Data acceptance.Report `json:"data"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Data.Summary.Movies != 1 || body.Data.Summary.ServerReportedBytes != 42_000_000_000 || body.Data.Summary.LocallyVerifiedBytes != 42_000_000_000 {
+		t.Fatalf("diagnostics summary = %#v", body.Data.Summary)
+	}
+	if len(body.Data.TopRecommendations) != 1 || body.Data.TopRecommendations[0].ID != "rec_1" {
+		t.Fatalf("diagnostics recommendations = %#v", body.Data.TopRecommendations)
 	}
 }

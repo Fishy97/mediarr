@@ -35,6 +35,7 @@ import type {
   CatalogCorrectionInput,
   CatalogItem,
   Integration,
+  IntegrationDiagnostics,
   IntegrationSyncJob,
   IntegrationSetting,
   IntegrationSettingInput,
@@ -65,6 +66,7 @@ export function App() {
   const [integrationSettings, setIntegrationSettings] = useState<IntegrationSetting[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [syncJobs, setSyncJobs] = useState<Record<string, IntegrationSyncJob | null>>({});
+  const [integrationDiagnostics, setIntegrationDiagnostics] = useState<Record<string, IntegrationDiagnostics | null>>({});
   const [integrationItems, setIntegrationItems] = useState<MediaServerItem[]>([]);
   const [activityRollups, setActivityRollups] = useState<ActivityRollup[]>([]);
   const [pathMappings, setPathMappings] = useState<PathMapping[]>([]);
@@ -148,7 +150,7 @@ export function App() {
 
   async function refreshIntegrationActivity(integrationRows = integrations) {
     const mediaServers = integrationRows.filter((integration) => integration.kind === 'media_server');
-    const [rollupRows, mappingRows, unmappedRows, itemRows, jobRows] = await Promise.all([
+    const [rollupRows, mappingRows, unmappedRows, itemRows, jobRows, diagnosticRows] = await Promise.all([
       api.activityRollups().catch(() => [] as ActivityRollup[]),
       api.pathMappings().catch(() => [] as PathMapping[]),
       api.unmappedPathItems().catch(() => [] as MediaServerItem[]),
@@ -157,12 +159,17 @@ export function App() {
         const job = await api.integrationSyncStatus(integration.id).catch(() => null);
         return [integration.id, job] as const;
       })),
+      Promise.all(mediaServers.map(async (integration) => {
+        const diagnostics = await api.integrationDiagnostics(integration.id).catch(() => null);
+        return [integration.id, diagnostics] as const;
+      })),
     ]);
     setActivityRollups(rollupRows);
     setPathMappings(mappingRows);
     setUnmappedItems(unmappedRows);
     setIntegrationItems(itemRows.flat());
     setSyncJobs(Object.fromEntries(jobRows));
+    setIntegrationDiagnostics(Object.fromEntries(diagnosticRows));
   }
 
   useEffect(() => {
@@ -565,6 +572,7 @@ export function App() {
             integrationSettings={integrationSettings}
             aiStatus={aiStatus}
             syncJobs={syncJobs}
+            integrationDiagnostics={integrationDiagnostics}
             integrationItems={integrationItems}
             activityRollups={activityRollups}
             pathMappings={pathMappings}
@@ -1033,6 +1041,7 @@ function Integrations({
   integrationSettings,
   aiStatus,
   syncJobs,
+  integrationDiagnostics,
   integrationItems,
   activityRollups,
   pathMappings,
@@ -1056,6 +1065,7 @@ function Integrations({
   integrationSettings: IntegrationSetting[];
   aiStatus: AIStatus | null;
   syncJobs: Record<string, IntegrationSyncJob | null>;
+  integrationDiagnostics: Record<string, IntegrationDiagnostics | null>;
   integrationItems: MediaServerItem[];
   activityRollups: ActivityRollup[];
   pathMappings: PathMapping[];
@@ -1086,6 +1096,7 @@ function Integrations({
               integration={integration}
               setting={integrationSettings.find((setting) => setting.integration === integration.id)}
               job={syncJobs[integration.id] ?? null}
+              diagnostics={integrationDiagnostics[integration.id] ?? null}
               importedItems={integrationItems.filter((item) => item.serverId === integration.id).length}
               activityCount={activityRollups.filter((rollup) => rollup.serverId === integration.id).length}
               pathMappingCount={pathMappings.filter((mapping) => !mapping.serverId || mapping.serverId === integration.id).length}
@@ -1153,6 +1164,7 @@ function MediaServerCard({
   integration,
   setting,
   job,
+  diagnostics,
   activeJob,
   jobDetail,
   importedItems,
@@ -1168,6 +1180,7 @@ function MediaServerCard({
   integration: Integration;
   setting?: IntegrationSetting;
   job: IntegrationSyncJob | null;
+  diagnostics: IntegrationDiagnostics | null;
   activeJob?: Job;
   jobDetail?: JobDetail;
   importedItems: number;
@@ -1229,6 +1242,8 @@ function MediaServerCard({
           <Signal label="Backoff" value={integration.retryPolicy || 'standard'} />
           <Signal label="Auto Sync" value={effectiveAutoSyncEnabled ? `Every ${formatMinutes(effectiveAutoSyncInterval)}` : 'Disabled'} />
           <Signal label="Next Sync" value={nextSync || 'After connect'} />
+          <Signal label="Verified" value={diagnostics ? formatBytes(diagnostics.summary.locallyVerifiedBytes) : 'Pending'} />
+          <Signal label="Suggestions" value={diagnostics ? String(diagnostics.summary.recommendations) : 'Pending'} />
         </div>
         <form className="integration-config" onSubmit={submit}>
           <label>
@@ -1275,9 +1290,45 @@ function MediaServerCard({
             </button>
           </div>
         </div>
+        {diagnostics && <IntegrationDiagnosticsPanel diagnostics={diagnostics} />}
         {displayJob && <ProgressPanel job={displayJob} events={jobDetail?.events || []} compact onCancel={onCancelJob} onRetry={onRetryJob} />}
       </div>
     </article>
+  );
+}
+
+function IntegrationDiagnosticsPanel({ diagnostics }: { diagnostics: IntegrationDiagnostics }) {
+  const summary = diagnostics.summary;
+  const warningCount = diagnostics.warnings.length;
+  return (
+    <div className="diagnostics-panel">
+      <div className="diagnostics-header">
+        <span>Ingestion Proof</span>
+        <span className={warningCount > 0 ? 'status-pill warning' : 'status-pill'}>{warningCount > 0 ? `${warningCount} warnings` : 'Trusted'}</span>
+      </div>
+      <div className="diagnostics-grid">
+        <Signal label="Movies" value={String(summary.movies)} />
+        <Signal label="Series" value={String(summary.series)} />
+        <Signal label="Episodes" value={String(summary.episodes)} />
+        <Signal label="Anime" value={String(summary.animeItems)} />
+        <Signal label="Files" value={String(summary.files)} />
+        <Signal label="Unmapped" value={String(summary.unmappedFiles)} />
+        <Signal label="Server Size" value={formatBytes(summary.serverReportedBytes)} />
+        <Signal label="Local Proof" value={formatBytes(summary.locallyVerifiedBytes)} />
+      </div>
+      {diagnostics.warnings.length > 0 && (
+        <ul className="diagnostics-warnings">
+          {diagnostics.warnings.slice(0, 3).map((warning) => <li key={warning}>{warning}</li>)}
+        </ul>
+      )}
+      {diagnostics.topRecommendations.length > 0 && (
+        <div className="diagnostics-top">
+          <span>Top suggestion</span>
+          <strong>{formatBytes(diagnostics.topRecommendations[0].spaceSavedBytes)}</strong>
+          <span>{formatVerification(diagnostics.topRecommendations[0].verification)}</span>
+        </div>
+      )}
+    </div>
   );
 }
 

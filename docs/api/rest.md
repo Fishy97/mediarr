@@ -37,6 +37,7 @@ All API routes are rooted at `/api/v1`.
 | POST | `/integrations/{id}/refresh` | Request a Jellyfin, Plex, or Emby library refresh |
 | POST | `/integrations/{id}/sync` | Queue a background Jellyfin, Plex, or Emby inventory/activity sync job |
 | GET | `/integrations/{id}/sync` | Active or latest media-server sync job |
+| GET | `/integrations/{id}/diagnostics` | Imported inventory/activity proof summary, warnings, storage verification, and top suggestions |
 | GET | `/integrations/{id}/items` | Imported media-server items; supports `?unmapped=true` |
 | GET | `/activity/rollups` | Normalized media activity rollups; supports `?serverId=` |
 | GET | `/path-mappings` | Path prefix mappings used to resolve server paths to Mediarr paths |
@@ -61,3 +62,5 @@ Recommendation evidence is intentionally verbose. Clients should display storage
 Provider and media-server API calls use bounded retry behavior for `429` and `5xx` responses. `Retry-After` is honored when present, capped to avoid wedging background jobs indefinitely.
 
 Integration settings include `autoSyncEnabled` and `autoSyncIntervalMinutes`. Auto-sync defaults to enabled at 360 minutes. Saving a valid URL and API key/token queues the first sync immediately, and the backend scheduler keeps due integrations fresh while avoiding duplicate active jobs.
+
+Integration diagnostics reuse the same evidence model as the live Jellyfin acceptance suite. They summarize persisted imported data, not raw provider payloads: movie/series/episode counts, file counts, server-reported bytes, locally verified bytes, unmapped files, activity rollups, warning messages, and top recommendations.

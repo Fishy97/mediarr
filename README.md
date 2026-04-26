@@ -24,6 +24,7 @@ Mediarr 1.5 is a Docker-hosted library scanner, catalog, and review dashboard fo
 - retry provider and media-server requests with bounded, Retry-After-aware backoff
 - create activity-aware cleanup recommendations for inactive and never-watched movies, series, and anime-style libraries
 - run an opt-in live Jellyfin acceptance suite against real NAS libraries without modifying media
+- show in-app ingestion diagnostics with imported counts, local verification coverage, unmapped paths, warnings, and top suggestions
 - show recommendation proof with trust state, storage verification, activity evidence, source rule, and audit-backed actions
 - protect recommendations or accept them for manual action without enabling permanent deletion
 - review unmapped Jellyfin/Plex/Emby paths, save path mappings, and verify mappings against local files

@@ -17,6 +17,7 @@ Use this checklist before tagging a public Mediarr release.
 - no endpoint permanently deletes media files
 - CI has a dedicated no-delete safety job
 - recommendation evidence, protect, and accept-manual routes work
+- integration diagnostics route and in-app ingestion proof panel work after media-server sync
 - path mapping unmapped and verify routes work
 - background job cancel, retry, and stale recovery routes work
 - `scripts/acceptance-jellyfin-live.sh` builds and documents the opt-in live Jellyfin acceptance workflow

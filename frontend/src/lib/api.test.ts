@@ -158,6 +158,39 @@ describe('api auth helpers', () => {
     }));
   });
 
+  test('integration diagnostics call returns ingestion proof summary', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        data: {
+          targetId: 'jellyfin',
+          generatedAt: '2026-04-26T10:00:00Z',
+          server: { name: 'Jellyfin', kind: 'jellyfin', status: 'configured' },
+          summary: {
+            movies: 10,
+            series: 2,
+            episodes: 40,
+            files: 50,
+            activityRollups: 42,
+            recommendations: 3,
+            serverReportedBytes: 1000,
+            locallyVerifiedBytes: 750,
+            unmappedFiles: 1,
+          },
+          warnings: ['local verification is incomplete'],
+          progressSamples: [],
+          topRecommendations: [],
+        },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.integrationDiagnostics('jellyfin')).resolves.toMatchObject({
+      targetId: 'jellyfin',
+      summary: { movies: 10, recommendations: 3 },
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/integrations/jellyfin/diagnostics', expect.any(Object));
+  });
+
   test('backup restore can inspect and restore a config archive', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ data: { entries: ['mediarr.db'] } }))

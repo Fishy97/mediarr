@@ -162,6 +162,53 @@ export type IntegrationSyncJob = {
   completedAt?: string;
 };
 
+export type IntegrationDiagnostics = {
+  targetId: string;
+  generatedAt: string;
+  server: {
+    name: string;
+    kind: string;
+    status: string;
+  };
+  summary: {
+    libraries: number;
+    users: number;
+    movies: number;
+    series: number;
+    episodes: number;
+    videos: number;
+    animeItems: number;
+    files: number;
+    activityRollups: number;
+    recommendations: number;
+    destructiveRecommendations: number;
+    serverReportedBytes: number;
+    locallyVerifiedBytes: number;
+    recommendationBytes: number;
+    unmappedFiles: number;
+    filesMissingSize: number;
+    acceptedForRecommendationBytes: number;
+  };
+  warnings: string[];
+  progressSamples: Array<{
+    phase: string;
+    message: string;
+    currentLabel?: string;
+    processed: number;
+    total: number;
+  }>;
+  topRecommendations: Array<{
+    id: string;
+    action: string;
+    title: string;
+    spaceSavedBytes: number;
+    confidence: number;
+    source: string;
+    verification: string;
+    affectedPaths?: string[];
+  }>;
+};
+
 export type Job = {
   id: string;
   kind: string;

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Fishy97/mediarr/backend/internal/acceptance"
 	"github.com/Fishy97/mediarr/backend/internal/ai"
 	"github.com/Fishy97/mediarr/backend/internal/audit"
 	"github.com/Fishy97/mediarr/backend/internal/auth"
@@ -924,6 +926,8 @@ func (server *Server) integrationActionHandler(w http.ResponseWriter, r *http.Re
 		server.integrationSyncHandler(w, r, parts[0])
 	case "items":
 		server.integrationItemsHandler(w, r, parts[0])
+	case "diagnostics":
+		server.integrationDiagnosticsHandler(w, r, parts[0])
 	default:
 		http.NotFound(w, r)
 	}
@@ -1195,6 +1199,44 @@ func (server *Server) integrationItemsHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{Data: items})
+}
+
+func (server *Server) integrationDiagnosticsHandler(w http.ResponseWriter, r *http.Request, targetID string) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.store == nil {
+		http.Error(w, "integration store is not configured", http.StatusBadRequest)
+		return
+	}
+	targetID = strings.TrimSpace(targetID)
+	snapshot, err := server.store.GetMediaServerSnapshot(targetID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	recs, err := server.store.ListRecommendations()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	filtered := make([]recommendations.Recommendation, 0, len(recs))
+	for _, rec := range recs {
+		if rec.ServerID == targetID {
+			filtered = append(filtered, rec)
+		}
+	}
+	report := acceptance.BuildReport(snapshot, filtered, nil, acceptance.ReportOptions{
+		TargetID:                 targetID,
+		GeneratedAt:              time.Now().UTC(),
+		RequireLocalVerification: true,
+	})
+	writeJSON(w, http.StatusOK, envelope{Data: report})
 }
 
 func syncIntegrationSnapshot(ctx context.Context, options integrations.Options, targetID string, mappings []database.PathMapping) (database.MediaServerSnapshot, error) {

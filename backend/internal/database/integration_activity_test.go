@@ -228,6 +228,49 @@ func TestActivityRecommendationMediaIncludesSeriesAndLibraryContext(t *testing.T
 	}
 }
 
+func TestGetMediaServerSnapshotRehydratesPersistedState(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	now := parseIntegrationTestTime("2026-04-26T10:00:00Z")
+	snapshot := MediaServerSnapshot{
+		Server: MediaServer{ID: "jellyfin", Kind: "jellyfin", Name: "Jellyfin", BaseURL: "http://jellyfin.local", Status: "configured", LastSyncedAt: now, UpdatedAt: now},
+		Users: []MediaServerUser{
+			{ServerID: "jellyfin", ExternalID: "user_1", DisplayName: "Alex", LastSeenAt: now},
+		},
+		Libraries: []MediaServerLibrary{
+			{ServerID: "jellyfin", ExternalID: "movies", Name: "Movies", Kind: "movie", ItemCount: 1},
+		},
+		Items: []MediaServerItem{
+			{ServerID: "jellyfin", ExternalID: "movie_1", LibraryExternalID: "movies", Kind: "movie", Title: "Arrival", Path: "/mnt/movies/Arrival.mkv", MatchConfidence: 0.9, UpdatedAt: now},
+		},
+		Files: []MediaServerFile{
+			{ServerID: "jellyfin", ItemExternalID: "movie_1", Path: "/mnt/movies/Arrival.mkv", LocalPath: "/media/movies/Arrival.mkv", SizeBytes: 42_000_000_000, Verification: "local_verified", MatchConfidence: 0.95},
+		},
+		Rollups: []MediaActivityRollup{
+			{ServerID: "jellyfin", ItemExternalID: "movie_1", PlayCount: 2, UniqueUsers: 1, WatchedUsers: 1, LastPlayedAt: now.AddDate(-1, 0, 0), UpdatedAt: now},
+		},
+		Job: MediaSyncJob{ID: "sync_1", ServerID: "jellyfin", Status: "completed", ItemsImported: 1, RollupsImported: 1, UnmappedItems: 0, StartedAt: now.Add(-time.Minute), CompletedAt: now},
+	}
+	if err := store.ReplaceMediaServerSnapshot(snapshot); err != nil {
+		t.Fatal(err)
+	}
+
+	rehydrated, err := store.GetMediaServerSnapshot("jellyfin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rehydrated.Server.Name != "Jellyfin" || len(rehydrated.Users) != 1 || len(rehydrated.Libraries) != 1 || len(rehydrated.Items) != 1 || len(rehydrated.Files) != 1 || len(rehydrated.Rollups) != 1 {
+		t.Fatalf("snapshot = %#v", rehydrated)
+	}
+	if rehydrated.Files[0].LocalPath != "/media/movies/Arrival.mkv" || rehydrated.Job.ID != "sync_1" {
+		t.Fatalf("snapshot evidence = %#v job=%#v", rehydrated.Files, rehydrated.Job)
+	}
+}
+
 func TestPathMappingVerificationUpgradesFileEvidence(t *testing.T) {
 	localRoot := t.TempDir()
 	localMovie := filepath.Join(localRoot, "movies", "Arrival (2016).mkv")

@@ -10,6 +10,7 @@ import type {
   IntegrationRefreshResult,
   IntegrationSetting,
   IntegrationSettingInput,
+  IntegrationDiagnostics,
   IntegrationSyncJob,
   Job,
   JobDetail,
@@ -164,6 +165,9 @@ export const api = {
   },
   async integrationSyncStatus(id: string): Promise<IntegrationSyncJob> {
     return (await request<Envelope<IntegrationSyncJob>>(`/api/v1/integrations/${encodeURIComponent(id)}/sync`)).data;
+  },
+  async integrationDiagnostics(id: string): Promise<IntegrationDiagnostics> {
+    return (await request<Envelope<IntegrationDiagnostics>>(`/api/v1/integrations/${encodeURIComponent(id)}/diagnostics`)).data;
   },
   async jobs(filter?: { active?: boolean; kind?: string; targetId?: string; limit?: number }): Promise<Job[]> {
     const params = new URLSearchParams();

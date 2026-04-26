@@ -1223,6 +1223,138 @@ func (store *Store) ListMediaServerItems(filter MediaServerItemFilter) ([]MediaS
 	return items, rows.Err()
 }
 
+func (store *Store) GetMediaServerSnapshot(serverID string) (MediaServerSnapshot, error) {
+	if store == nil || store.DB == nil {
+		return MediaServerSnapshot{}, errors.New("nil database store")
+	}
+	serverID = strings.TrimSpace(serverID)
+	if serverID == "" {
+		return MediaServerSnapshot{}, errors.New("media server id is required")
+	}
+	var snapshot MediaServerSnapshot
+	var lastSyncedAt sql.NullString
+	var updatedAt string
+	if err := store.DB.QueryRow(`SELECT id, kind, name, base_url, status, last_synced_at, updated_at
+		FROM media_servers
+		WHERE id = ?`, serverID).Scan(
+		&snapshot.Server.ID,
+		&snapshot.Server.Kind,
+		&snapshot.Server.Name,
+		&snapshot.Server.BaseURL,
+		&snapshot.Server.Status,
+		&lastSyncedAt,
+		&updatedAt,
+	); err != nil {
+		return MediaServerSnapshot{}, err
+	}
+	snapshot.Server.LastSyncedAt = parseSQLTime(lastSyncedAt)
+	snapshot.Server.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+
+	users, err := store.listMediaServerUsers(serverID)
+	if err != nil {
+		return MediaServerSnapshot{}, err
+	}
+	libraries, err := store.listMediaServerLibraries(serverID)
+	if err != nil {
+		return MediaServerSnapshot{}, err
+	}
+	items, err := store.ListMediaServerItems(MediaServerItemFilter{ServerID: serverID})
+	if err != nil {
+		return MediaServerSnapshot{}, err
+	}
+	files, err := store.listMediaServerFiles(serverID)
+	if err != nil {
+		return MediaServerSnapshot{}, err
+	}
+	rollups, err := store.ListMediaActivityRollups(serverID)
+	if err != nil {
+		return MediaServerSnapshot{}, err
+	}
+	job, err := store.LatestMediaSyncJob(serverID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return MediaServerSnapshot{}, err
+	}
+	snapshot.Users = users
+	snapshot.Libraries = libraries
+	snapshot.Items = items
+	snapshot.Files = files
+	snapshot.Rollups = rollups
+	snapshot.Job = job
+	return snapshot, nil
+}
+
+func (store *Store) listMediaServerUsers(serverID string) ([]MediaServerUser, error) {
+	rows, err := store.DB.Query(`SELECT server_id, external_id, display_name, last_seen_at
+		FROM media_server_users
+		WHERE server_id = ?
+		ORDER BY display_name, external_id`, serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	users := []MediaServerUser{}
+	for rows.Next() {
+		var user MediaServerUser
+		var lastSeenAt sql.NullString
+		if err := rows.Scan(&user.ServerID, &user.ExternalID, &user.DisplayName, &lastSeenAt); err != nil {
+			return nil, err
+		}
+		user.LastSeenAt = parseSQLTime(lastSeenAt)
+		users = append(users, user)
+	}
+	return users, rows.Err()
+}
+
+func (store *Store) listMediaServerLibraries(serverID string) ([]MediaServerLibrary, error) {
+	rows, err := store.DB.Query(`SELECT server_id, external_id, name, kind, item_count
+		FROM media_server_libraries
+		WHERE server_id = ?
+		ORDER BY name, external_id`, serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	libraries := []MediaServerLibrary{}
+	for rows.Next() {
+		var library MediaServerLibrary
+		if err := rows.Scan(&library.ServerID, &library.ExternalID, &library.Name, &library.Kind, &library.ItemCount); err != nil {
+			return nil, err
+		}
+		libraries = append(libraries, library)
+	}
+	return libraries, rows.Err()
+}
+
+func (store *Store) listMediaServerFiles(serverID string) ([]MediaServerFile, error) {
+	rows, err := store.DB.Query(`SELECT server_id, item_external_id, path, size_bytes, container, local_path, local_media_file_id, verification, match_confidence
+		FROM media_server_files
+		WHERE server_id = ?
+		ORDER BY item_external_id, path`, serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	files := []MediaServerFile{}
+	for rows.Next() {
+		var file MediaServerFile
+		if err := rows.Scan(
+			&file.ServerID,
+			&file.ItemExternalID,
+			&file.Path,
+			&file.SizeBytes,
+			&file.Container,
+			&file.LocalPath,
+			&file.LocalMediaFileID,
+			&file.Verification,
+			&file.MatchConfidence,
+		); err != nil {
+			return nil, err
+		}
+		files = append(files, file)
+	}
+	return files, rows.Err()
+}
+
 func (store *Store) ListMediaActivityRollups(serverID string) ([]MediaActivityRollup, error) {
 	if store == nil || store.DB == nil {
 		return nil, errors.New("nil database store")

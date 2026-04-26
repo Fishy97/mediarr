@@ -207,6 +207,8 @@ Mediarr imports media-server inventory, file paths, file sizes, and activity rol
 
 Auto-sync is enabled by default. Saving a valid Jellyfin, Plex, or Emby connection queues the first sync immediately, and Mediarr checks for due integrations on startup and on a background schedule. The default interval is 6 hours. You can disable auto-sync or change the interval per integration from the UI.
 
+After a sync has completed, each media-server card shows an **Ingestion Proof** panel. It summarizes imported movies, series, episodes, anime-path/library matches, files, unmapped files, server-reported size, locally verified size, warnings, and top suggestion impact. This is the in-app version of the acceptance report and is meant to tell admins whether Mediarr has enough evidence to make trustworthy recommendations.
+
 Use path mappings when Jellyfin, Plex, or Emby sees a different path than the Mediarr container. For example, if Plex reports `/mnt/media/movies` but Mediarr sees `/media/movies`, create a mapping from `/mnt/media` to `/media` in the Integrations screen.
 
 After saving a mapping, run **Verify**. Mediarr checks mapped files against the local filesystem and updates the evidence label:
