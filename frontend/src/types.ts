@@ -16,6 +16,7 @@ export type Recommendation = {
     | 'review_inactive_series'
     | 'review_abandoned_series'
     | 'review_unwatched_duplicate';
+  state?: RecommendationState;
   title: string;
   explanation: string;
   spaceSavedBytes: number;
@@ -35,6 +36,43 @@ export type Recommendation = {
   favoriteCount?: number;
   verification?: string;
   evidence?: Record<string, string>;
+};
+
+export type RecommendationState = 'new' | 'reviewing' | 'ignored' | 'protected' | 'accepted_for_manual_action';
+
+export type RecommendationEvidence = {
+  recommendationId: string;
+  state: RecommendationState;
+  title: string;
+  explanation: string;
+  confidence: number;
+  destructive: boolean;
+  affectedPaths: string[];
+  suppressionReasons: string[];
+  raw: Record<string, string>;
+  storage: {
+    spaceSavedBytes: number;
+    verification: string;
+    risk: string;
+  };
+  activity: {
+    serverId?: string;
+    externalItemId?: string;
+    lastPlayedAt?: string;
+    playCount: number;
+    uniqueUsers: number;
+    favoriteCount: number;
+  };
+  source: {
+    rule: string;
+    ai?: string;
+    aiConfidence?: number;
+  };
+  proof: Array<{
+    label: string;
+    value: string;
+    status: string;
+  }>;
 };
 
 export type ProviderHealth = {
@@ -187,6 +225,15 @@ export type PathMapping = {
   serverPathPrefix: string;
   localPathPrefix: string;
   createdAt?: string;
+  updatedAt?: string;
+};
+
+export type PathMappingVerification = {
+  mapping: PathMapping;
+  matchedFiles: number;
+  mappedFiles: number;
+  verifiedFiles: number;
+  missingFiles: number;
   updatedAt?: string;
 };
 

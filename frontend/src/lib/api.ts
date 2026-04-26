@@ -20,8 +20,10 @@ import type {
   ProviderSetting,
   ProviderSettingInput,
   Recommendation,
+  RecommendationEvidence,
   ScanResult,
   SetupStatus,
+  PathMappingVerification,
 } from '../types';
 
 type Envelope<T> = { data: T };
@@ -118,6 +120,15 @@ export const api = {
   async restoreRecommendation(id: string): Promise<void> {
     await request<Envelope<{ ok: boolean }>>(`/api/v1/recommendations/${encodeURIComponent(id)}/restore`, { method: 'POST' });
   },
+  async protectRecommendation(id: string): Promise<void> {
+    await request<Envelope<{ ok: boolean }>>(`/api/v1/recommendations/${encodeURIComponent(id)}/protect`, { method: 'POST' });
+  },
+  async acceptRecommendation(id: string): Promise<void> {
+    await request<Envelope<{ ok: boolean }>>(`/api/v1/recommendations/${encodeURIComponent(id)}/accept-manual`, { method: 'POST' });
+  },
+  async recommendationEvidence(id: string): Promise<RecommendationEvidence> {
+    return (await request<Envelope<RecommendationEvidence>>(`/api/v1/recommendations/${encodeURIComponent(id)}/evidence`)).data;
+  },
   async providers(): Promise<ProviderHealth[]> {
     return (await request<Envelope<ProviderHealth[]>>('/api/v1/providers')).data;
   },
@@ -174,6 +185,12 @@ export const api = {
   async job(id: string): Promise<JobDetail> {
     return (await request<Envelope<JobDetail>>(`/api/v1/jobs/${encodeURIComponent(id)}`)).data;
   },
+  async cancelJob(id: string): Promise<Job> {
+    return (await request<Envelope<Job>>(`/api/v1/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST' })).data;
+  },
+  async retryJob(id: string): Promise<Job> {
+    return (await request<Envelope<Job>>(`/api/v1/jobs/${encodeURIComponent(id)}/retry`, { method: 'POST' })).data;
+  },
   async integrationItems(id: string, unmapped = false): Promise<MediaServerItem[]> {
     const suffix = unmapped ? '?unmapped=true' : '';
     return (await request<Envelope<MediaServerItem[]>>(`/api/v1/integrations/${encodeURIComponent(id)}/items${suffix}`)).data;
@@ -184,6 +201,23 @@ export const api = {
   },
   async pathMappings(): Promise<PathMapping[]> {
     return (await request<Envelope<PathMapping[]>>('/api/v1/path-mappings')).data;
+  },
+  async unmappedPathItems(serverId?: string): Promise<MediaServerItem[]> {
+    const suffix = serverId ? `?serverId=${encodeURIComponent(serverId)}` : '';
+    return (await request<Envelope<MediaServerItem[]>>(`/api/v1/path-mappings/unmapped${suffix}`)).data;
+  },
+  async upsertPathMapping(mapping: Partial<PathMapping> & Pick<PathMapping, 'serverPathPrefix' | 'localPathPrefix'>): Promise<PathMapping> {
+    const id = mapping.id?.trim();
+    return (await request<Envelope<PathMapping>>(id ? `/api/v1/path-mappings/${encodeURIComponent(id)}` : '/api/v1/path-mappings', {
+      method: id ? 'PUT' : 'POST',
+      body: JSON.stringify(mapping),
+    })).data;
+  },
+  async deletePathMapping(id: string): Promise<void> {
+    await request<Envelope<{ ok: boolean }>>(`/api/v1/path-mappings/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+  async verifyPathMapping(id: string): Promise<PathMappingVerification> {
+    return (await request<Envelope<PathMappingVerification>>(`/api/v1/path-mappings/${encodeURIComponent(id)}/verify`, { method: 'POST' })).data;
   },
   async createBackup(): Promise<{ path: string }> {
     return (await request<Envelope<{ path: string }>>('/api/v1/backups', { method: 'POST' })).data;

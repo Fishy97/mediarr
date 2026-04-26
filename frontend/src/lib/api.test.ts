@@ -35,14 +35,25 @@ describe('api auth helpers', () => {
   });
 
   test('recommendation actions call review queue endpoints', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ data: { ok: true } }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ data: { ok: true } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { ok: true } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { ok: true } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { ok: true } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { recommendationId: 'rec_1', state: 'new', proof: [] } }));
     vi.stubGlobal('fetch', fetchMock);
 
     await api.ignoreRecommendation('rec_1');
     await api.restoreRecommendation('rec_1');
+    await api.protectRecommendation('rec_1');
+    await api.acceptRecommendation('rec_1');
+    await expect(api.recommendationEvidence('rec_1')).resolves.toMatchObject({ recommendationId: 'rec_1', state: 'new' });
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/recommendations/rec_1/ignore', expect.objectContaining({ method: 'POST' }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/recommendations/rec_1/restore', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/v1/recommendations/rec_1/protect', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/v1/recommendations/rec_1/accept-manual', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/v1/recommendations/rec_1/evidence', expect.any(Object));
   });
 
   test('provider settings calls redactable settings endpoints', async () => {
@@ -89,31 +100,46 @@ describe('api auth helpers', () => {
       .mockResolvedValueOnce(jsonResponse({ data: { serverId: 'jellyfin', status: 'completed', itemsImported: 1 } }))
       .mockResolvedValueOnce(jsonResponse({ data: [{ serverId: 'jellyfin', externalId: 'item_1', title: 'Arrival' }] }))
       .mockResolvedValueOnce(jsonResponse({ data: [{ serverId: 'jellyfin', itemExternalId: 'item_1', playCount: 2 }] }))
-      .mockResolvedValueOnce(jsonResponse({ data: [{ id: 'map_1', serverPathPrefix: '/mnt/media', localPathPrefix: '/media' }] }));
+      .mockResolvedValueOnce(jsonResponse({ data: [{ id: 'map_1', serverPathPrefix: '/mnt/media', localPathPrefix: '/media' }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: [{ serverId: 'jellyfin', externalId: 'item_2', title: 'Unmapped' }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'map_1', serverPathPrefix: '/mnt/media', localPathPrefix: '/media' } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { mapping: { id: 'map_1' }, matchedFiles: 1, verifiedFiles: 1 } }));
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(api.syncIntegration('jellyfin')).resolves.toMatchObject({ serverId: 'jellyfin', status: 'completed' });
     await expect(api.integrationItems('jellyfin')).resolves.toHaveLength(1);
     await expect(api.activityRollups()).resolves.toHaveLength(1);
     await expect(api.pathMappings()).resolves.toHaveLength(1);
+    await expect(api.unmappedPathItems()).resolves.toHaveLength(1);
+    await expect(api.upsertPathMapping({ id: 'map_1', serverPathPrefix: '/mnt/media', localPathPrefix: '/media' })).resolves.toMatchObject({ id: 'map_1' });
+    await expect(api.verifyPathMapping('map_1')).resolves.toMatchObject({ matchedFiles: 1, verifiedFiles: 1 });
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/integrations/jellyfin/sync', expect.objectContaining({ method: 'POST' }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/integrations/jellyfin/items', expect.any(Object));
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/v1/activity/rollups', expect.any(Object));
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/v1/path-mappings', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/v1/path-mappings/unmapped', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/v1/path-mappings/map_1', expect.objectContaining({ method: 'PUT' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/v1/path-mappings/map_1/verify', expect.objectContaining({ method: 'POST' }));
   });
 
   test('jobs endpoints expose active background progress', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ data: [{ id: 'job_1', kind: 'filesystem_scan', status: 'running', phase: 'processing' }] }))
-      .mockResolvedValueOnce(jsonResponse({ data: { id: 'job_1', kind: 'filesystem_scan', status: 'running', events: [{ id: 'evt_1', message: 'Processed Arrival' }] } }));
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'job_1', kind: 'filesystem_scan', status: 'running', events: [{ id: 'evt_1', message: 'Processed Arrival' }] } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'job_1', status: 'canceled' } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'job_2', status: 'queued' } }));
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(api.jobs({ active: true })).resolves.toHaveLength(1);
     await expect(api.job('job_1')).resolves.toMatchObject({ id: 'job_1', events: [{ message: 'Processed Arrival' }] });
+    await expect(api.cancelJob('job_1')).resolves.toMatchObject({ status: 'canceled' });
+    await expect(api.retryJob('job_1')).resolves.toMatchObject({ id: 'job_2', status: 'queued' });
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/jobs?active=true', expect.any(Object));
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/jobs/job_1', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/v1/jobs/job_1/cancel', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/v1/jobs/job_1/retry', expect.objectContaining({ method: 'POST' }));
   });
 
   test('integration settings calls redactable media server setting endpoints', async () => {

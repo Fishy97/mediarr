@@ -13,6 +13,7 @@ import {
   KeyRound,
   Library,
   LogOut,
+  Map as MapIcon,
   Pencil,
   PlayCircle,
   RefreshCw,
@@ -47,6 +48,7 @@ import type {
   ProviderSetting,
   ProviderSettingInput,
   Recommendation,
+  RecommendationEvidence,
   ScanResult,
 } from './types';
 
@@ -66,8 +68,10 @@ export function App() {
   const [integrationItems, setIntegrationItems] = useState<MediaServerItem[]>([]);
   const [activityRollups, setActivityRollups] = useState<ActivityRollup[]>([]);
   const [pathMappings, setPathMappings] = useState<PathMapping[]>([]);
+  const [unmappedItems, setUnmappedItems] = useState<MediaServerItem[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [jobDetails, setJobDetails] = useState<Record<string, JobDetail>>({});
+  const [recommendationEvidence, setRecommendationEvidence] = useState<Record<string, RecommendationEvidence>>({});
   const [aiStatus, setAIStatus] = useState<AIStatus | null>(null);
   const [status, setStatus] = useState('Loading');
   const [error, setError] = useState<string | null>(null);
@@ -144,9 +148,10 @@ export function App() {
 
   async function refreshIntegrationActivity(integrationRows = integrations) {
     const mediaServers = integrationRows.filter((integration) => integration.kind === 'media_server');
-    const [rollupRows, mappingRows, itemRows, jobRows] = await Promise.all([
+    const [rollupRows, mappingRows, unmappedRows, itemRows, jobRows] = await Promise.all([
       api.activityRollups().catch(() => [] as ActivityRollup[]),
       api.pathMappings().catch(() => [] as PathMapping[]),
+      api.unmappedPathItems().catch(() => [] as MediaServerItem[]),
       Promise.all(mediaServers.map((integration) => api.integrationItems(integration.id).catch(() => [] as MediaServerItem[]))),
       Promise.all(mediaServers.map(async (integration) => {
         const job = await api.integrationSyncStatus(integration.id).catch(() => null);
@@ -155,6 +160,7 @@ export function App() {
     ]);
     setActivityRollups(rollupRows);
     setPathMappings(mappingRows);
+    setUnmappedItems(unmappedRows);
     setIntegrationItems(itemRows.flat());
     setSyncJobs(Object.fromEntries(jobRows));
   }
@@ -253,6 +259,51 @@ export function App() {
     }
   }
 
+  async function protectRecommendation(id: string) {
+    setBusy(true);
+    try {
+      await api.protectRecommendation(id);
+      setRecommendations((current) => current.filter((rec) => rec.id !== id));
+      setRecommendationEvidence((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to protect recommendation');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function acceptRecommendation(id: string) {
+    setBusy(true);
+    try {
+      await api.acceptRecommendation(id);
+      const [recs, evidence] = await Promise.all([api.recommendations(), api.recommendationEvidence(id).catch(() => null)]);
+      setRecommendations(recs);
+      if (evidence) {
+        setRecommendationEvidence((current) => ({ ...current, [id]: evidence }));
+      }
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to accept recommendation');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function loadRecommendationEvidence(id: string) {
+    try {
+      const evidence = await api.recommendationEvidence(id);
+      setRecommendationEvidence((current) => ({ ...current, [id]: evidence }));
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to load recommendation evidence');
+    }
+  }
+
   async function updateProviderSetting(provider: string, setting: ProviderSettingInput) {
     setBusy(true);
     try {
@@ -341,6 +392,69 @@ export function App() {
     }
   }
 
+  async function savePathMapping(mapping: Partial<PathMapping> & Pick<PathMapping, 'serverPathPrefix' | 'localPathPrefix'>) {
+    setBusy(true);
+    try {
+      await api.upsertPathMapping(mapping);
+      await refreshIntegrationActivity();
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to save path mapping');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verifyPathMapping(id: string) {
+    setBusy(true);
+    try {
+      await api.verifyPathMapping(id);
+      await refreshIntegrationActivity();
+      const recs = await api.recommendations();
+      setRecommendations(recs);
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to verify path mapping');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deletePathMapping(id: string) {
+    setBusy(true);
+    try {
+      await api.deletePathMapping(id);
+      await refreshIntegrationActivity();
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to remove path mapping');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancelJob(id: string) {
+    try {
+      const job = await api.cancelJob(id);
+      setJobs((current) => [job, ...current.filter((row) => row.id !== id)]);
+      await refreshJobs();
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to cancel job');
+    }
+  }
+
+  async function retryJob(id: string) {
+    try {
+      const job = await api.retryJob(id);
+      setJobs((current) => [job, ...current.filter((row) => row.id !== job.id)]);
+      await refreshJobs();
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to retry job');
+    }
+  }
+
   const catalogItems = useMemo(() => catalog, [catalog]);
   const totalFiles = catalogItems.length;
   const totalSize = catalogItems.reduce((sum, item) => sum + item.sizeBytes, 0);
@@ -426,11 +540,23 @@ export function App() {
             activityRollups={activityRollups}
             jobs={jobs}
             jobDetails={jobDetails}
+            onCancelJob={(id) => void cancelJob(id)}
+            onRetryJob={(id) => void retryJob(id)}
           />
         )}
         {view === 'libraries' && <Libraries libraries={libraries} scans={scans} />}
         {view === 'catalog' && <Catalog items={catalogItems} onCorrect={(id, correction) => void correctCatalogItem(id, correction)} onClear={(id) => void clearCatalogCorrection(id)} busy={busy} />}
-        {view === 'recommendations' && <RecommendationQueue recommendations={recommendations} onIgnore={(id) => void ignoreRecommendation(id)} busy={busy} />}
+        {view === 'recommendations' && (
+          <RecommendationQueue
+            recommendations={recommendations}
+            evidence={recommendationEvidence}
+            onEvidence={(id) => void loadRecommendationEvidence(id)}
+            onAccept={(id) => void acceptRecommendation(id)}
+            onProtect={(id) => void protectRecommendation(id)}
+            onIgnore={(id) => void ignoreRecommendation(id)}
+            busy={busy}
+          />
+        )}
         {view === 'integrations' && (
           <Integrations
             providers={providers}
@@ -442,12 +568,18 @@ export function App() {
             integrationItems={integrationItems}
             activityRollups={activityRollups}
             pathMappings={pathMappings}
+            unmappedItems={unmappedItems}
             jobs={jobs}
             jobDetails={jobDetails}
             onProviderUpdate={(provider, setting) => void updateProviderSetting(provider, setting)}
             onIntegrationUpdate={(integration, setting) => void updateIntegrationSetting(integration, setting)}
             onIntegrationRefresh={(id) => void refreshIntegration(id)}
             onIntegrationSync={(id) => void syncIntegration(id)}
+            onPathMappingSave={(mapping) => void savePathMapping(mapping)}
+            onPathMappingVerify={(id) => void verifyPathMapping(id)}
+            onPathMappingDelete={(id) => void deletePathMapping(id)}
+            onCancelJob={(id) => void cancelJob(id)}
+            onRetryJob={(id) => void retryJob(id)}
             busy={busy}
           />
         )}
@@ -526,6 +658,8 @@ function Dashboard({
   activityRollups,
   jobs,
   jobDetails,
+  onCancelJob,
+  onRetryJob,
 }: {
   status: string;
   libraries: MediaLibrary[];
@@ -537,6 +671,8 @@ function Dashboard({
   activityRollups: ActivityRollup[];
   jobs: Job[];
   jobDetails: Record<string, JobDetail>;
+  onCancelJob: (id: string) => void;
+  onRetryJob: (id: string) => void;
 }) {
   const lastScan = scans.at(-1);
   const activityRecommendations = recommendations.filter((rec) => rec.serverId);
@@ -546,7 +682,7 @@ function Dashboard({
     .reduce((sum, rec) => sum + rec.spaceSavedBytes, 0);
   return (
     <section className="view-grid">
-      <JobTelemetry jobs={jobs} jobDetails={jobDetails} />
+      <JobTelemetry jobs={jobs} jobDetails={jobDetails} onCancel={onCancelJob} onRetry={onRetryJob} />
       <div className="stat-strip">
         <Stat icon={<HeartPulse />} label="System" value={status.toUpperCase()} />
         <Stat icon={<FolderOpen />} label="Libraries" value={String(libraries.length)} />
@@ -788,45 +924,105 @@ function CatalogCorrectionPanel({
   );
 }
 
-function RecommendationQueue({ recommendations, onIgnore, busy }: { recommendations: Recommendation[]; onIgnore: (id: string) => void; busy: boolean }) {
+function RecommendationQueue({
+  recommendations,
+  evidence,
+  onEvidence,
+  onAccept,
+  onProtect,
+  onIgnore,
+  busy,
+}: {
+  recommendations: Recommendation[];
+  evidence: Record<string, RecommendationEvidence>;
+  onEvidence: (id: string) => void;
+  onAccept: (id: string) => void;
+  onProtect: (id: string) => void;
+  onIgnore: (id: string) => void;
+  busy: boolean;
+}) {
   return (
     <section className="queue">
-      {recommendations.map((rec) => (
-        <article className="recommendation-card" key={rec.id}>
-          <div className="rec-main">
-            <div className="rec-icon"><ShieldCheck size={22} /></div>
-            <div>
-              <h2>{rec.title}</h2>
-              <p>{rec.explanation}</p>
-              <div className="path-list">
-                {rec.affectedPaths.map((path) => <code key={path}>{path}</code>)}
-              </div>
-              {rec.serverId && (
+      {recommendations.map((rec) => {
+        const proof = evidence[rec.id];
+        return (
+          <article className="recommendation-card" key={rec.id}>
+            <div className="rec-main">
+              <div className="rec-icon"><ShieldCheck size={22} /></div>
+              <div>
+                <div className="rec-title-row">
+                  <h2>{rec.title}</h2>
+                  <span className="status-pill">{formatRecommendationState(rec.state)}</span>
+                </div>
+                <p>{rec.explanation}</p>
+                <div className="path-list">
+                  {rec.affectedPaths.map((path) => <code key={path}>{path}</code>)}
+                </div>
                 <div className="rec-evidence">
-                  <Signal label="Source" value={rec.serverId} />
-                  <Signal label="Last Played" value={rec.lastPlayedAt ? formatDateTime(rec.lastPlayedAt) : 'Never'} />
+                  <Signal label="Source" value={rec.serverId || 'Local scan'} />
+                  <Signal label="Last Played" value={rec.lastPlayedAt ? formatDateTime(rec.lastPlayedAt) : rec.serverId ? 'Never' : 'N/A'} />
                   <Signal label="Plays" value={String(rec.playCount ?? 0)} />
                   <Signal label="Users" value={String(rec.uniqueUsers ?? 0)} />
                   <Signal label="Evidence" value={formatVerification(rec.verification)} />
                 </div>
-              )}
-              {rec.aiRationale && (
-                <div className="ai-note">
-                  <Bot size={16} />
-                  <span>{rec.aiRationale}</span>
-                </div>
-              )}
+                {proof && <RecommendationEvidencePanel evidence={proof} />}
+                {rec.aiRationale && (
+                  <div className="ai-note">
+                    <Bot size={16} />
+                    <span>{rec.aiRationale}</span>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-          <div className="rec-metrics">
-            <span>{formatBytes(rec.spaceSavedBytes)}</span>
-            <small>{formatConfidence(rec.confidence)} • {rec.source}</small>
-            <button className="secondary-button" disabled={busy} onClick={() => onIgnore(rec.id)}>Ignore</button>
-          </div>
-        </article>
-      ))}
+            <div className="rec-metrics">
+              <span>{formatBytes(rec.spaceSavedBytes)}</span>
+              <small>{formatConfidence(rec.confidence)} • {rec.source}</small>
+              <div className="button-column">
+                <button className="secondary-button" disabled={busy} onClick={() => onEvidence(rec.id)}>
+                  <SearchCheck size={16} />
+                  Proof
+                </button>
+                <button className="secondary-button" disabled={busy} onClick={() => onAccept(rec.id)}>
+                  <Check size={16} />
+                  Manual
+                </button>
+                <button className="secondary-button" disabled={busy} onClick={() => onProtect(rec.id)}>
+                  <ShieldCheck size={16} />
+                  Protect
+                </button>
+                <button className="secondary-button" disabled={busy} onClick={() => onIgnore(rec.id)}>Ignore</button>
+              </div>
+            </div>
+          </article>
+        );
+      })}
       {recommendations.length === 0 && <EmptyState icon={<Trash2 />} text="No cleanup recommendations are open." />}
     </section>
+  );
+}
+
+function RecommendationEvidencePanel({ evidence }: { evidence: RecommendationEvidence }) {
+  return (
+    <div className="evidence-panel">
+      <div className="signal-grid">
+        <Signal label="Storage" value={formatVerification(evidence.storage.verification)} />
+        <Signal label="Risk" value={evidence.storage.risk} />
+        <Signal label="Saved" value={formatBytes(evidence.storage.spaceSavedBytes)} />
+        <Signal label="Rule" value={evidence.source.rule.replace('rule:', '')} />
+      </div>
+      <div className="proof-grid">
+        {evidence.proof.map((point) => (
+          <div className="proof-point" key={`${point.label}-${point.value}`}>
+            <span>{point.label}</span>
+            <strong>{point.value}</strong>
+            <small>{point.status}</small>
+          </div>
+        ))}
+      </div>
+      {evidence.suppressionReasons.length > 0 && (
+        <div className="notice warning">{evidence.suppressionReasons.join(', ')}</div>
+      )}
+    </div>
   );
 }
 
@@ -840,12 +1036,18 @@ function Integrations({
   integrationItems,
   activityRollups,
   pathMappings,
+  unmappedItems,
   jobs,
   jobDetails,
   onProviderUpdate,
   onIntegrationUpdate,
   onIntegrationRefresh,
   onIntegrationSync,
+  onPathMappingSave,
+  onPathMappingVerify,
+  onPathMappingDelete,
+  onCancelJob,
+  onRetryJob,
   busy,
 }: {
   providers: ProviderHealth[];
@@ -857,12 +1059,18 @@ function Integrations({
   integrationItems: MediaServerItem[];
   activityRollups: ActivityRollup[];
   pathMappings: PathMapping[];
+  unmappedItems: MediaServerItem[];
   jobs: Job[];
   jobDetails: Record<string, JobDetail>;
   onProviderUpdate: (provider: string, setting: ProviderSettingInput) => void;
   onIntegrationUpdate: (integration: string, setting: IntegrationSettingInput) => void;
   onIntegrationRefresh: (id: string) => void;
   onIntegrationSync: (id: string) => void;
+  onPathMappingSave: (mapping: Partial<PathMapping> & Pick<PathMapping, 'serverPathPrefix' | 'localPathPrefix'>) => void;
+  onPathMappingVerify: (id: string) => void;
+  onPathMappingDelete: (id: string) => void;
+  onCancelJob: (id: string) => void;
+  onRetryJob: (id: string) => void;
   busy: boolean;
 }) {
   const mediaServers = integrations.filter((integration) => integration.kind === 'media_server');
@@ -887,10 +1095,21 @@ function Integrations({
               onUpdate={onIntegrationUpdate}
               onRefresh={onIntegrationRefresh}
               onSync={onIntegrationSync}
+              onCancelJob={onCancelJob}
+              onRetryJob={onRetryJob}
             />
           );
         })}
       </div>
+      <PathMappingWorkbench
+        integrations={mediaServers}
+        mappings={pathMappings}
+        unmappedItems={unmappedItems}
+        busy={busy}
+        onSave={onPathMappingSave}
+        onVerify={onPathMappingVerify}
+        onDelete={onPathMappingDelete}
+      />
       <div className="grid-list">
         {aiStatus && (
           <article className="status-card">
@@ -943,6 +1162,8 @@ function MediaServerCard({
   onUpdate,
   onRefresh,
   onSync,
+  onCancelJob,
+  onRetryJob,
 }: {
   integration: Integration;
   setting?: IntegrationSetting;
@@ -956,6 +1177,8 @@ function MediaServerCard({
   onUpdate: (integration: string, setting: IntegrationSettingInput) => void;
   onRefresh: (id: string) => void;
   onSync: (id: string) => void;
+  onCancelJob: (id: string) => void;
+  onRetryJob: (id: string) => void;
 }) {
   const [baseUrl, setBaseURL] = useState(setting?.baseUrl || '');
   const [apiKey, setAPIKey] = useState('');
@@ -1030,9 +1253,108 @@ function MediaServerCard({
             </button>
           </div>
         </div>
-        {displayJob && <ProgressPanel job={displayJob} events={jobDetail?.events || []} compact />}
+        {displayJob && <ProgressPanel job={displayJob} events={jobDetail?.events || []} compact onCancel={onCancelJob} onRetry={onRetryJob} />}
       </div>
     </article>
+  );
+}
+
+function PathMappingWorkbench({
+  integrations,
+  mappings,
+  unmappedItems,
+  busy,
+  onSave,
+  onVerify,
+  onDelete,
+}: {
+  integrations: Integration[];
+  mappings: PathMapping[];
+  unmappedItems: MediaServerItem[];
+  busy: boolean;
+  onSave: (mapping: Partial<PathMapping> & Pick<PathMapping, 'serverPathPrefix' | 'localPathPrefix'>) => void;
+  onVerify: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [serverId, setServerID] = useState(integrations[0]?.id || 'jellyfin');
+  const [serverPathPrefix, setServerPathPrefix] = useState('/mnt/media');
+  const [localPathPrefix, setLocalPathPrefix] = useState('/media');
+
+  useEffect(() => {
+    if (!integrations.some((integration) => integration.id === serverId)) {
+      setServerID(integrations[0]?.id || 'jellyfin');
+    }
+  }, [integrations, serverId]);
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    onSave({ serverId, serverPathPrefix, localPathPrefix });
+  }
+
+  return (
+    <section className="mapping-workbench">
+      <div className="panel-heading">
+        <div>
+          <h2>Path Mapping</h2>
+          <p>{unmappedItems.length} unmapped server items require path proof</p>
+        </div>
+        <span className={unmappedItems.length > 0 ? 'status-pill warning' : 'status-pill'}>{unmappedItems.length > 0 ? 'Review' : 'Verified'}</span>
+      </div>
+      <form className="mapping-form" onSubmit={submit}>
+        <label>
+          Server
+          <select value={serverId} onChange={(event) => setServerID(event.target.value)}>
+            {integrations.map((integration) => <option value={integration.id} key={integration.id}>{integration.name}</option>)}
+          </select>
+        </label>
+        <label>
+          Server path
+          <input value={serverPathPrefix} onChange={(event) => setServerPathPrefix(event.target.value)} />
+        </label>
+        <label>
+          Mediarr path
+          <input value={localPathPrefix} onChange={(event) => setLocalPathPrefix(event.target.value)} />
+        </label>
+        <button className="primary-button" type="submit" disabled={busy || !serverPathPrefix.trim() || !localPathPrefix.trim()}>
+          <MapIcon size={16} />
+          Save mapping
+        </button>
+      </form>
+      <div className="mapping-grid">
+        <div className="mapping-list">
+          {mappings.map((mapping) => (
+            <article className="mapping-row" key={mapping.id}>
+              <div>
+                <strong>{mapping.serverId || 'All servers'}</strong>
+                <code>{mapping.serverPathPrefix}</code>
+                <code>{mapping.localPathPrefix}</code>
+              </div>
+              <div className="button-row">
+                <button className="secondary-button" disabled={busy} onClick={() => onVerify(mapping.id)}>
+                  <SearchCheck size={16} />
+                  Verify
+                </button>
+                <button className="secondary-button" disabled={busy} onClick={() => onDelete(mapping.id)}>
+                  <Trash2 size={16} />
+                  Remove
+                </button>
+              </div>
+            </article>
+          ))}
+          {mappings.length === 0 && <EmptyState icon={<MapIcon />} text="No path mappings configured." />}
+        </div>
+        <div className="unmapped-list">
+          {unmappedItems.slice(0, 8).map((item) => (
+            <div className="unmapped-row" key={`${item.serverId}-${item.externalId}`}>
+              <span>{item.serverId}</span>
+              <strong>{item.title}</strong>
+              <code>{item.path || 'No path reported'}</code>
+            </div>
+          ))}
+          {unmappedItems.length === 0 && <EmptyState icon={<ShieldCheck />} text="No unmapped server items." />}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1045,7 +1367,17 @@ function Signal({ label, value }: { label: string; value: string }) {
   );
 }
 
-function JobTelemetry({ jobs, jobDetails }: { jobs: Job[]; jobDetails: Record<string, JobDetail> }) {
+function JobTelemetry({
+  jobs,
+  jobDetails,
+  onCancel,
+  onRetry,
+}: {
+  jobs: Job[];
+  jobDetails: Record<string, JobDetail>;
+  onCancel: (id: string) => void;
+  onRetry: (id: string) => void;
+}) {
   const active = jobs.filter(isActiveJob);
   const recent = jobs.filter((job) => !isActiveJob(job)).slice(0, 3);
   if (active.length === 0 && recent.length === 0) {
@@ -1054,16 +1386,28 @@ function JobTelemetry({ jobs, jobDetails }: { jobs: Job[]; jobDetails: Record<st
   return (
     <section className="job-telemetry">
       {active.map((job) => (
-        <ProgressPanel key={job.id} job={job} events={jobDetails[job.id]?.events || []} />
+        <ProgressPanel key={job.id} job={job} events={jobDetails[job.id]?.events || []} onCancel={onCancel} onRetry={onRetry} />
       ))}
       {active.length === 0 && recent.map((job) => (
-        <ProgressPanel key={job.id} job={job} events={jobDetails[job.id]?.events || []} compact />
+        <ProgressPanel key={job.id} job={job} events={jobDetails[job.id]?.events || []} compact onCancel={onCancel} onRetry={onRetry} />
       ))}
     </section>
   );
 }
 
-function ProgressPanel({ job, events, compact = false }: { job: Job; events: JobEvent[]; compact?: boolean }) {
+function ProgressPanel({
+  job,
+  events,
+  compact = false,
+  onCancel,
+  onRetry,
+}: {
+  job: Job;
+  events: JobEvent[];
+  compact?: boolean;
+  onCancel?: (id: string) => void;
+  onRetry?: (id: string) => void;
+}) {
   const percent = job.total > 0 ? Math.min(100, Math.round((job.processed / job.total) * 100)) : 0;
   const visibleEvents = events.slice(0, compact ? 3 : 5);
   return (
@@ -1074,7 +1418,15 @@ function ProgressPanel({ job, events, compact = false }: { job: Job; events: Job
           <h2>{jobKindLabel(job)}</h2>
           <p>{job.message || job.phase}</p>
         </div>
-        <strong>{job.total > 0 ? `${job.processed} / ${job.total}` : job.currentLabel || job.phase}</strong>
+        <div className="progress-actions">
+          <strong>{job.total > 0 ? `${job.processed} / ${job.total}` : job.currentLabel || job.phase}</strong>
+          {isActiveJob(job) && onCancel && (
+            <button className="secondary-button compact-action" onClick={() => onCancel(job.id)}>Cancel</button>
+          )}
+          {!isActiveJob(job) && job.status !== 'completed' && onRetry && (
+            <button className="secondary-button compact-action" onClick={() => onRetry(job.id)}>Retry</button>
+          )}
+        </div>
       </div>
       <div className="progress-track" aria-label={`${jobKindLabel(job)} progress`}>
         <span style={{ width: job.total > 0 ? `${percent}%` : isActiveJob(job) ? '36%' : '100%' }} />
@@ -1297,6 +1649,21 @@ function formatVerification(value?: string): string {
       return 'Server';
     default:
       return 'Unknown';
+  }
+}
+
+function formatRecommendationState(value?: string): string {
+  switch (value) {
+    case 'accepted_for_manual_action':
+      return 'Manual';
+    case 'reviewing':
+      return 'Reviewing';
+    case 'protected':
+      return 'Protected';
+    case 'ignored':
+      return 'Ignored';
+    default:
+      return 'New';
   }
 }
 
