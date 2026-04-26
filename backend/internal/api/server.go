@@ -1306,7 +1306,7 @@ func (server *Server) campaignsHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, envelope{Data: campaignList})
+		writeJSON(w, http.StatusOK, envelope{Data: emptyIfNil(campaignList)})
 	case http.MethodPost:
 		var request campaigns.Campaign
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -1456,7 +1456,7 @@ func (server *Server) campaignRunsHandler(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, envelope{Data: runs})
+	writeJSON(w, http.StatusOK, envelope{Data: emptyIfNil(runs)})
 }
 
 func (server *Server) simulateCampaign(id string, now time.Time) (campaigns.Campaign, campaigns.Result, error) {

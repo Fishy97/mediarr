@@ -112,6 +112,24 @@ func TestCampaignAPICreateListSimulateAndRun(t *testing.T) {
 	}
 }
 
+func TestCampaignAPIListReturnsEmptyArrayOnFreshStore(t *testing.T) {
+	store, err := database.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	server := NewServer(Deps{Store: store})
+
+	res := httptest.NewRecorder()
+	server.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/api/v1/campaigns", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want 200: %s", res.Code, res.Body.String())
+	}
+	if !bytes.Contains(res.Body.Bytes(), []byte(`"data":[]`)) {
+		t.Fatalf("fresh campaigns list should be an empty array, got %s", res.Body.String())
+	}
+}
+
 func TestCampaignAPIDeleteRemovesDefinitionOnly(t *testing.T) {
 	store, err := database.Open(t.TempDir())
 	if err != nil {

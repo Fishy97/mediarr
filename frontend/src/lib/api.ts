@@ -225,7 +225,7 @@ export const api = {
     return (await request<Envelope<ActivityRollup[]>>(`/api/v1/activity/rollups${suffix}`)).data;
   },
   async campaigns(): Promise<Campaign[]> {
-    return (await request<Envelope<Campaign[]>>('/api/v1/campaigns')).data;
+    return (await request<Envelope<Campaign[] | null>>('/api/v1/campaigns')).data ?? [];
   },
   async createCampaign(campaign: Campaign): Promise<Campaign> {
     return (await request<Envelope<Campaign>>('/api/v1/campaigns', {

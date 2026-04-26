@@ -1274,9 +1274,10 @@ function CampaignsView({
   onRun: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
-  const [selectedID, setSelectedID] = useState(campaigns[0]?.id ?? '__new__');
+  const safeCampaigns = campaigns || [];
+  const [selectedID, setSelectedID] = useState(safeCampaigns[0]?.id ?? '__new__');
   const [draft, setDraft] = useState<Campaign>(() => newCampaignDraft());
-  const selectedCampaign = campaigns.find((campaign) => campaign.id === selectedID);
+  const selectedCampaign = safeCampaigns.find((campaign) => campaign.id === selectedID);
   const activeID = selectedCampaign?.id ?? draft.id;
   const result = results[activeID];
   const campaignRuns = runs[activeID] || [];
@@ -1287,18 +1288,18 @@ function CampaignsView({
       return;
     }
     if (selectedID !== '__new__') {
-      setSelectedID(campaigns[0]?.id ?? '__new__');
+      setSelectedID(safeCampaigns[0]?.id ?? '__new__');
       return;
     }
     if (!draft.id) {
       setDraft(newCampaignDraft());
     }
-  }, [campaigns, selectedCampaign, selectedID, draft.id]);
+  }, [safeCampaigns, selectedCampaign, selectedID, draft.id]);
 
   function updateRule(index: number, updates: Partial<CampaignRule>) {
     setDraft((current) => ({
       ...current,
-      rules: current.rules.map((rule, ruleIndex) => ruleIndex === index ? { ...rule, ...updates } : rule),
+      rules: (current.rules || []).map((rule, ruleIndex) => ruleIndex === index ? { ...rule, ...updates } : rule),
     }));
   }
 
@@ -1325,7 +1326,7 @@ function CampaignsView({
         <div className="panel-heading">
           <div>
             <h2>Stewardship Campaigns</h2>
-            <span>{campaigns.length} saved</span>
+              <span>{safeCampaigns.length} saved</span>
           </div>
           <button
             className="secondary-button compact-action"
@@ -1340,7 +1341,7 @@ function CampaignsView({
           </button>
         </div>
         <div className="campaign-list">
-          {campaigns.map((campaign) => (
+          {safeCampaigns.map((campaign) => (
             <button
               className={campaign.id === selectedID ? 'campaign-list-item active' : 'campaign-list-item'}
               type="button"
@@ -1352,7 +1353,7 @@ function CampaignsView({
               <small>{campaign.lastRunAt ? `Last run ${formatDateTime(campaign.lastRunAt)}` : 'No runs yet'}</small>
             </button>
           ))}
-          {campaigns.length === 0 && <EmptyState icon={<SlidersHorizontal />} text="No campaigns saved." />}
+          {safeCampaigns.length === 0 && <EmptyState icon={<SlidersHorizontal />} text="No campaigns saved." />}
         </div>
       </div>
       <form className="campaign-editor" onSubmit={(event) => void save(event)}>
@@ -1389,7 +1390,7 @@ function CampaignsView({
           </label>
           <label>
             Target
-            <select value={draft.targetKinds[0] || ''} onChange={(event) => setDraft((current) => ({ ...current, targetKinds: event.target.value ? [event.target.value] : [] }))}>
+            <select value={(draft.targetKinds || [])[0] || ''} onChange={(event) => setDraft((current) => ({ ...current, targetKinds: event.target.value ? [event.target.value] : [] }))}>
               <option value="">All media</option>
               <option value="movie">Movies</option>
               <option value="series">Series</option>
@@ -1416,11 +1417,11 @@ function CampaignsView({
         <div className="rule-builder">
           <div className="panel-heading">
             <h2>Rules</h2>
-            <button className="secondary-button compact-action" type="button" onClick={() => setDraft((current) => ({ ...current, rules: [...current.rules, defaultCampaignRule()] }))}>
+            <button className="secondary-button compact-action" type="button" onClick={() => setDraft((current) => ({ ...current, rules: [...(current.rules || []), defaultCampaignRule()] }))}>
               Add rule
             </button>
           </div>
-          {draft.rules.map((rule, index) => (
+          {(draft.rules || []).map((rule, index) => (
             <div className="rule-row" key={`${index}-${rule.field}-${rule.operator}`}>
               <select value={rule.field} onChange={(event) => updateRule(index, { field: event.target.value as CampaignRuleField })}>
                 {campaignRuleFields.map((field) => <option key={field.value} value={field.value}>{field.label}</option>)}
@@ -1433,7 +1434,7 @@ function CampaignsView({
                 disabled={rule.operator === 'is_empty' || rule.operator === 'is_not_empty'}
                 onChange={(event) => updateRuleValue(index, event.target.value)}
               />
-              <button className="icon-button" type="button" title="Remove rule" aria-label="Remove rule" onClick={() => setDraft((current) => ({ ...current, rules: current.rules.filter((_, ruleIndex) => ruleIndex !== index) }))}>
+              <button className="icon-button" type="button" title="Remove rule" aria-label="Remove rule" onClick={() => setDraft((current) => ({ ...current, rules: (current.rules || []).filter((_, ruleIndex) => ruleIndex !== index) }))}>
                 <Trash2 size={15} />
               </button>
             </div>

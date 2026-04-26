@@ -181,6 +181,15 @@ describe('api auth helpers', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/v1/campaigns/campaign_cold_movies', expect.objectContaining({ method: 'DELETE' }));
   });
 
+  test('campaign list normalizes null data to an empty array', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ data: null }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.campaigns()).resolves.toEqual([]);
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/campaigns', expect.any(Object));
+  });
+
   test('integration settings calls redactable media server setting endpoints', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ data: [{ integration: 'jellyfin', baseUrl: 'http://jellyfin:8096', apiKeyConfigured: true, apiKeyLast4: 'abcd' }] }))
