@@ -197,17 +197,50 @@ describe('api auth helpers', () => {
       .mockResolvedValueOnce(jsonResponse({ data: { preRestoreBackup: '/config/backups/pre.zip', restored: ['mediarr.db'] } }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(api.restoreBackup('/config/backups/backup.zip', true)).resolves.toMatchObject({ entries: ['mediarr.db'] });
-    await expect(api.restoreBackup('/config/backups/backup.zip', false)).resolves.toMatchObject({ restored: ['mediarr.db'] });
+    await expect(api.restoreBackup('mediarr-backup.zip', true)).resolves.toMatchObject({ entries: ['mediarr.db'] });
+    await expect(api.restoreBackup('mediarr-backup.zip', false)).resolves.toMatchObject({ restored: ['mediarr.db'] });
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/backups/restore', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ path: '/config/backups/backup.zip', dryRun: true }),
+      body: JSON.stringify({ name: 'mediarr-backup.zip', dryRun: true, confirmRestore: false }),
     }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/backups/restore', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ path: '/config/backups/backup.zip', dryRun: false }),
+      body: JSON.stringify({ name: 'mediarr-backup.zip', dryRun: false, confirmRestore: true }),
     }));
+  });
+
+  test('backup listing exposes downloadable archive names', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        data: [{
+          name: 'mediarr-20260426.zip',
+          path: '/config/backups/mediarr-20260426.zip',
+          sizeBytes: 4096,
+          createdAt: '2026-04-26T12:00:00Z',
+        }],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        data: {
+          name: 'mediarr-20260426.zip',
+          path: '/config/backups/mediarr-20260426.zip',
+          sizeBytes: 4096,
+          createdAt: '2026-04-26T12:00:00Z',
+        },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.backups()).resolves.toEqual([expect.objectContaining({
+      name: 'mediarr-20260426.zip',
+      sizeBytes: 4096,
+    })]);
+    await expect(api.createBackup()).resolves.toMatchObject({
+      name: 'mediarr-20260426.zip',
+      path: '/config/backups/mediarr-20260426.zip',
+    });
+    expect(api.backupDownloadUrl('mediarr backup.zip')).toBe('/api/v1/backups/mediarr%20backup.zip');
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/backups', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/backups', expect.objectContaining({ method: 'POST' }));
   });
 
   test('support bundle endpoint creates a redacted diagnostics archive', async () => {

@@ -295,6 +295,13 @@ export type BackupRestoreResult = {
   restored?: string[];
 };
 
+export type Backup = {
+  name: string;
+  path: string;
+  sizeBytes: number;
+  createdAt: string;
+};
+
 export type SupportBundle = {
   name: string;
   path: string;

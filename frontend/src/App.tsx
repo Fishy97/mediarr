@@ -33,6 +33,7 @@ import type {
   AIStatus,
   ActivityRollup,
   AuthUser,
+  Backup,
   CatalogCorrectionInput,
   CatalogItem,
   Integration,
@@ -80,6 +81,7 @@ export function App() {
   const [status, setStatus] = useState('Loading');
   const [error, setError] = useState<string | null>(null);
   const [backupNotice, setBackupNotice] = useState<string | null>(null);
+  const [backups, setBackups] = useState<Backup[]>([]);
   const [supportBundles, setSupportBundles] = useState<SupportBundle[]>([]);
   const [busy, setBusy] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
@@ -89,7 +91,7 @@ export function App() {
 
   async function refresh() {
     try {
-      const [health, libs, catalogRows, scanRows, recs, providerRows, providerSettingRows, integrationSettingRows, integrationRows, ai, bundleRows] = await Promise.all([
+      const [health, libs, catalogRows, scanRows, recs, providerRows, providerSettingRows, integrationSettingRows, integrationRows, ai, backupRows, bundleRows] = await Promise.all([
         api.health(),
         api.libraries(),
         api.catalog(),
@@ -100,6 +102,7 @@ export function App() {
         api.integrationSettings(),
         api.integrations(),
         api.aiStatus(),
+        api.backups(),
         api.supportBundles(),
       ]);
       setStatus(health.status);
@@ -112,6 +115,7 @@ export function App() {
       setIntegrationSettings(integrationSettingRows);
       setIntegrations(integrationRows);
       setAIStatus(ai);
+      setBackups(backupRows);
       setSupportBundles(bundleRows);
       await refreshIntegrationActivity(integrationRows);
       setError(null);
@@ -233,6 +237,7 @@ export function App() {
     try {
       const result = await api.createBackup();
       setBackupNotice(`Backup created: ${result.path}`);
+      setBackups(await api.backups());
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Backup failed');
@@ -255,14 +260,18 @@ export function App() {
     }
   }
 
-  async function restoreBackup(path: string, dryRun: boolean) {
+  async function restoreBackup(name: string, dryRun: boolean) {
+    if (!dryRun && !window.confirm(`Restore backup ${name}? This creates a pre-restore backup first, then replaces files under /config.`)) {
+      return;
+    }
     setBusy(true);
     try {
-      const result = await api.restoreBackup(path, dryRun);
+      const result = await api.restoreBackup(name, dryRun);
       if (dryRun) {
         setBackupNotice(`Archive contains ${result.entries?.length ?? 0} entries.`);
       } else {
         setBackupNotice(`Restored ${result.restored?.length ?? 0} entries. Pre-restore backup: ${result.preRestoreBackup}`);
+        setBackups(await api.backups());
       }
       setError(null);
     } catch (caught) {
@@ -614,7 +623,8 @@ export function App() {
           <SettingsView
             onBackup={() => void createBackup()}
             onSupportBundle={() => void createSupportBundle()}
-            onRestore={(path, dryRun) => void restoreBackup(path, dryRun)}
+            onRestore={(name, dryRun) => void restoreBackup(name, dryRun)}
+            backups={backups}
             supportBundles={supportBundles}
             notice={backupNotice}
             busy={busy}
@@ -1638,18 +1648,30 @@ function SettingsView({
   onBackup,
   onSupportBundle,
   onRestore,
+  backups,
   supportBundles,
   notice,
   busy,
 }: {
   onBackup: () => void;
   onSupportBundle: () => void;
-  onRestore: (path: string, dryRun: boolean) => void;
+  onRestore: (name: string, dryRun: boolean) => void;
+  backups: Backup[];
   supportBundles: SupportBundle[];
   notice: string | null;
   busy: boolean;
 }) {
-  const [restorePath, setRestorePath] = useState('');
+  const [selectedBackup, setSelectedBackup] = useState('');
+  useEffect(() => {
+    if (backups.length === 0) {
+      setSelectedBackup('');
+      return;
+    }
+    if (!backups.some((backup) => backup.name === selectedBackup)) {
+      setSelectedBackup(backups[0].name);
+    }
+  }, [backups, selectedBackup]);
+  const activeBackup = backups.find((backup) => backup.name === selectedBackup) ?? backups[0];
   return (
     <section className="settings-layout">
       <div className="panel form-panel">
@@ -1663,17 +1685,41 @@ function SettingsView({
         </button>
         <label>
           Restore archive
-          <input value={restorePath} onChange={(event) => setRestorePath(event.target.value)} placeholder="/config/backups/mediarr-...zip" />
+          <select value={activeBackup?.name ?? ''} onChange={(event) => setSelectedBackup(event.target.value)} disabled={backups.length === 0}>
+            {backups.length === 0 && <option value="">No backups available</option>}
+            {backups.map((backup) => <option value={backup.name} key={backup.name}>{backup.name}</option>)}
+          </select>
         </label>
         <div className="button-row">
-          <button className="secondary-button" type="button" onClick={() => onRestore(restorePath, true)} disabled={busy || restorePath.trim() === ''}>
+          <button className="secondary-button" type="button" onClick={() => activeBackup && onRestore(activeBackup.name, true)} disabled={busy || !activeBackup}>
             <SearchCheck size={16} />
             Inspect
           </button>
-          <button className="secondary-button" type="button" onClick={() => onRestore(restorePath, false)} disabled={busy || restorePath.trim() === ''}>
+          <button className="secondary-button" type="button" onClick={() => activeBackup && onRestore(activeBackup.name, false)} disabled={busy || !activeBackup}>
             <RotateCcw size={16} />
             Restore
           </button>
+          {activeBackup && (
+            <a className="secondary-button" href={api.backupDownloadUrl(activeBackup.name)} download>
+              <Download size={16} />
+              Download
+            </a>
+          )}
+        </div>
+        <div className="compact-list">
+          {backups.length === 0 && <p className="muted-copy">No backups have been created yet.</p>}
+          {backups.slice(0, 5).map((backup) => (
+            <div className="compact-row bundle-row" key={backup.name}>
+              <div>
+                <strong>{backup.name}</strong>
+                <span>{formatBytes(backup.sizeBytes)} • {formatDateTime(backup.createdAt)}</span>
+              </div>
+              <a className="secondary-button compact-action" href={api.backupDownloadUrl(backup.name)} download>
+                <Download size={16} />
+                Download
+              </a>
+            </div>
+          ))}
         </div>
         {notice && <div className="notice success">{notice}</div>}
       </div>

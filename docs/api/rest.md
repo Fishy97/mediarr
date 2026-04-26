@@ -47,7 +47,9 @@ All API routes are rooted at `/api/v1`.
 | POST | `/path-mappings/{id}/verify` | Verify mapped server files against local paths and update evidence labels |
 | DELETE | `/path-mappings/{id}` | Delete a path mapping |
 | GET | `/ai/status` | Optional local AI health and model availability |
+| GET | `/backups` | List `/config` backups |
 | POST | `/backups` | Create a `/config` backup |
+| GET | `/backups/{name}` | Download one backup by safe archive name |
 | POST | `/backups/restore` | Inspect or restore a `/config` backup |
 | GET | `/support/bundles` | List redacted support bundles under `/config/support` |
 | POST | `/support/bundles` | Create a redacted diagnostics archive under `/config/support` |
@@ -69,3 +71,5 @@ Integration settings include `autoSyncEnabled` and `autoSyncIntervalMinutes`. Au
 Integration diagnostics reuse the same evidence model as the live Jellyfin acceptance suite. They summarize persisted imported data, not raw provider payloads: movie/series/episode counts, file counts, server-reported bytes, locally verified bytes, unmapped files, activity rollups, warning messages, and top recommendations.
 
 Support bundles package redacted provider and integration settings, path mappings, recent jobs, recommendation state, ingestion diagnostics, and safety proof into a zip archive. They intentionally exclude media files, the raw SQLite database, raw provider payloads, and API keys. Download paths only accept generated `mediarr-support-*.zip` archive names and reject path traversal. The archive may still include media titles and paths because those are necessary to troubleshoot ingestion evidence.
+
+Backup downloads and restores only accept generated `mediarr-*.zip` archive names or existing paths under `/config/backups`. Non-dry-run restore requests must send `confirmRestore: true`; Mediarr creates a pre-restore backup before replacing files under `/config`.

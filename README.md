@@ -219,16 +219,17 @@ Use the Settings screen or:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/backups
+curl http://localhost:8080/api/v1/backups
 ```
 
-Backups are written under `./config/backups`.
+Backups are written under `./config/backups` and can be downloaded from the Settings screen.
 
 Restore dry-run:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/backups/restore \
   -H 'Content-Type: application/json' \
-  -d '{"path":"/config/backups/mediarr-example.zip","dryRun":true}'
+  -d '{"name":"mediarr-example.zip","dryRun":true}'
 ```
 
 Restore execution creates a new pre-restore backup first:
@@ -236,7 +237,7 @@ Restore execution creates a new pre-restore backup first:
 ```bash
 curl -X POST http://localhost:8080/api/v1/backups/restore \
   -H 'Content-Type: application/json' \
-  -d '{"path":"/config/backups/mediarr-example.zip","dryRun":false}'
+  -d '{"name":"mediarr-example.zip","dryRun":false,"confirmRestore":true}'
 ```
 
 ### 6. Support Bundle

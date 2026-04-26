@@ -36,6 +36,6 @@ docker compose --profile ai up -d
 ```
 
 - repository contains `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, Docker Compose guide, provider guide, AI guide, and REST API docs
-- `/config` backup creation, restore dry-run, and support bundle create/list/download work from the UI
+- `/config` backup create/list/download, restore dry-run, confirmed restore, and support bundle create/list/download work from the UI
 - media mounts are read-only in the default Compose file
 - release notes and `docs/threat-model.md` are updated for the release

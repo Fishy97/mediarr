@@ -28,7 +28,7 @@ Mediarr is a self-hosted stewardship service for already-downloaded media. It is
 | Mediarr to media servers | Mediarr integration client | Jellyfin, Plex, Emby API responses | Redacted credentials, bounded retries, path mapping verification, server-reported evidence labels |
 | Mediarr to metadata providers | Provider adapters | Provider API responses and outages | Provider cache, health status, graceful failure, user corrections override provider guesses |
 | Mediarr to local AI | Deterministic recommendation engine | Ollama model output | JSON validation, confidence score, advisory-only storage, no destructive authority |
-| Backup restore | Admin-approved `/config` archive | Zip file contents | Dry-run inspect, pre-restore backup, zip-slip path validation |
+| Backup restore | Admin-approved `/config` archive | Zip file contents | Dry-run inspect, selected archive names, restore confirmation, pre-restore backup, zip-slip path validation |
 | Support bundle export | Redacted operational snapshot | Support recipients and external issue trackers | Secrets redacted, raw DB and media files excluded, operators warned that media titles and paths can be present |
 
 ## Key Risks And Mitigations
@@ -55,6 +55,7 @@ Mitigations:
 - Tokens are stored server-side in `/config/mediarr.db`.
 - Job telemetry uses titles and basenames instead of full raw paths when possible.
 - Support bundles redact stored provider and media-server API keys and exclude raw provider payloads, media files, and the raw SQLite database.
+- Backup download and restore routes only accept generated archive names or paths under `/config/backups`, and non-dry-run restore requires explicit confirmation.
 - Support bundle download routes only accept generated archive names and reject path traversal.
 - Admin sessions use HTTP-only cookies, SameSite Lax, and Secure when the request is HTTPS or arrives through an HTTPS reverse proxy.
 - Operators are instructed to protect `/config`, `/config/backups`, and `/config/support`.

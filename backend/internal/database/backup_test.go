@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestBackupIncludesDatabaseSettingsAndAudit(t *testing.T) {
@@ -105,5 +106,64 @@ func TestRestoreRejectsUnsafeArchivePaths(t *testing.T) {
 
 	if _, err := RestoreBackup(configDir, backupPath, filepath.Join(configDir, "backups")); err == nil {
 		t.Fatal("unsafe archive path should be rejected")
+	}
+}
+
+func TestListBackupsSortsArchivesAndResolveRejectsUnsafeNames(t *testing.T) {
+	backupDir := t.TempDir()
+	olderName := "mediarr-20260426T110000.000000000Z.zip"
+	newerName := "mediarr-20260426T120000.000000000Z.zip"
+	olderPath := filepath.Join(backupDir, olderName)
+	newerPath := filepath.Join(backupDir, newerName)
+	if err := os.WriteFile(olderPath, []byte("older"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newerPath, []byte("newer"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, "notes.txt"), []byte("ignore"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	olderTime := time.Date(2026, 4, 26, 11, 0, 0, 0, time.UTC)
+	newerTime := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(olderPath, olderTime, olderTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(newerPath, newerTime, newerTime); err != nil {
+		t.Fatal(err)
+	}
+
+	backups, err := ListBackups(backupDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backups) != 2 {
+		t.Fatalf("backup count = %d, want 2: %#v", len(backups), backups)
+	}
+	if backups[0].Name != newerName || backups[1].Name != olderName {
+		t.Fatalf("backup order = %#v", backups)
+	}
+	if backups[0].Path != newerPath || backups[0].SizeBytes != int64(len("newer")) || !backups[0].CreatedAt.Equal(newerTime) {
+		t.Fatalf("newest backup metadata = %#v", backups[0])
+	}
+
+	resolved, err := ResolveBackupPath(backupDir, newerName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != newerPath {
+		t.Fatalf("resolved path = %q, want %q", resolved, newerPath)
+	}
+	resolved, err = ResolveBackupPath(backupDir, newerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != newerPath {
+		t.Fatalf("resolved absolute path = %q, want %q", resolved, newerPath)
+	}
+	for _, name := range []string{"", "../secret.zip", "/tmp/secret.zip", "mediarr-20260426.txt", "not-mediarr.zip"} {
+		if _, err := ResolveBackupPath(backupDir, name); err == nil {
+			t.Fatalf("ResolveBackupPath(%q) succeeded; want error", name)
+		}
 	}
 }

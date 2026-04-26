@@ -3,6 +3,7 @@ import type {
   ActivityRollup,
   AuthResponse,
   AuthUser,
+  Backup,
   BackupRestoreResult,
   CatalogCorrectionInput,
   CatalogItem,
@@ -225,8 +226,14 @@ export const api = {
   async verifyPathMapping(id: string): Promise<PathMappingVerification> {
     return (await request<Envelope<PathMappingVerification>>(`/api/v1/path-mappings/${encodeURIComponent(id)}/verify`, { method: 'POST' })).data;
   },
-  async createBackup(): Promise<{ path: string }> {
-    return (await request<Envelope<{ path: string }>>('/api/v1/backups', { method: 'POST' })).data;
+  async backups(): Promise<Backup[]> {
+    return (await request<Envelope<Backup[]>>('/api/v1/backups')).data;
+  },
+  async createBackup(): Promise<Backup> {
+    return (await request<Envelope<Backup>>('/api/v1/backups', { method: 'POST' })).data;
+  },
+  backupDownloadUrl(name: string): string {
+    return `/api/v1/backups/${encodeURIComponent(name)}`;
   },
   async createSupportBundle(): Promise<SupportBundleResult> {
     return (await request<Envelope<SupportBundleResult>>('/api/v1/support/bundles', { method: 'POST' })).data;
@@ -237,10 +244,10 @@ export const api = {
   supportBundleDownloadUrl(name: string): string {
     return `/api/v1/support/bundles/${encodeURIComponent(name)}`;
   },
-  async restoreBackup(path: string, dryRun: boolean): Promise<BackupRestoreResult> {
+  async restoreBackup(name: string, dryRun: boolean): Promise<BackupRestoreResult> {
     return (await request<Envelope<BackupRestoreResult>>('/api/v1/backups/restore', {
       method: 'POST',
-      body: JSON.stringify({ path, dryRun }),
+      body: JSON.stringify({ name, dryRun, confirmRestore: !dryRun }),
     })).data;
   },
 };

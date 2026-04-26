@@ -135,6 +135,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("/api/v1/path-mappings", server.pathMappingsHandler)
 	server.mux.HandleFunc("/api/v1/path-mappings/", server.pathMappingHandler)
 	server.mux.HandleFunc("/api/v1/ai/status", server.aiStatusHandler)
+	server.mux.HandleFunc("/api/v1/backups/", server.backupFileHandler)
 	server.mux.HandleFunc("/api/v1/backups", server.backupsHandler)
 	server.mux.HandleFunc("/api/v1/backups/restore", server.backupRestoreHandler)
 	server.mux.HandleFunc("/api/v1/support/bundles/", server.supportBundleFileHandler)
@@ -1390,21 +1391,38 @@ func (server *Server) aiStatusHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (server *Server) backupsHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+	switch r.Method {
+	case http.MethodGet:
+		if server.configDir == "" {
+			http.Error(w, "config directory not configured", http.StatusBadRequest)
+			return
+		}
+		backups, err := database.ListBackups(filepath.Join(server.configDir, "backups"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, envelope{Data: backups})
+	case http.MethodPost:
+		if server.configDir == "" {
+			http.Error(w, "config directory not configured", http.StatusBadRequest)
+			return
+		}
+		path, err := database.CreateBackup(server.configDir, filepath.Join(server.configDir, "backups"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		info, err := database.BackupInfoForPath(path)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		server.record("backup.created", "Backup created", map[string]any{"path": path})
+		writeJSON(w, http.StatusCreated, envelope{Data: info})
+	default:
 		methodNotAllowed(w, r)
-		return
 	}
-	if server.configDir == "" {
-		http.Error(w, "config directory not configured", http.StatusBadRequest)
-		return
-	}
-	path, err := database.CreateBackup(server.configDir, filepath.Join(server.configDir, "backups"))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	server.record("backup.created", "Backup created", map[string]any{"path": path})
-	writeJSON(w, http.StatusCreated, envelope{Data: map[string]string{"path": path}})
 }
 
 func (server *Server) backupRestoreHandler(w http.ResponseWriter, r *http.Request) {
@@ -1417,19 +1435,27 @@ func (server *Server) backupRestoreHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var request struct {
-		Path   string `json:"path"`
-		DryRun bool   `json:"dryRun"`
+		Name           string `json:"name"`
+		Path           string `json:"path"`
+		DryRun         bool   `json:"dryRun"`
+		ConfirmRestore bool   `json:"confirmRestore"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if request.Path == "" {
+	locator := firstNonEmpty(request.Name, request.Path)
+	if locator == "" {
 		http.Error(w, "backup path is required", http.StatusBadRequest)
 		return
 	}
+	backupPath, err := database.ResolveBackupPath(filepath.Join(server.configDir, "backups"), locator)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	if request.DryRun {
-		entries, err := database.InspectBackup(request.Path)
+		entries, err := database.InspectBackup(backupPath)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -1437,13 +1463,53 @@ func (server *Server) backupRestoreHandler(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusOK, envelope{Data: map[string]any{"entries": entries}})
 		return
 	}
-	result, err := database.RestoreBackup(server.configDir, request.Path, filepath.Join(server.configDir, "backups"))
+	if !request.ConfirmRestore {
+		http.Error(w, "restore confirmation is required", http.StatusBadRequest)
+		return
+	}
+	result, err := database.RestoreBackup(server.configDir, backupPath, filepath.Join(server.configDir, "backups"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	server.record("backup.restored", "Backup restored", map[string]any{"path": request.Path, "preRestoreBackup": result.PreRestoreBackup})
+	server.record("backup.restored", "Backup restored", map[string]any{"path": backupPath, "preRestoreBackup": result.PreRestoreBackup})
 	writeJSON(w, http.StatusOK, envelope{Data: result})
+}
+
+func (server *Server) backupFileHandler(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/api/v1/backups/restore" {
+		server.backupRestoreHandler(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.configDir == "" {
+		http.Error(w, "config directory not configured", http.StatusBadRequest)
+		return
+	}
+	escaped := strings.TrimPrefix(r.URL.EscapedPath(), "/api/v1/backups/")
+	name, err := url.PathUnescape(escaped)
+	if err != nil || strings.TrimSpace(name) == "" {
+		http.Error(w, "invalid backup name", http.StatusBadRequest)
+		return
+	}
+	path, err := database.ResolveBackupPath(filepath.Join(server.configDir, "backups"), name)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			http.Error(w, "backup not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	filename := filepath.Base(path)
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.ServeFile(w, r, path)
 }
 
 func (server *Server) supportBundlesHandler(w http.ResponseWriter, r *http.Request) {
@@ -1792,6 +1858,15 @@ type envelope struct {
 
 func methodNotAllowed(w http.ResponseWriter, _ *http.Request) {
 	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

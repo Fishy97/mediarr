@@ -286,6 +286,21 @@ Create a backup from the UI, or use:
 curl -X POST http://localhost:8080/api/v1/backups
 ```
 
+List backups:
+
+```bash
+curl http://localhost:8080/api/v1/backups \
+  -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN"
+```
+
+Download one by generated archive name:
+
+```bash
+curl -o mediarr-backup.zip \
+  -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN" \
+  http://localhost:8080/api/v1/backups/mediarr-20260426T120000.000000000Z.zip
+```
+
 Backups are written to:
 
 ```text
@@ -298,7 +313,7 @@ Inspect a backup before restoring it:
 curl -X POST http://localhost:8080/api/v1/backups/restore \
   -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"path":"/config/backups/mediarr-example.zip","dryRun":true}'
+  -d '{"name":"mediarr-example.zip","dryRun":true}'
 ```
 
 Restore creates a fresh pre-restore backup before replacing files under `/config`:
@@ -307,8 +322,10 @@ Restore creates a fresh pre-restore backup before replacing files under `/config
 curl -X POST http://localhost:8080/api/v1/backups/restore \
   -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"path":"/config/backups/mediarr-example.zip","dryRun":false}'
+  -d '{"name":"mediarr-example.zip","dryRun":false,"confirmRestore":true}'
 ```
+
+Backup download and restore paths reject unsafe archive names and path traversal. The UI uses the same selected-backup flow and asks for confirmation before restore.
 
 For host-level backups, back up the whole `config` directory:
 
