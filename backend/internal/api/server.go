@@ -177,7 +177,7 @@ func (server *Server) setupAdminHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), status)
 		return
 	}
-	server.setSessionCookie(w, session)
+	server.setSessionCookie(w, r, session)
 	server.record("auth.admin_created", "Initial admin account created", map[string]any{"email": user.Email})
 	writeJSON(w, http.StatusCreated, envelope{Data: authResponse{User: user, Token: session.Token, ExpiresAt: session.ExpiresAt}})
 }
@@ -201,7 +201,7 @@ func (server *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
-	server.setSessionCookie(w, session)
+	server.setSessionCookie(w, r, session)
 	server.record("auth.login", "Admin logged in", map[string]any{"email": user.Email})
 	writeJSON(w, http.StatusOK, envelope{Data: authResponse{User: user, Token: session.Token, ExpiresAt: session.ExpiresAt}})
 }
@@ -533,7 +533,7 @@ func (server *Server) startJob(job database.Job) error {
 	switch job.Kind {
 	case "filesystem_scan":
 		go server.runScanJob(job.ID)
-	case "jellyfin_sync", "plex_sync":
+	case "jellyfin_sync", "plex_sync", "emby_sync":
 		go server.runIntegrationSyncJob(job.ID, job.TargetID)
 	default:
 		return errors.New("job kind cannot be started")
@@ -985,6 +985,14 @@ func (server *Server) runIntegrationSyncJob(jobID string, targetID string) {
 		return
 	}
 	options := server.integrationOptions
+	if targetID == "plex" {
+		if latest, err := server.store.LatestMediaSyncJob(targetID); err == nil {
+			options.PlexHistoryCursor = latest.Cursor
+		}
+		if priorRollups, err := server.store.ListMediaActivityRollups(targetID); err == nil {
+			options.PriorRollups = priorRollups
+		}
+	}
 	options.Progress = func(progress integrations.Progress) {
 		reporter.update(database.JobUpdate{
 			Phase:           progress.Phase,
@@ -1034,6 +1042,8 @@ func integrationJobKind(targetID string) string {
 		return "jellyfin_sync"
 	case "plex":
 		return "plex_sync"
+	case "emby":
+		return "emby_sync"
 	default:
 		return ""
 	}
@@ -1084,6 +1094,8 @@ func syncIntegrationSnapshot(ctx context.Context, options integrations.Options, 
 		return integrations.SyncJellyfin(ctx, options, mappings)
 	case "plex":
 		return integrations.SyncPlex(ctx, options, mappings)
+	case "emby":
+		return integrations.SyncEmby(ctx, options, mappings)
 	default:
 		return database.MediaServerSnapshot{}, errors.New("integration sync is not supported for this target")
 	}
@@ -1496,15 +1508,33 @@ func wantsSubtitles(kind string) bool {
 	}
 }
 
-func (server *Server) setSessionCookie(w http.ResponseWriter, session auth.Session) {
+func (server *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, session auth.Session) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     auth.SessionCookieName,
 		Value:    session.Token,
 		Path:     "/",
 		Expires:  session.ExpiresAt,
+		MaxAge:   int(time.Until(session.ExpiresAt).Seconds()),
+		Secure:   requestIsHTTPS(r),
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
+}
+
+func requestIsHTTPS(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if r.TLS != nil {
+		return true
+	}
+	forwarded := strings.ToLower(r.Header.Get("X-Forwarded-Proto"))
+	for _, value := range strings.Split(forwarded, ",") {
+		if strings.TrimSpace(value) == "https" {
+			return true
+		}
+	}
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Ssl")), "on")
 }
 
 func requestToken(r *http.Request) string {

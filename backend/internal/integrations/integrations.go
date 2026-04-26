@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -20,17 +21,20 @@ type Target struct {
 	Kind        string    `json:"kind"`
 	Status      string    `json:"status"`
 	Description string    `json:"description"`
+	RetryPolicy string    `json:"retryPolicy,omitempty"`
 	CheckedAt   time.Time `json:"checkedAt"`
 }
 
 type Options struct {
-	JellyfinURL string
-	JellyfinKey string
-	PlexURL     string
-	PlexToken   string
-	EmbyURL     string
-	EmbyKey     string
-	Progress    func(Progress)
+	JellyfinURL       string
+	JellyfinKey       string
+	PlexURL           string
+	PlexToken         string
+	EmbyURL           string
+	EmbyKey           string
+	PlexHistoryCursor string
+	PriorRollups      []database.MediaActivityRollup
+	Progress          func(Progress)
 }
 
 type Progress struct {
@@ -155,10 +159,11 @@ func Defaults() []Target {
 
 func DefaultsWithOptions(options Options) []Target {
 	now := time.Now().UTC()
+	retryPolicy := "3 attempts with Retry-After aware 429/5xx backoff"
 	return []Target{
-		{ID: "jellyfin", Name: "Jellyfin", Kind: "media_server", Status: checkServer(options.JellyfinURL, options.JellyfinKey, "jellyfin"), Description: "Sync metadata, artwork, collections, and library refresh events.", CheckedAt: now},
-		{ID: "plex", Name: "Plex", Kind: "media_server", Status: checkServer(options.PlexURL, options.PlexToken, "plex"), Description: "Sync metadata, artwork, collections, and library refresh events.", CheckedAt: now},
-		{ID: "emby", Name: "Emby", Kind: "media_server", Status: checkServer(options.EmbyURL, options.EmbyKey, "emby"), Description: "Sync metadata, artwork, collections, and library refresh events.", CheckedAt: now},
+		{ID: "jellyfin", Name: "Jellyfin", Kind: "media_server", Status: checkServer(options.JellyfinURL, options.JellyfinKey, "jellyfin"), Description: "Sync metadata, artwork, collections, and library refresh events.", RetryPolicy: retryPolicy, CheckedAt: now},
+		{ID: "plex", Name: "Plex", Kind: "media_server", Status: checkServer(options.PlexURL, options.PlexToken, "plex"), Description: "Sync metadata, artwork, collections, and library refresh events.", RetryPolicy: retryPolicy, CheckedAt: now},
+		{ID: "emby", Name: "Emby", Kind: "media_server", Status: checkServer(options.EmbyURL, options.EmbyKey, "emby"), Description: "Sync metadata, artwork, collections, and library refresh events.", RetryPolicy: retryPolicy, CheckedAt: now},
 		{ID: "ollama", Name: "Ollama", Kind: "local_ai", Status: "optional", Description: "Local-only advisory AI for matching, tags, and cleanup rationales.", CheckedAt: now},
 	}
 }
@@ -190,13 +195,21 @@ func Refresh(ctx context.Context, options Options, targetID string) (RefreshResu
 }
 
 func SyncJellyfin(ctx context.Context, options Options, mappings []database.PathMapping) (database.MediaServerSnapshot, error) {
-	baseURL := strings.TrimRight(strings.TrimSpace(options.JellyfinURL), "/")
-	token := strings.TrimSpace(options.JellyfinKey)
+	return syncEmbyFamily(ctx, options, "jellyfin", options.JellyfinURL, options.JellyfinKey, "Jellyfin", mappings)
+}
+
+func SyncEmby(ctx context.Context, options Options, mappings []database.PathMapping) (database.MediaServerSnapshot, error) {
+	return syncEmbyFamily(ctx, options, "emby", options.EmbyURL, options.EmbyKey, "Emby", mappings)
+}
+
+func syncEmbyFamily(ctx context.Context, options Options, targetID string, rawBaseURL string, rawToken string, defaultName string, mappings []database.PathMapping) (database.MediaServerSnapshot, error) {
+	baseURL := strings.TrimRight(strings.TrimSpace(rawBaseURL), "/")
+	token := strings.TrimSpace(rawToken)
 	startedAt := time.Now().UTC()
 	if baseURL == "" || token == "" {
-		return database.MediaServerSnapshot{}, errors.New("jellyfin is not configured")
+		return database.MediaServerSnapshot{}, errors.New(targetID + " is not configured")
 	}
-	reportProgress(options, Progress{TargetID: "jellyfin", Phase: "connecting", Message: "Connecting to Jellyfin"})
+	reportProgress(options, Progress{TargetID: targetID, Phase: "connecting", Message: "Connecting to " + defaultName})
 
 	var info jellyfinSystemInfo
 	if err := getJSON(ctx, baseURL+"/System/Info", "X-Emby-Token", token, &info); err != nil {
@@ -204,11 +217,11 @@ func SyncJellyfin(ctx context.Context, options Options, mappings []database.Path
 	}
 	serverName := strings.TrimSpace(info.ServerName)
 	if serverName == "" {
-		serverName = "Jellyfin"
+		serverName = defaultName
 	}
 
 	var jellyfinUsers []jellyfinUser
-	reportProgress(options, Progress{TargetID: "jellyfin", Phase: "users", Message: "Reading Jellyfin users"})
+	reportProgress(options, Progress{TargetID: targetID, Phase: "users", Message: "Reading " + defaultName + " users"})
 	if err := getJSON(ctx, baseURL+"/Users", "X-Emby-Token", token, &jellyfinUsers); err != nil {
 		return database.MediaServerSnapshot{}, err
 	}
@@ -218,7 +231,7 @@ func SyncJellyfin(ctx context.Context, options Options, mappings []database.Path
 			continue
 		}
 		users = append(users, database.MediaServerUser{
-			ServerID:    "jellyfin",
+			ServerID:    targetID,
 			ExternalID:  user.ID,
 			DisplayName: strings.TrimSpace(user.Name),
 		})
@@ -235,8 +248,8 @@ func SyncJellyfin(ctx context.Context, options Options, mappings []database.Path
 		if label == "" {
 			label = "server"
 		}
-		reportProgress(options, Progress{TargetID: "jellyfin", Phase: "items", Message: "Reading Jellyfin items for " + label, CurrentLabel: label})
-		if err := syncJellyfinItemsForUser(ctx, options, baseURL, token, user.ID, mappings, itemByID, fileByKey, rollupByItemID); err != nil {
+		reportProgress(options, Progress{TargetID: targetID, Phase: "items", Message: "Reading " + defaultName + " items for " + label, CurrentLabel: label})
+		if err := syncEmbyFamilyItemsForUser(ctx, options, targetID, baseURL, token, user.ID, mappings, itemByID, fileByKey, rollupByItemID); err != nil {
 			return database.MediaServerSnapshot{}, err
 		}
 	}
@@ -258,11 +271,11 @@ func SyncJellyfin(ctx context.Context, options Options, mappings []database.Path
 		rollups = append(rollups, *rollup)
 	}
 	completedAt := time.Now().UTC()
-	reportProgress(options, Progress{TargetID: "jellyfin", Phase: "complete", Message: "Jellyfin sync completed", ItemsImported: len(items), RollupsImported: len(rollups), UnmappedItems: unmapped})
+	reportProgress(options, Progress{TargetID: targetID, Phase: "complete", Message: defaultName + " sync completed", ItemsImported: len(items), RollupsImported: len(rollups), UnmappedItems: unmapped})
 	return database.MediaServerSnapshot{
 		Server: database.MediaServer{
-			ID:           "jellyfin",
-			Kind:         "jellyfin",
+			ID:           targetID,
+			Kind:         targetID,
 			Name:         serverName,
 			BaseURL:      baseURL,
 			Status:       "configured",
@@ -271,14 +284,14 @@ func SyncJellyfin(ctx context.Context, options Options, mappings []database.Path
 		},
 		Users: users,
 		Libraries: []database.MediaServerLibrary{
-			{ServerID: "jellyfin", ExternalID: "jellyfin-all", Name: "Jellyfin Libraries", Kind: "mixed", ItemCount: len(items)},
+			{ServerID: targetID, ExternalID: targetID + "-all", Name: defaultName + " Libraries", Kind: "mixed", ItemCount: len(items)},
 		},
 		Items:   items,
 		Files:   files,
 		Rollups: rollups,
 		Job: database.MediaSyncJob{
-			ID:              "sync_jellyfin_" + completedAt.Format("20060102150405"),
-			ServerID:        "jellyfin",
+			ID:              "sync_" + targetID + "_" + completedAt.Format("20060102150405"),
+			ServerID:        targetID,
 			Status:          "completed",
 			ItemsImported:   len(items),
 			RollupsImported: len(rollups),
@@ -380,13 +393,38 @@ func SyncPlex(ctx context.Context, options Options, mappings []database.PathMapp
 
 	var history plexHistoryResponse
 	reportProgress(options, Progress{TargetID: "plex", Phase: "activity", Message: "Reading Plex playback history", ItemsImported: len(itemByID)})
-	if err := getXML(ctx, baseURL+"/status/sessions/history/all", "X-Plex-Token", token, &history); err != nil {
+	historyEndpoint := baseURL + "/status/sessions/history/all"
+	cursorSeconds, _ := strconv.ParseInt(strings.TrimSpace(options.PlexHistoryCursor), 10, 64)
+	if cursorSeconds > 0 {
+		values := url.Values{}
+		values.Set("viewedAt>", strconv.FormatInt(cursorSeconds, 10))
+		historyEndpoint += "?" + values.Encode()
+	}
+	if err := getXML(ctx, historyEndpoint, "X-Plex-Token", token, &history); err != nil {
 		return database.MediaServerSnapshot{}, err
 	}
 	rollupByItemID := map[string]*database.MediaActivityRollup{}
+	baseUniqueUsers := map[string]int{}
+	for _, prior := range options.PriorRollups {
+		if prior.ServerID != "" && prior.ServerID != "plex" {
+			continue
+		}
+		if strings.TrimSpace(prior.ItemExternalID) == "" {
+			continue
+		}
+		priorCopy := prior
+		priorCopy.ServerID = "plex"
+		priorCopy.UpdatedAt = now
+		rollupByItemID[prior.ItemExternalID] = &priorCopy
+		baseUniqueUsers[prior.ItemExternalID] = prior.UniqueUsers
+	}
 	uniqueAccounts := map[string]map[string]bool{}
+	maxViewedAt := cursorSeconds
 	for _, event := range history.Videos {
 		if strings.TrimSpace(event.RatingKey) == "" {
+			continue
+		}
+		if cursorSeconds > 0 && event.ViewedAt <= cursorSeconds {
 			continue
 		}
 		rollup := rollupByItemID[event.RatingKey]
@@ -406,11 +444,16 @@ func SyncPlex(ctx context.Context, options Options, mappings []database.PathMapp
 			}
 			uniqueAccounts[event.RatingKey][accountID] = true
 		}
+		if event.ViewedAt > maxViewedAt {
+			maxViewedAt = event.ViewedAt
+		}
 	}
 	rollups := make([]database.MediaActivityRollup, 0, len(rollupByItemID))
 	for itemID, rollup := range rollupByItemID {
-		rollup.UniqueUsers = len(uniqueAccounts[itemID])
-		rollup.WatchedUsers = rollup.UniqueUsers
+		if len(uniqueAccounts[itemID]) > 0 {
+			rollup.UniqueUsers = baseUniqueUsers[itemID] + len(uniqueAccounts[itemID])
+			rollup.WatchedUsers = rollup.UniqueUsers
+		}
 		if rollup.UniqueUsers == 0 && rollup.PlayCount > 0 {
 			rollup.UniqueUsers = 1
 			rollup.WatchedUsers = 1
@@ -453,13 +496,14 @@ func SyncPlex(ctx context.Context, options Options, mappings []database.PathMapp
 			ItemsImported:   len(items),
 			RollupsImported: len(rollups),
 			UnmappedItems:   unmapped,
+			Cursor:          strconv.FormatInt(maxViewedAt, 10),
 			StartedAt:       startedAt,
 			CompletedAt:     completedAt,
 		},
 	}, nil
 }
 
-func syncJellyfinItemsForUser(ctx context.Context, options Options, baseURL string, token string, userID string, mappings []database.PathMapping, itemByID map[string]database.MediaServerItem, fileByKey map[string]database.MediaServerFile, rollupByItemID map[string]*database.MediaActivityRollup) error {
+func syncEmbyFamilyItemsForUser(ctx context.Context, options Options, targetID string, baseURL string, token string, userID string, mappings []database.PathMapping, itemByID map[string]database.MediaServerItem, fileByKey map[string]database.MediaServerFile, rollupByItemID map[string]*database.MediaActivityRollup) error {
 	const limit = 200
 	for start := 0; ; start += limit {
 		values := url.Values{}
@@ -482,7 +526,7 @@ func syncJellyfinItemsForUser(ctx context.Context, options Options, baseURL stri
 				continue
 			}
 			reportProgress(options, Progress{
-				TargetID:        "jellyfin",
+				TargetID:        targetID,
 				Phase:           "items",
 				Message:         "Imported " + strings.TrimSpace(sourceItem.Name),
 				CurrentLabel:    strings.TrimSpace(sourceItem.Name),
@@ -493,9 +537,9 @@ func syncJellyfinItemsForUser(ctx context.Context, options Options, baseURL stri
 			})
 			if _, exists := itemByID[sourceItem.ID]; !exists {
 				itemByID[sourceItem.ID] = database.MediaServerItem{
-					ServerID:          "jellyfin",
+					ServerID:          targetID,
 					ExternalID:        sourceItem.ID,
-					LibraryExternalID: "jellyfin-all",
+					LibraryExternalID: targetID + "-all",
 					ParentExternalID:  firstNonEmpty(sourceItem.SeriesID, sourceItem.ParentID),
 					Kind:              normalizeJellyfinKind(sourceItem.Type),
 					Title:             strings.TrimSpace(sourceItem.Name),
@@ -513,9 +557,9 @@ func syncJellyfinItemsForUser(ctx context.Context, options Options, baseURL stri
 				if strings.TrimSpace(path) == "" {
 					continue
 				}
-				localPath, verification, confidence := applyPathMappings("jellyfin", path, mappings)
+				localPath, verification, confidence := applyPathMappings(targetID, path, mappings)
 				fileByKey[sourceItem.ID+"|"+path] = database.MediaServerFile{
-					ServerID:        "jellyfin",
+					ServerID:        targetID,
 					ItemExternalID:  sourceItem.ID,
 					Path:            path,
 					SizeBytes:       mediaSource.Size,
@@ -526,9 +570,9 @@ func syncJellyfinItemsForUser(ctx context.Context, options Options, baseURL stri
 				}
 			}
 			if len(sourceItem.MediaSources) == 0 && strings.TrimSpace(sourceItem.Path) != "" {
-				localPath, verification, confidence := applyPathMappings("jellyfin", sourceItem.Path, mappings)
+				localPath, verification, confidence := applyPathMappings(targetID, sourceItem.Path, mappings)
 				fileByKey[sourceItem.ID+"|"+sourceItem.Path] = database.MediaServerFile{
-					ServerID:        "jellyfin",
+					ServerID:        targetID,
 					ItemExternalID:  sourceItem.ID,
 					Path:            sourceItem.Path,
 					LocalPath:       localPath,
@@ -539,7 +583,7 @@ func syncJellyfinItemsForUser(ctx context.Context, options Options, baseURL stri
 			rollup := rollupByItemID[sourceItem.ID]
 			if rollup == nil {
 				rollup = &database.MediaActivityRollup{
-					ServerID:       "jellyfin",
+					ServerID:       targetID,
 					ItemExternalID: sourceItem.ID,
 					UpdatedAt:      now,
 				}
@@ -643,41 +687,99 @@ func checkServer(baseURL string, token string, kind string) string {
 }
 
 func getJSON(ctx context.Context, endpoint string, headerName string, token string, target any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	body, err := providerBody(ctx, endpoint, headerName, token)
 	if err != nil {
 		return err
 	}
-	if headerName != "" {
-		req.Header.Set(headerName, token)
-	}
-	res, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-	if res.StatusCode < 200 || res.StatusCode > 299 {
-		return errors.New("provider request failed with status " + res.Status)
-	}
-	return json.NewDecoder(res.Body).Decode(target)
+	return json.Unmarshal(body, target)
 }
 
 func getXML(ctx context.Context, endpoint string, headerName string, token string, target any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	body, err := providerBody(ctx, endpoint, headerName, token)
 	if err != nil {
 		return err
 	}
-	if headerName != "" {
-		req.Header.Set(headerName, token)
+	return xml.Unmarshal(body, target)
+}
+
+func providerBody(ctx context.Context, endpoint string, headerName string, token string) ([]byte, error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	var lastStatus string
+	for attempt := 1; attempt <= 3; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return nil, err
+		}
+		if headerName != "" {
+			req.Header.Set(headerName, token)
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			if attempt == 3 || !sleepWithContext(ctx, retryDelay(attempt, "")) {
+				return nil, err
+			}
+			continue
+		}
+		body, readErr := io.ReadAll(res.Body)
+		_ = res.Body.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if res.StatusCode >= 200 && res.StatusCode < 300 {
+			return body, nil
+		}
+		lastStatus = res.Status
+		if res.StatusCode == http.StatusTooManyRequests || res.StatusCode >= 500 {
+			if attempt < 3 && sleepWithContext(ctx, retryDelay(attempt, res.Header.Get("Retry-After"))) {
+				continue
+			}
+		}
+		return nil, errors.New("provider request failed with status " + res.Status)
 	}
-	res, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
-	if err != nil {
-		return err
+	if lastStatus == "" {
+		lastStatus = "unknown"
 	}
-	defer res.Body.Close()
-	if res.StatusCode < 200 || res.StatusCode > 299 {
-		return errors.New("provider request failed with status " + res.Status)
+	return nil, errors.New("provider request failed with status " + lastStatus)
+}
+
+func retryDelay(attempt int, retryAfter string) time.Duration {
+	retryAfter = strings.TrimSpace(retryAfter)
+	if retryAfter != "" {
+		if seconds, err := strconv.Atoi(retryAfter); err == nil && seconds >= 0 {
+			if seconds > 5 {
+				seconds = 5
+			}
+			return time.Duration(seconds) * time.Second
+		}
+		if retryAt, err := http.ParseTime(retryAfter); err == nil {
+			delay := time.Until(retryAt)
+			if delay > 0 && delay < 5*time.Second {
+				return delay
+			}
+		}
 	}
-	return xml.NewDecoder(res.Body).Decode(target)
+	switch attempt {
+	case 1:
+		return 250 * time.Millisecond
+	case 2:
+		return 750 * time.Millisecond
+	default:
+		return time.Second
+	}
+}
+
+func sleepWithContext(ctx context.Context, delay time.Duration) bool {
+	if delay <= 0 {
+		return true
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func intString(value int) string {

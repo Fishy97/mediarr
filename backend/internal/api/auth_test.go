@@ -79,3 +79,35 @@ func TestSetupAndLoginRoutesCreateUsableSession(t *testing.T) {
 		t.Fatalf("login status = %d, want 200: %s", res.Code, res.Body.String())
 	}
 }
+
+func TestLoginCookieIsSecureBehindHTTPSProxy(t *testing.T) {
+	store, err := database.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	service := auth.Service{Store: store, SessionTTL: time.Hour}
+	if _, _, err := service.CreateAdmin("admin@example.test", "correct horse battery staple"); err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(Deps{Store: store, Auth: &service})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewBufferString(`{"email":"admin@example.test","password":"correct horse battery staple"}`))
+	req.Header.Set("X-Forwarded-Proto", "https")
+	res := httptest.NewRecorder()
+	server.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want 200: %s", res.Code, res.Body.String())
+	}
+	cookies := res.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("login should set a session cookie")
+	}
+	if !cookies[0].Secure {
+		t.Fatalf("session cookie should be secure behind HTTPS proxy: %#v", cookies[0])
+	}
+	if cookies[0].SameSite != http.SameSiteLaxMode || !cookies[0].HttpOnly {
+		t.Fatalf("session cookie flags = %#v", cookies[0])
+	}
+}

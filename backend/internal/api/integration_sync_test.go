@@ -112,6 +112,77 @@ func TestJellyfinSyncRoutePersistsNormalizedActivity(t *testing.T) {
 	}
 }
 
+func TestEmbySyncRoutePersistsNormalizedActivity(t *testing.T) {
+	emby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Emby-Token") != "emby-key" {
+			http.Error(w, "missing token", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/System/Info":
+			_, _ = w.Write([]byte(`{"ServerName":"Emby Test"}`))
+		case "/Users":
+			_, _ = w.Write([]byte(`[{"Id":"user_1","Name":"Sam"}]`))
+		case "/Items":
+			_, _ = w.Write([]byte(`{
+				"Items": [{
+					"Id": "item_1",
+					"Name": "Arrival",
+					"Type": "Movie",
+					"ProductionYear": 2016,
+					"Path": "/media/movies/Arrival (2016).mkv",
+					"ProviderIds": {"Tmdb":"329865"},
+					"MediaSources": [{"Path":"/media/movies/Arrival (2016).mkv","Size":42000000000,"Container":"mkv"}],
+					"UserData": {"PlayCount":1,"LastPlayedDate":"2025-01-02T03:04:05Z","Played":true}
+				}],
+				"TotalRecordCount": 1
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer emby.Close()
+
+	store, err := database.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	server := NewServer(Deps{
+		Store: store,
+		IntegrationOptions: integrations.Options{
+			EmbyURL: emby.URL,
+			EmbyKey: "emby-key",
+		},
+	})
+
+	res := httptest.NewRecorder()
+	server.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/api/v1/integrations/emby/sync", nil))
+	if res.Code != http.StatusAccepted {
+		t.Fatalf("sync status = %d, want 202: %s", res.Code, res.Body.String())
+	}
+	var syncBody struct {
+		Data database.MediaSyncJob `json:"data"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&syncBody); err != nil {
+		t.Fatal(err)
+	}
+	job := waitForJobStatus(t, store, syncBody.Data.ID, "completed")
+	if job.ItemsImported != 1 || job.RollupsImported != 1 {
+		t.Fatalf("completed sync job = %#v", job)
+	}
+
+	items, err := store.ListMediaServerItems(database.MediaServerItemFilter{ServerID: "emby"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Title != "Arrival" {
+		t.Fatalf("items = %#v", items)
+	}
+}
+
 func TestJellyfinSyncCreatesActivityRecommendations(t *testing.T) {
 	jellyfin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Emby-Token") != "jellyfin-key" {

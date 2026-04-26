@@ -1215,6 +1215,7 @@ function MediaServerCard({
           <Signal label="Activity" value={String(job?.rollupsImported ?? activityCount)} />
           <Signal label="Unmapped" value={String(job?.unmappedItems ?? 0)} />
           <Signal label="Credential" value={setting?.apiKeyConfigured ? `Key ...${setting.apiKeyLast4 || ''}` : 'Not set'} />
+          <Signal label="Backoff" value={integration.retryPolicy || 'standard'} />
         </div>
         <form className="integration-config" onSubmit={submit}>
           <label>
@@ -1690,6 +1691,8 @@ function jobKindLabel(job: Job): string {
       return 'Jellyfin Sync';
     case 'plex_sync':
       return 'Plex Sync';
+    case 'emby_sync':
+      return 'Emby Sync';
     default:
       return job.kind.replaceAll('_', ' ');
   }

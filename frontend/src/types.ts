@@ -114,6 +114,7 @@ export type Integration = {
   kind: string;
   status: string;
   description: string;
+  retryPolicy?: string;
   checkedAt: string;
 };
 

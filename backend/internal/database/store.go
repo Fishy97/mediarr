@@ -705,6 +705,24 @@ func (store *Store) DeleteSession(tokenHash string) error {
 	return err
 }
 
+func (store *Store) DeleteExpiredSessions(now time.Time) (int, error) {
+	if store == nil || store.DB == nil {
+		return 0, errors.New("nil database store")
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	result, err := store.DB.Exec(`DELETE FROM sessions WHERE expires_at <= ?`, now.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return 0, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(affected), nil
+}
+
 func (store *Store) userFromQuery(query string, args ...any) (User, error) {
 	if store == nil || store.DB == nil {
 		return User{}, errors.New("nil database store")

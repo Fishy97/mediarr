@@ -79,3 +79,69 @@ func TestSyncPlexImportsLibraryPartsAndHistory(t *testing.T) {
 		t.Fatalf("job = %#v", snapshot.Job)
 	}
 }
+
+func TestSyncPlexUsesHistoryCursorAndPreservesPriorRollups(t *testing.T) {
+	var historyQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Plex-Token") != "plex-token" {
+			http.Error(w, "missing token", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		switch r.URL.Path {
+		case "/identity":
+			_, _ = w.Write([]byte(`<MediaContainer friendlyName="Plex Test"/>`))
+		case "/library/sections":
+			_, _ = w.Write([]byte(`<MediaContainer size="1"><Directory key="1" title="Movies" type="movie"/></MediaContainer>`))
+		case "/library/sections/1/all":
+			_, _ = w.Write([]byte(`<MediaContainer size="1">
+				<Video ratingKey="101" key="/library/metadata/101" title="Arrival" type="movie" year="2016" addedAt="1704067200" duration="6960000">
+					<Media duration="6960000"><Part file="/media/movies/Arrival (2016).mkv" size="42000000000" container="mkv"/></Media>
+				</Video>
+			</MediaContainer>`))
+		case "/status/sessions/history/all":
+			historyQuery = r.URL.RawQuery
+			_, _ = w.Write([]byte(`<MediaContainer size="2">
+				<Video ratingKey="101" title="Arrival" viewedAt="1735787045" accountID="1"/>
+				<Video ratingKey="101" title="Arrival" viewedAt="1736000000" accountID="2"/>
+			</MediaContainer>`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	snapshot, err := SyncPlex(context.Background(), Options{
+		PlexURL:           server.URL,
+		PlexToken:         "plex-token",
+		PlexHistoryCursor: "1735787045",
+		PriorRollups: []database.MediaActivityRollup{{
+			ServerID:       "plex",
+			ItemExternalID: "101",
+			PlayCount:      1,
+			UniqueUsers:    1,
+			WatchedUsers:   1,
+			LastPlayedAt:   time.Unix(1735787045, 0).UTC(),
+		}},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if historyQuery != "viewedAt%3E=1735787045" {
+		t.Fatalf("history query = %q, want viewedAt cursor", historyQuery)
+	}
+	if len(snapshot.Rollups) != 1 {
+		t.Fatalf("rollups = %#v", snapshot.Rollups)
+	}
+	rollup := snapshot.Rollups[0]
+	if rollup.PlayCount != 2 || rollup.UniqueUsers != 2 || rollup.WatchedUsers != 2 {
+		t.Fatalf("rollup did not merge prior and new events: %#v", rollup)
+	}
+	if !rollup.LastPlayedAt.Equal(time.Unix(1736000000, 0).UTC()) {
+		t.Fatalf("last played = %s", rollup.LastPlayedAt)
+	}
+	if snapshot.Job.Cursor != "1736000000" {
+		t.Fatalf("cursor = %q, want latest viewedAt", snapshot.Job.Cursor)
+	}
+}

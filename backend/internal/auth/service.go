@@ -46,6 +46,7 @@ func (service Service) CreateAdmin(email string, password string) (database.User
 	if service.Store == nil {
 		return database.User{}, Session{}, ErrAuthenticationStore
 	}
+	_, _ = service.Store.DeleteExpiredSessions(time.Now().UTC())
 	required, err := service.SetupRequired()
 	if err != nil {
 		return database.User{}, Session{}, err
@@ -72,6 +73,7 @@ func (service Service) Login(email string, password string) (database.User, Sess
 	if service.Store == nil {
 		return database.User{}, Session{}, ErrAuthenticationStore
 	}
+	_, _ = service.Store.DeleteExpiredSessions(time.Now().UTC())
 	user, err := service.Store.UserByEmail(email)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
