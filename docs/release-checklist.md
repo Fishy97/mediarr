@@ -19,6 +19,7 @@ Use this checklist before tagging a public Mediarr release.
 - recommendation evidence, protect, and accept-manual routes work
 - path mapping unmapped and verify routes work
 - background job cancel, retry, and stale recovery routes work
+- `scripts/acceptance-jellyfin-live.sh` builds and documents the opt-in live Jellyfin acceptance workflow
 - GHCR image workflow is present for tagged releases
 - tagged GHCR images generate GitHub artifact provenance attestations with `actions/attest`
 - `docker compose --profile ai up -d` starts the optional Ollama sidecar and model init service

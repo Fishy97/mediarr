@@ -6,7 +6,7 @@ It deliberately does not search for, download, torrent, index, or acquire media.
 
 ## Project Status
 
-Mediarr 1.4 is a Docker-hosted library scanner, catalog, and review dashboard for already-downloaded media. It can:
+Mediarr 1.5 is a Docker-hosted library scanner, catalog, and review dashboard for already-downloaded media. It can:
 
 - scan movie, series, and anime folders mounted read-only
 - parse common movie, series, and anime filename patterns
@@ -22,7 +22,8 @@ Mediarr 1.4 is a Docker-hosted library scanner, catalog, and review dashboard fo
 - show durable background-job telemetry for filesystem scans and media-server syncs, including phase, counters, current item, and recent events
 - cancel, retry, and mark stale background work so long-running scans and syncs remain transparent
 - retry provider and media-server requests with bounded, Retry-After-aware backoff
-- create activity-aware cleanup recommendations for inactive and never-watched media
+- create activity-aware cleanup recommendations for inactive and never-watched movies, series, and anime-style libraries
+- run an opt-in live Jellyfin acceptance suite against real NAS libraries without modifying media
 - show recommendation proof with trust state, storage verification, activity evidence, source rule, and audit-backed actions
 - protect recommendations or accept them for manual action without enabling permanent deletion
 - review unmapped Jellyfin/Plex/Emby paths, save path mappings, and verify mappings against local files
@@ -127,6 +128,22 @@ Auto-sync is enabled by default and runs every 6 hours. You can disable it or ch
 If Jellyfin, Plex, or Emby reports paths that differ from Mediarr's container mounts, use **Integrations > Path Mapping** to map the server prefix to the Mediarr-visible prefix. Mediarr can then verify mapped files against the local filesystem and raise evidence from `server_reported` to `path_mapped` or `local_verified`.
 
 Recommendation cards are evidence-first. Use **Proof** to inspect the rule, storage verification, activity signals, and risk level; use **Manual** to mark a recommendation accepted for human action; use **Protect** to keep the media out of the open queue.
+
+### Live Jellyfin Acceptance Suite
+
+For production validation against a real NAS Jellyfin instance, run the opt-in live acceptance suite. It calls Jellyfin read-only, imports into an isolated scratch Mediarr database, generates activity recommendations, and writes local JSON/Markdown reports under `acceptance-reports/`.
+
+```bash
+MEDIARR_ACCEPTANCE_JELLYFIN_URL="http://nas:8096" \
+MEDIARR_ACCEPTANCE_JELLYFIN_API_KEY="your-jellyfin-api-key" \
+MEDIARR_ACCEPTANCE_PATH_MAPS="/volume1/media=/media" \
+MEDIARR_ACCEPTANCE_REQUIRE_LOCAL_VERIFY=true \
+scripts/acceptance-jellyfin-live.sh
+```
+
+`MEDIARR_ACCEPTANCE_PATH_MAPS` is optional and accepts semicolon-separated mappings such as `/server/movies=/media/movies;/server/anime=/media/anime`. If the NAS paths are not mounted locally, omit the mapping and the report will clearly separate server-reported size from locally verified size. The suite never deletes, moves, refreshes, or writes media files.
+
+The script runs through Docker by default so Ubuntu hosts do not need Go installed. Use `MEDIARR_ACCEPTANCE_RUNNER=go` only when running from a development checkout with Go available.
 
 ## Ubuntu Server Deployment
 

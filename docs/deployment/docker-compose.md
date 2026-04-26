@@ -222,6 +222,46 @@ Activity data can expose household viewing behavior. Keep Mediarr behind authent
 
 Plex syncs store the most recent imported watch-history cursor. Later syncs request history at or after that cursor and preserve prior rollups, so large Plex libraries do not need to rebuild playback activity from scratch on every run.
 
+## 8. Validate A Live Jellyfin NAS Library
+
+Mediarr includes an opt-in live acceptance suite for production Jellyfin validation. It is designed for real libraries, not mocked fixture libraries. The suite reads Jellyfin inventory and user activity, imports the data into an isolated scratch Mediarr database, generates advisory recommendations, and writes reports to `acceptance-reports/`.
+
+It is read-only:
+
+- no Jellyfin library refresh is requested
+- no media file is deleted, moved, renamed, or edited
+- no normal `/config/mediarr.db` state is changed
+- scratch database files stay under `acceptance-reports/` unless `MEDIARR_ACCEPTANCE_STORE_DIR` is set
+- API keys are read from the environment and are not written to the report
+
+Run it from a checkout:
+
+```bash
+MEDIARR_ACCEPTANCE_JELLYFIN_URL="http://nas:8096" \
+MEDIARR_ACCEPTANCE_JELLYFIN_API_KEY="your-jellyfin-api-key" \
+MEDIARR_ACCEPTANCE_PATH_MAPS="/volume1/media=/media" \
+MEDIARR_ACCEPTANCE_REQUIRE_LOCAL_VERIFY=true \
+scripts/acceptance-jellyfin-live.sh
+```
+
+The script builds and runs the Mediarr Docker image by default, then executes `/app/mediarr-acceptance` inside a one-off container. This keeps the workflow aligned with normal Ubuntu Compose deployment and does not require Go on the server. Developers can set `MEDIARR_ACCEPTANCE_RUNNER=go` to run the same command with `go run`.
+
+Use `MEDIARR_ACCEPTANCE_PATH_MAPS` when the host running the suite can see the same NAS media read-only under a different path. Multiple mappings are separated with semicolons:
+
+```bash
+MEDIARR_ACCEPTANCE_PATH_MAPS="/volume1/movies=/media/movies;/volume1/anime=/media/anime"
+```
+
+If you cannot mount the NAS media locally, omit `MEDIARR_ACCEPTANCE_PATH_MAPS` and leave `MEDIARR_ACCEPTANCE_REQUIRE_LOCAL_VERIFY=false`. The report will still validate Jellyfin-reported inventory, file sizes, last-used data, and recommendations, but it will mark reclaimable storage as server-reported rather than locally verified.
+
+Optional controls:
+
+- `MEDIARR_ACCEPTANCE_REDACT_TITLES=true` redacts titles, paths, and current-item progress labels in reports.
+- `MEDIARR_ACCEPTANCE_REPORT_DIR=/path/to/reports` changes the report directory.
+- `MEDIARR_ACCEPTANCE_TIMEOUT=8h` changes the maximum runtime for very large libraries.
+
+Read the generated Markdown report first. It summarizes movies, series, episodes, anime-library items, file sizes, local verification coverage, unmapped paths, last-used activity rollups, and top suggestions.
+
 ## Reverse Proxy And TLS
 
 For internet-adjacent access, place Mediarr behind a trusted reverse proxy such as Caddy, Traefik, or Nginx and terminate TLS there. Do not expose port `8080` directly to the public internet.

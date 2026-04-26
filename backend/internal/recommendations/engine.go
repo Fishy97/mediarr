@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -41,19 +42,22 @@ type MediaFile struct {
 }
 
 type ActivityMedia struct {
-	ServerID        string
-	ExternalItemID  string
-	Kind            string
-	Title           string
-	Path            string
-	SizeBytes       int64
-	AddedAt         time.Time
-	LastPlayedAt    time.Time
-	PlayCount       int
-	UniqueUsers     int
-	FavoriteCount   int
-	Verification    string
-	MatchConfidence float64
+	ServerID             string
+	ExternalItemID       string
+	ParentExternalItemID string
+	ParentTitle          string
+	LibraryName          string
+	Kind                 string
+	Title                string
+	Path                 string
+	SizeBytes            int64
+	AddedAt              time.Time
+	LastPlayedAt         time.Time
+	PlayCount            int
+	UniqueUsers          int
+	FavoriteCount        int
+	Verification         string
+	MatchConfidence      float64
 }
 
 type Recommendation struct {
@@ -194,6 +198,7 @@ type Engine struct {
 	OversizedThresholdBytes int64
 	NeverWatchedDays        int
 	InactiveDays            int
+	ActiveSeriesGraceDays   int
 }
 
 func (engine Engine) Generate(files []MediaFile) []Recommendation {
@@ -288,6 +293,10 @@ func (engine Engine) GenerateActivity(items []ActivityMedia, now time.Time) []Re
 	if inactiveDays == 0 {
 		inactiveDays = 540
 	}
+	activeSeriesGraceDays := engine.ActiveSeriesGraceDays
+	if activeSeriesGraceDays == 0 {
+		activeSeriesGraceDays = 90
+	}
 
 	var recs []Recommendation
 	for _, item := range items {
@@ -356,6 +365,7 @@ func (engine Engine) GenerateActivity(items []ActivityMedia, now time.Time) []Re
 			}
 		}
 	}
+	recs = append(recs, engine.generateSeriesActivity(items, now, neverWatchedDays, inactiveDays, activeSeriesGraceDays)...)
 	sort.Slice(recs, func(i, j int) bool {
 		if recs[i].SpaceSavedBytes == recs[j].SpaceSavedBytes {
 			return recs[i].ID < recs[j].ID
@@ -363,6 +373,229 @@ func (engine Engine) GenerateActivity(items []ActivityMedia, now time.Time) []Re
 		return recs[i].SpaceSavedBytes > recs[j].SpaceSavedBytes
 	})
 	return recs
+}
+
+type seriesActivityGroup struct {
+	serverID      string
+	externalID    string
+	title         string
+	libraryName   string
+	sizeBytes     int64
+	paths         []string
+	latestAddedAt time.Time
+	lastPlayedAt  time.Time
+	playCount     int
+	uniqueUsers   int
+	favoriteCount int
+	verification  string
+	confidence    float64
+	matchCount    int
+	isAnime       bool
+}
+
+func (engine Engine) generateSeriesActivity(items []ActivityMedia, now time.Time, neverWatchedDays int, inactiveDays int, activeSeriesGraceDays int) []Recommendation {
+	groups := map[string]*seriesActivityGroup{}
+	for _, item := range items {
+		if !isSeriesActivityItem(item) || item.SizeBytes <= 0 || strings.TrimSpace(item.Path) == "" {
+			continue
+		}
+		externalID := firstActivityValue(item.ParentExternalItemID, item.ExternalItemID)
+		if externalID == "" {
+			continue
+		}
+		key := item.ServerID + ":" + externalID
+		group := groups[key]
+		if group == nil {
+			group = &seriesActivityGroup{
+				serverID:     item.ServerID,
+				externalID:   externalID,
+				title:        firstActivityValue(item.ParentTitle, item.Title),
+				libraryName:  item.LibraryName,
+				verification: strings.TrimSpace(item.Verification),
+				confidence:   1,
+				isAnime:      activityLooksAnime(item),
+			}
+			groups[key] = group
+		}
+		if group.title == "" {
+			group.title = firstActivityValue(item.ParentTitle, item.Title)
+		}
+		if group.libraryName == "" {
+			group.libraryName = item.LibraryName
+		}
+		group.isAnime = group.isAnime || activityLooksAnime(item)
+		group.sizeBytes += item.SizeBytes
+		group.paths = append(group.paths, item.Path)
+		if !item.AddedAt.IsZero() && (group.latestAddedAt.IsZero() || item.AddedAt.After(group.latestAddedAt)) {
+			group.latestAddedAt = item.AddedAt
+		}
+		if !item.LastPlayedAt.IsZero() && (group.lastPlayedAt.IsZero() || item.LastPlayedAt.After(group.lastPlayedAt)) {
+			group.lastPlayedAt = item.LastPlayedAt
+		}
+		group.playCount += item.PlayCount
+		if item.UniqueUsers > group.uniqueUsers {
+			group.uniqueUsers = item.UniqueUsers
+		}
+		group.favoriteCount += item.FavoriteCount
+		group.verification = weakerVerification(group.verification, item.Verification)
+		confidence := activityConfidence(item.MatchConfidence, item.Verification)
+		if confidence > 0 {
+			if group.matchCount == 0 || confidence < group.confidence {
+				group.confidence = confidence
+			}
+			group.matchCount++
+		}
+	}
+
+	var recs []Recommendation
+	for _, group := range groups {
+		if group.title == "" || group.sizeBytes <= 0 || len(group.paths) == 0 {
+			continue
+		}
+		if group.favoriteCount > 0 {
+			continue
+		}
+		if group.matchCount == 0 {
+			group.confidence = activityConfidence(0, group.verification)
+		}
+		if group.confidence < 0.65 {
+			continue
+		}
+		sort.Strings(group.paths)
+		if !group.latestAddedAt.IsZero() {
+			activeAgeDays := int(now.Sub(group.latestAddedAt).Hours() / 24)
+			if activeAgeDays >= 0 && activeAgeDays < activeSeriesGraceDays {
+				continue
+			}
+		}
+		category := "series"
+		if group.isAnime {
+			category = "anime"
+		}
+		if group.playCount == 0 && !group.latestAddedAt.IsZero() {
+			ageDays := int(now.Sub(group.latestAddedAt).Hours() / 24)
+			if ageDays >= neverWatchedDays {
+				recs = append(recs, Recommendation{
+					ID:              stableID("activity-abandoned-series:" + group.serverID + ":" + group.externalID + ":" + strings.Join(group.paths, "|")),
+					Action:          ActionReviewAbandonedSeries,
+					Title:           "Review abandoned series",
+					Explanation:     group.title + " has no imported play activity and all known files are older than the review threshold. Review the series before reclaiming storage.",
+					SpaceSavedBytes: group.sizeBytes,
+					Confidence:      group.confidence,
+					Source:          "rule:activity-abandoned-series",
+					AffectedPaths:   group.paths,
+					Destructive:     false,
+					ServerID:        group.serverID,
+					ExternalItemID:  group.externalID,
+					PlayCount:       group.playCount,
+					UniqueUsers:     group.uniqueUsers,
+					FavoriteCount:   group.favoriteCount,
+					Verification:    group.verification,
+					Evidence: map[string]string{
+						"ageDays":       strconv.Itoa(ageDays),
+						"thresholdDays": strconv.Itoa(neverWatchedDays),
+						"itemCount":     strconv.Itoa(len(group.paths)),
+						"category":      category,
+					},
+				})
+			}
+			continue
+		}
+		if group.playCount > 0 && !group.lastPlayedAt.IsZero() {
+			inactiveForDays := int(now.Sub(group.lastPlayedAt).Hours() / 24)
+			if inactiveForDays >= inactiveDays {
+				recs = append(recs, Recommendation{
+					ID:              stableID("activity-inactive-series:" + group.serverID + ":" + group.externalID + ":" + strings.Join(group.paths, "|")),
+					Action:          ActionReviewInactiveSeries,
+					Title:           "Review inactive series",
+					Explanation:     group.title + " has not been watched recently by any imported media-server user. Review the full series before reclaiming storage.",
+					SpaceSavedBytes: group.sizeBytes,
+					Confidence:      group.confidence,
+					Source:          "rule:activity-inactive-series",
+					AffectedPaths:   group.paths,
+					Destructive:     false,
+					ServerID:        group.serverID,
+					ExternalItemID:  group.externalID,
+					LastPlayedAt:    group.lastPlayedAt,
+					PlayCount:       group.playCount,
+					UniqueUsers:     group.uniqueUsers,
+					FavoriteCount:   group.favoriteCount,
+					Verification:    group.verification,
+					Evidence: map[string]string{
+						"inactiveDays":  strconv.Itoa(inactiveForDays),
+						"thresholdDays": strconv.Itoa(inactiveDays),
+						"itemCount":     strconv.Itoa(len(group.paths)),
+						"category":      category,
+					},
+				})
+			}
+		}
+	}
+	sort.Slice(recs, func(i, j int) bool {
+		if recs[i].SpaceSavedBytes == recs[j].SpaceSavedBytes {
+			return recs[i].ID < recs[j].ID
+		}
+		return recs[i].SpaceSavedBytes > recs[j].SpaceSavedBytes
+	})
+	return recs
+}
+
+func firstActivityValue(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func isSeriesActivityItem(item ActivityMedia) bool {
+	kind := strings.ToLower(strings.TrimSpace(item.Kind))
+	switch kind {
+	case "episode", "season":
+		return true
+	case "series":
+		return strings.TrimSpace(item.Path) != ""
+	case "video":
+		return strings.TrimSpace(item.ParentExternalItemID) != "" || activityLooksAnime(item)
+	default:
+		return strings.TrimSpace(item.ParentExternalItemID) != "" && kind != "movie"
+	}
+}
+
+func activityLooksAnime(item ActivityMedia) bool {
+	haystack := strings.ToLower(strings.Join([]string{item.LibraryName, item.Path, item.ParentTitle}, " "))
+	return strings.Contains(haystack, "anime")
+}
+
+func weakerVerification(current string, next string) string {
+	current = strings.TrimSpace(current)
+	next = strings.TrimSpace(next)
+	if current == "" {
+		return next
+	}
+	if next == "" {
+		return current
+	}
+	if verificationRank(next) < verificationRank(current) {
+		return next
+	}
+	return current
+}
+
+func verificationRank(verification string) int {
+	switch strings.TrimSpace(verification) {
+	case "local_verified":
+		return 4
+	case "path_mapped":
+		return 3
+	case "server_reported":
+		return 2
+	case "unmapped":
+		return 1
+	default:
+		return 0
+	}
 }
 
 func suppressionReasons(rec Recommendation) []string {

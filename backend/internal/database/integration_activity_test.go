@@ -166,6 +166,68 @@ func TestPathMappingsCanBeUpsertedListedAndDeleted(t *testing.T) {
 	}
 }
 
+func TestActivityRecommendationMediaIncludesSeriesAndLibraryContext(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	now := parseIntegrationTestTime("2026-04-26T10:00:00Z")
+	snapshot := MediaServerSnapshot{
+		Server: MediaServer{ID: "jellyfin", Kind: "jellyfin", Name: "Jellyfin", BaseURL: "http://jellyfin.local", Status: "configured"},
+		Libraries: []MediaServerLibrary{
+			{ServerID: "jellyfin", ExternalID: "lib_anime", Name: "Anime", Kind: "series", ItemCount: 2},
+		},
+		Items: []MediaServerItem{
+			{
+				ServerID:          "jellyfin",
+				ExternalID:        "series_1",
+				LibraryExternalID: "lib_anime",
+				Kind:              "series",
+				Title:             "Cowboy Bebop",
+				MatchConfidence:   0.8,
+			},
+			{
+				ServerID:          "jellyfin",
+				ExternalID:        "episode_1",
+				LibraryExternalID: "lib_anime",
+				ParentExternalID:  "series_1",
+				Kind:              "episode",
+				Title:             "Asteroid Blues",
+				Path:              "/mnt/anime/Cowboy Bebop/S01E01.mkv",
+				DateCreated:       now.AddDate(-1, 0, 0),
+				MatchConfidence:   0.8,
+			},
+		},
+		Files: []MediaServerFile{
+			{
+				ServerID:        "jellyfin",
+				ItemExternalID:  "episode_1",
+				Path:            "/mnt/anime/Cowboy Bebop/S01E01.mkv",
+				SizeBytes:       8_000_000_000,
+				Verification:    "path_mapped",
+				MatchConfidence: 0.86,
+			},
+		},
+		Job: MediaSyncJob{ID: "sync_1", ServerID: "jellyfin", Status: "completed", StartedAt: now.Add(-time.Minute), CompletedAt: now},
+	}
+	if err := store.ReplaceMediaServerSnapshot(snapshot); err != nil {
+		t.Fatal(err)
+	}
+
+	media, err := store.ListActivityRecommendationMedia()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(media) != 1 {
+		t.Fatalf("media = %d, want 1", len(media))
+	}
+	if media[0].ParentExternalItemID != "series_1" || media[0].ParentTitle != "Cowboy Bebop" || media[0].LibraryName != "Anime" {
+		t.Fatalf("series context = %#v", media[0])
+	}
+}
+
 func TestPathMappingVerificationUpgradesFileEvidence(t *testing.T) {
 	localRoot := t.TempDir()
 	localMovie := filepath.Join(localRoot, "movies", "Arrival (2016).mkv")

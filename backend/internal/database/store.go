@@ -1263,6 +1263,9 @@ func (store *Store) ListActivityRecommendationMedia() ([]recommendations.Activit
 	rows, err := store.DB.Query(`SELECT
 			items.server_id,
 			items.external_id,
+			items.parent_external_id,
+			COALESCE(parent.title, ''),
+			COALESCE(libraries.name, ''),
 			items.kind,
 			items.title,
 			COALESCE(NULLIF(files.local_path, ''), files.path),
@@ -1285,6 +1288,12 @@ func (store *Store) ListActivityRecommendationMedia() ([]recommendations.Activit
 		LEFT JOIN media_activity_rollups AS rollups
 			ON rollups.server_id = items.server_id
 			AND rollups.item_external_id = items.external_id
+		LEFT JOIN media_server_items AS parent
+			ON parent.server_id = items.server_id
+			AND parent.external_id = items.parent_external_id
+		LEFT JOIN media_server_libraries AS libraries
+			ON libraries.server_id = items.server_id
+			AND libraries.external_id = items.library_external_id
 		ORDER BY items.title, files.path`)
 	if err != nil {
 		return nil, err
@@ -1299,6 +1308,9 @@ func (store *Store) ListActivityRecommendationMedia() ([]recommendations.Activit
 		if err := rows.Scan(
 			&item.ServerID,
 			&item.ExternalItemID,
+			&item.ParentExternalItemID,
+			&item.ParentTitle,
+			&item.LibraryName,
 			&item.Kind,
 			&item.Title,
 			&item.Path,
