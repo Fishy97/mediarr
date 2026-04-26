@@ -96,6 +96,53 @@ func TestSyncJellyfinImportsInventoryAndUserActivity(t *testing.T) {
 	}
 }
 
+func TestSyncJellyfinKeepsServerReportedEvidenceWithoutPathMapping(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Emby-Token") != "jellyfin-key" {
+			http.Error(w, "missing token", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/System/Info":
+			_, _ = w.Write([]byte(`{"ServerName":"Test Jellyfin"}`))
+		case "/Users":
+			_, _ = w.Write([]byte(`[{"Id":"user_1","Name":"Alex"}]`))
+		case "/Items":
+			_, _ = w.Write([]byte(`{
+				"Items": [{
+					"Id": "item_1",
+					"Name": "Arrival",
+					"Type": "Movie",
+					"Path": "/Volume1/Media/Movies/Arrival (2016).mkv",
+					"DateCreated": "2024-01-01T00:00:00Z",
+					"MediaSources": [{"Path":"/Volume1/Media/Movies/Arrival (2016).mkv","Size":42000000000,"Container":"mkv"}],
+					"UserData": {"PlayCount":0,"Played":false}
+				}],
+				"TotalRecordCount": 1
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	snapshot, err := SyncJellyfin(context.Background(), Options{JellyfinURL: server.URL, JellyfinKey: "jellyfin-key"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Files) != 1 {
+		t.Fatalf("files = %#v", snapshot.Files)
+	}
+	file := snapshot.Files[0]
+	if file.Verification != "server_reported" || file.LocalPath != "" {
+		t.Fatalf("file evidence = %#v, want server-reported without local path", file)
+	}
+	if file.MatchConfidence < 0.65 {
+		t.Fatalf("server-reported confidence = %f, want recommendation-eligible confidence", file.MatchConfidence)
+	}
+}
+
 func TestSyncJellyfinReportsProgress(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Emby-Token") != "jellyfin-key" {

@@ -297,6 +297,12 @@ type MediaServerSnapshot struct {
 type MediaServerItemFilter struct {
 	ServerID     string
 	UnmappedOnly bool
+	Limit        int
+}
+
+type MediaActivityRollupFilter struct {
+	ServerID string
+	Limit    int
 }
 
 func Open(configDir string) (*Store, error) {
@@ -1181,6 +1187,14 @@ func (store *Store) ListMediaServerItems(filter MediaServerItemFilter) ([]MediaS
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
 	query += " ORDER BY title, path"
+	if filter.Limit > 0 {
+		limit := filter.Limit
+		if limit > 500 {
+			limit = 500
+		}
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
 	rows, err := store.DB.Query(query, args...)
 	if err != nil {
 		return nil, err
@@ -1266,7 +1280,7 @@ func (store *Store) GetMediaServerSnapshot(serverID string) (MediaServerSnapshot
 	if err != nil {
 		return MediaServerSnapshot{}, err
 	}
-	rollups, err := store.ListMediaActivityRollups(serverID)
+	rollups, err := store.ListMediaActivityRollups(MediaActivityRollupFilter{ServerID: serverID})
 	if err != nil {
 		return MediaServerSnapshot{}, err
 	}
@@ -1355,18 +1369,26 @@ func (store *Store) listMediaServerFiles(serverID string) ([]MediaServerFile, er
 	return files, rows.Err()
 }
 
-func (store *Store) ListMediaActivityRollups(serverID string) ([]MediaActivityRollup, error) {
+func (store *Store) ListMediaActivityRollups(filter MediaActivityRollupFilter) ([]MediaActivityRollup, error) {
 	if store == nil || store.DB == nil {
 		return nil, errors.New("nil database store")
 	}
 	query := `SELECT server_id, item_external_id, play_count, unique_users, watched_users, favorite_count, last_played_at, updated_at
 		FROM media_activity_rollups`
 	args := []any{}
-	if strings.TrimSpace(serverID) != "" {
+	if strings.TrimSpace(filter.ServerID) != "" {
 		query += " WHERE server_id = ?"
-		args = append(args, strings.TrimSpace(serverID))
+		args = append(args, strings.TrimSpace(filter.ServerID))
 	}
 	query += " ORDER BY server_id, item_external_id"
+	if filter.Limit > 0 {
+		limit := filter.Limit
+		if limit > 500 {
+			limit = 500
+		}
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
 	rows, err := store.DB.Query(query, args...)
 	if err != nil {
 		return nil, err

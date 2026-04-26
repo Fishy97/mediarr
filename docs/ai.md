@@ -22,6 +22,7 @@ The default model is `qwen3:0.6b`.
 ## What AI Can Do
 
 AI can attach a short advisory rationale and tags to recommendations that were already created by deterministic rules.
+Inline AI enrichment is intentionally bounded to small recommendation batches. Large Jellyfin, Plex, or Emby syncs complete on deterministic evidence first so local model latency cannot block ingestion, telemetry, or recommendation availability.
 
 AI cannot:
 

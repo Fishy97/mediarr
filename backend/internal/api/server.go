@@ -28,6 +28,11 @@ import (
 	"github.com/Fishy97/mediarr/backend/internal/support"
 )
 
+const (
+	maxAIEnrichedRecommendations = 8
+	aiRecommendationTimeout      = 6 * time.Second
+)
+
 type Deps struct {
 	ConfigDir          string
 	FrontendDir        string
@@ -498,7 +503,7 @@ func (server *Server) catalogCorrectionHandler(w http.ResponseWriter, r *http.Re
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if err := server.regenerateRecommendationsFromCatalog(); err != nil {
+		if err := server.regenerateRecommendationsFromCatalog(r.Context()); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -509,7 +514,7 @@ func (server *Server) catalogCorrectionHandler(w http.ResponseWriter, r *http.Re
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if err := server.regenerateRecommendationsFromCatalog(); err != nil {
+		if err := server.regenerateRecommendationsFromCatalog(r.Context()); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -1108,7 +1113,7 @@ func (server *Server) runIntegrationSyncJob(jobID string, targetID string) {
 		if latest, err := server.store.LatestMediaSyncJob(targetID); err == nil {
 			options.PlexHistoryCursor = latest.Cursor
 		}
-		if priorRollups, err := server.store.ListMediaActivityRollups(targetID); err == nil {
+		if priorRollups, err := server.store.ListMediaActivityRollups(database.MediaActivityRollupFilter{ServerID: targetID}); err == nil {
 			options.PriorRollups = priorRollups
 		}
 	}
@@ -1139,7 +1144,7 @@ func (server *Server) runIntegrationSyncJob(jobID string, targetID string) {
 		reporter.update(database.JobUpdate{Status: "failed", Phase: "failed", Message: "Unable to persist media-server snapshot", Error: err.Error(), Completed: true}, true)
 		return
 	}
-	if err := server.regenerateRecommendationsFromCatalog(); err != nil {
+	if err := server.regenerateRecommendationsFromCatalog(ctx); err != nil {
 		reporter.update(database.JobUpdate{Status: "failed", Phase: "failed", Message: "Unable to regenerate recommendations", Error: err.Error(), Completed: true}, true)
 		return
 	}
@@ -1199,6 +1204,7 @@ func (server *Server) integrationItemsHandler(w http.ResponseWriter, r *http.Req
 	items, err := server.store.ListMediaServerItems(database.MediaServerItemFilter{
 		ServerID:     targetID,
 		UnmappedOnly: r.URL.Query().Get("unmapped") == "true",
+		Limit:        parsePositiveInt(r.URL.Query().Get("limit")),
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1267,7 +1273,10 @@ func (server *Server) activityRollupsHandler(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "activity store is not configured", http.StatusBadRequest)
 		return
 	}
-	rollups, err := server.store.ListMediaActivityRollups(r.URL.Query().Get("serverId"))
+	rollups, err := server.store.ListMediaActivityRollups(database.MediaActivityRollupFilter{
+		ServerID: r.URL.Query().Get("serverId"),
+		Limit:    parsePositiveInt(r.URL.Query().Get("limit")),
+	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1324,6 +1333,7 @@ func (server *Server) pathMappingHandler(w http.ResponseWriter, r *http.Request)
 		items, err := server.store.ListMediaServerItems(database.MediaServerItemFilter{
 			ServerID:     r.URL.Query().Get("serverId"),
 			UnmappedOnly: true,
+			Limit:        parsePositiveInt(r.URL.Query().Get("limit")),
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1706,15 +1716,18 @@ func mergeIntegrationSettings(options integrations.Options, settings []database.
 	return options
 }
 
-func (server *Server) regenerateRecommendationsFromCatalog() error {
+func (server *Server) regenerateRecommendationsFromCatalog(ctx context.Context) error {
 	if server.store == nil {
 		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	items, err := server.store.ListCatalog()
 	if err != nil {
 		return err
 	}
-	recs, err := server.generateRecommendations(context.Background(), recommendationFilesFromCatalog(items))
+	recs, err := server.generateRecommendations(ctx, recommendationFilesFromCatalog(items))
 	if err != nil {
 		return err
 	}
@@ -1749,16 +1762,23 @@ func (server *Server) enrichRecommendationsWithAI(ctx context.Context, recs []re
 	if server.ai == nil || len(recs) == 0 {
 		return recs
 	}
+	if len(recs) > maxAIEnrichedRecommendations {
+		return recs
+	}
 	health := server.ai.Health(ctx)
 	if !health.ModelAvailable {
 		return recs
 	}
 	enriched := append([]recommendations.Recommendation(nil), recs...)
+	enrichedCount := 0
 	for index := range enriched {
 		if enriched[index].Destructive || !strings.HasPrefix(enriched[index].Source, "rule:") {
 			continue
 		}
-		itemCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+		if enrichedCount >= maxAIEnrichedRecommendations {
+			continue
+		}
+		itemCtx, cancel := context.WithTimeout(ctx, aiRecommendationTimeout)
 		suggestion, err := server.ai.SuggestRationale(itemCtx, ai.SuggestionInput{
 			Title:         enriched[index].Title,
 			Explanation:   enriched[index].Explanation,
@@ -1772,6 +1792,7 @@ func (server *Server) enrichRecommendationsWithAI(ctx context.Context, recs []re
 		enriched[index].AITags = suggestion.Tags
 		enriched[index].AIConfidence = suggestion.Confidence
 		enriched[index].AISource = "ollama:" + health.Model
+		enrichedCount++
 	}
 	return enriched
 }
@@ -1921,6 +1942,14 @@ func isTerminalJobStatus(status string) bool {
 
 func intPtr(value int) *int {
 	return &value
+}
+
+func parsePositiveInt(value string) int {
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || parsed <= 0 {
+		return 0
+	}
+	return parsed
 }
 
 func displayLibraryName(library filescan.Library) string {

@@ -852,7 +852,7 @@ func applyPathMappings(serverID string, path string, mappings []database.PathMap
 			return localPrefix + strings.TrimPrefix(path, serverPrefix), "path_mapped", 0.86
 		}
 	}
-	return "", "server_reported", 0.62
+	return "", "server_reported", 0.68
 }
 
 func unixTime(seconds int64) time.Time {

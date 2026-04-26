@@ -107,18 +107,18 @@ describe('api auth helpers', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(api.syncIntegration('jellyfin')).resolves.toMatchObject({ serverId: 'jellyfin', status: 'completed' });
-    await expect(api.integrationItems('jellyfin')).resolves.toHaveLength(1);
-    await expect(api.activityRollups()).resolves.toHaveLength(1);
+    await expect(api.integrationItems('jellyfin', false, 100)).resolves.toHaveLength(1);
+    await expect(api.activityRollups(undefined, 250)).resolves.toHaveLength(1);
     await expect(api.pathMappings()).resolves.toHaveLength(1);
-    await expect(api.unmappedPathItems()).resolves.toHaveLength(1);
+    await expect(api.unmappedPathItems(undefined, 50)).resolves.toHaveLength(1);
     await expect(api.upsertPathMapping({ id: 'map_1', serverPathPrefix: '/mnt/media', localPathPrefix: '/media' })).resolves.toMatchObject({ id: 'map_1' });
     await expect(api.verifyPathMapping('map_1')).resolves.toMatchObject({ matchedFiles: 1, verifiedFiles: 1 });
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/integrations/jellyfin/sync', expect.objectContaining({ method: 'POST' }));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/integrations/jellyfin/items', expect.any(Object));
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/v1/activity/rollups', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/integrations/jellyfin/items?limit=100', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/v1/activity/rollups?limit=250', expect.any(Object));
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/v1/path-mappings', expect.any(Object));
-    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/v1/path-mappings/unmapped', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/v1/path-mappings/unmapped?limit=50', expect.any(Object));
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/v1/path-mappings/map_1', expect.objectContaining({ method: 'PUT' }));
     expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/v1/path-mappings/map_1/verify', expect.objectContaining({ method: 'POST' }));
   });

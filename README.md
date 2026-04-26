@@ -29,7 +29,7 @@ Mediarr 1.5 is a Docker-hosted library scanner, catalog, and review dashboard fo
 - show recommendation proof with trust state, storage verification, activity evidence, source rule, and audit-backed actions
 - protect recommendations or accept them for manual action without enabling permanent deletion
 - review unmapped Jellyfin/Plex/Emby paths, save path mappings, and verify mappings against local files
-- attach optional local AI rationales to deterministic recommendations when the Ollama sidecar is enabled
+- attach optional local AI rationales to deterministic recommendations for bounded batches when the Ollama sidecar is enabled
 - expose a web UI and REST API
 
 Mediarr remains deliberately conservative: it does not delete media, does not download media, and does not treat provider or AI output as catalog truth unless a user applies a correction.

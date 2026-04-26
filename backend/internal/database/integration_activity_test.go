@@ -83,7 +83,7 @@ func TestMediaServerSnapshotPersistsNormalizedActivity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rollups, err := store.ListMediaActivityRollups("")
+	rollups, err := store.ListMediaActivityRollups(MediaActivityRollupFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}

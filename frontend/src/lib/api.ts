@@ -198,19 +198,40 @@ export const api = {
   async retryJob(id: string): Promise<Job> {
     return (await request<Envelope<Job>>(`/api/v1/jobs/${encodeURIComponent(id)}/retry`, { method: 'POST' })).data;
   },
-  async integrationItems(id: string, unmapped = false): Promise<MediaServerItem[]> {
-    const suffix = unmapped ? '?unmapped=true' : '';
+  async integrationItems(id: string, unmapped = false, limit?: number): Promise<MediaServerItem[]> {
+    const params = new URLSearchParams();
+    if (unmapped) {
+      params.set('unmapped', 'true');
+    }
+    if (limit && limit > 0) {
+      params.set('limit', String(limit));
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : '';
     return (await request<Envelope<MediaServerItem[]>>(`/api/v1/integrations/${encodeURIComponent(id)}/items${suffix}`)).data;
   },
-  async activityRollups(serverId?: string): Promise<ActivityRollup[]> {
-    const suffix = serverId ? `?serverId=${encodeURIComponent(serverId)}` : '';
+  async activityRollups(serverId?: string, limit?: number): Promise<ActivityRollup[]> {
+    const params = new URLSearchParams();
+    if (serverId) {
+      params.set('serverId', serverId);
+    }
+    if (limit && limit > 0) {
+      params.set('limit', String(limit));
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : '';
     return (await request<Envelope<ActivityRollup[]>>(`/api/v1/activity/rollups${suffix}`)).data;
   },
   async pathMappings(): Promise<PathMapping[]> {
     return (await request<Envelope<PathMapping[]>>('/api/v1/path-mappings')).data;
   },
-  async unmappedPathItems(serverId?: string): Promise<MediaServerItem[]> {
-    const suffix = serverId ? `?serverId=${encodeURIComponent(serverId)}` : '';
+  async unmappedPathItems(serverId?: string, limit?: number): Promise<MediaServerItem[]> {
+    const params = new URLSearchParams();
+    if (serverId) {
+      params.set('serverId', serverId);
+    }
+    if (limit && limit > 0) {
+      params.set('limit', String(limit));
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : '';
     return (await request<Envelope<MediaServerItem[]>>(`/api/v1/path-mappings/unmapped${suffix}`)).data;
   },
   async upsertPathMapping(mapping: Partial<PathMapping> & Pick<PathMapping, 'serverPathPrefix' | 'localPathPrefix'>): Promise<PathMapping> {

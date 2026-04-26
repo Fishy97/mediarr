@@ -58,6 +58,10 @@ import type {
 
 type View = 'dashboard' | 'libraries' | 'catalog' | 'recommendations' | 'integrations' | 'settings';
 
+const integrationItemSampleLimit = 100;
+const unmappedItemSampleLimit = 50;
+const activityRollupSampleLimit = 250;
+
 export function App() {
   const [view, setView] = useState<View>('dashboard');
   const [libraries, setLibraries] = useState<MediaLibrary[]>([]);
@@ -160,10 +164,10 @@ export function App() {
   async function refreshIntegrationActivity(integrationRows = integrations) {
     const mediaServers = integrationRows.filter((integration) => integration.kind === 'media_server');
     const [rollupRows, mappingRows, unmappedRows, itemRows, jobRows, diagnosticRows] = await Promise.all([
-      api.activityRollups().catch(() => [] as ActivityRollup[]),
+      api.activityRollups(undefined, activityRollupSampleLimit).catch(() => [] as ActivityRollup[]),
       api.pathMappings().catch(() => [] as PathMapping[]),
-      api.unmappedPathItems().catch(() => [] as MediaServerItem[]),
-      Promise.all(mediaServers.map((integration) => api.integrationItems(integration.id).catch(() => [] as MediaServerItem[]))),
+      api.unmappedPathItems(undefined, unmappedItemSampleLimit).catch(() => [] as MediaServerItem[]),
+      Promise.all(mediaServers.map((integration) => api.integrationItems(integration.id, false, integrationItemSampleLimit).catch(() => [] as MediaServerItem[]))),
       Promise.all(mediaServers.map(async (integration) => {
         const job = await api.integrationSyncStatus(integration.id).catch(() => null);
         return [integration.id, job] as const;
@@ -572,7 +576,7 @@ export function App() {
             recoverable={recoverable}
             recommendations={recommendations}
             scans={scans}
-            activityRollups={activityRollups}
+            activityRollupTotal={diagnosticActivityTotal(integrationDiagnostics, activityRollups.length)}
             jobs={jobs}
             jobDetails={jobDetails}
             onCancelJob={(id) => void cancelJob(id)}
@@ -701,7 +705,7 @@ function Dashboard({
   recoverable,
   recommendations,
   scans,
-  activityRollups,
+  activityRollupTotal,
   jobs,
   jobDetails,
   onCancelJob,
@@ -714,7 +718,7 @@ function Dashboard({
   recoverable: number;
   recommendations: Recommendation[];
   scans: ScanResult[];
-  activityRollups: ActivityRollup[];
+  activityRollupTotal: number;
   jobs: Job[];
   jobDetails: Record<string, JobDetail>;
   onCancelJob: (id: string) => void;
@@ -737,7 +741,7 @@ function Dashboard({
         <Stat icon={<Archive />} label="Review Savings" value={formatBytes(recoverable)} />
       </div>
       <div className="stat-strip activity-strip">
-        <Stat icon={<Server />} label="Activity Items" value={String(activityRollups.length)} />
+        <Stat icon={<Server />} label="Activity Items" value={String(activityRollupTotal)} />
         <Stat icon={<Trash2 />} label="Cold Suggestions" value={String(activityRecommendations.length)} />
         <Stat icon={<PlayCircle />} label="Never Watched" value={String(neverWatched)} />
         <Stat icon={<ShieldCheck />} label="Verified Savings" value={formatBytes(verifiedSavings)} />
@@ -1128,15 +1132,16 @@ function Integrations({
       <div className="integration-grid">
         {mediaServers.map((integration) => {
           const activeJob = activeSyncJobs.find((job) => job.targetId === integration.id);
+          const diagnostics = integrationDiagnostics[integration.id] ?? null;
           return (
             <MediaServerCard
               key={integration.id}
               integration={integration}
               setting={integrationSettings.find((setting) => setting.integration === integration.id)}
               job={syncJobs[integration.id] ?? null}
-              diagnostics={integrationDiagnostics[integration.id] ?? null}
-              importedItems={integrationItems.filter((item) => item.serverId === integration.id).length}
-              activityCount={activityRollups.filter((rollup) => rollup.serverId === integration.id).length}
+              diagnostics={diagnostics}
+              importedItems={diagnostics ? diagnosticImportedItems(diagnostics) : integrationItems.filter((item) => item.serverId === integration.id).length}
+              activityCount={diagnostics ? diagnostics.summary.activityRollups : activityRollups.filter((rollup) => rollup.serverId === integration.id).length}
               pathMappingCount={pathMappings.filter((mapping) => !mapping.serverId || mapping.serverId === integration.id).length}
               activeJob={activeJob}
               jobDetail={activeJob ? jobDetails[activeJob.id] : undefined}
@@ -1154,6 +1159,7 @@ function Integrations({
         integrations={mediaServers}
         mappings={pathMappings}
         unmappedItems={unmappedItems}
+        unmappedTotal={diagnosticUnmappedTotal(mediaServers, integrationDiagnostics, unmappedItems.length)}
         busy={busy}
         onSave={onPathMappingSave}
         onVerify={onPathMappingVerify}
@@ -1374,6 +1380,7 @@ function PathMappingWorkbench({
   integrations,
   mappings,
   unmappedItems,
+  unmappedTotal,
   busy,
   onSave,
   onVerify,
@@ -1382,13 +1389,15 @@ function PathMappingWorkbench({
   integrations: Integration[];
   mappings: PathMapping[];
   unmappedItems: MediaServerItem[];
+  unmappedTotal: number;
   busy: boolean;
   onSave: (mapping: Partial<PathMapping> & Pick<PathMapping, 'serverPathPrefix' | 'localPathPrefix'>) => void;
   onVerify: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
+  const suggestedServerPathPrefix = useMemo(() => suggestServerPathPrefix(unmappedItems), [unmappedItems]);
   const [serverId, setServerID] = useState(integrations[0]?.id || 'jellyfin');
-  const [serverPathPrefix, setServerPathPrefix] = useState('/mnt/media');
+  const [serverPathPrefix, setServerPathPrefix] = useState(() => suggestedServerPathPrefix || '/mnt/media');
   const [localPathPrefix, setLocalPathPrefix] = useState('/media');
 
   useEffect(() => {
@@ -1396,6 +1405,15 @@ function PathMappingWorkbench({
       setServerID(integrations[0]?.id || 'jellyfin');
     }
   }, [integrations, serverId]);
+
+  useEffect(() => {
+    if (mappings.length > 0 || serverPathPrefix !== '/mnt/media') {
+      return;
+    }
+    if (suggestedServerPathPrefix) {
+      setServerPathPrefix(suggestedServerPathPrefix);
+    }
+  }, [mappings.length, serverPathPrefix, suggestedServerPathPrefix]);
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -1407,9 +1425,9 @@ function PathMappingWorkbench({
       <div className="panel-heading">
         <div>
           <h2>Path Mapping</h2>
-          <p>{unmappedItems.length} unmapped server items require path proof</p>
+          <p>{unmappedTotal} unmapped server items require path proof</p>
         </div>
-        <span className={unmappedItems.length > 0 ? 'status-pill warning' : 'status-pill'}>{unmappedItems.length > 0 ? 'Review' : 'Verified'}</span>
+        <span className={unmappedTotal > 0 ? 'status-pill warning' : 'status-pill'}>{unmappedTotal > 0 ? 'Review' : 'Verified'}</span>
       </div>
       <form className="mapping-form" onSubmit={submit}>
         <label>
@@ -1455,6 +1473,9 @@ function PathMappingWorkbench({
           {mappings.length === 0 && <EmptyState icon={<MapIcon />} text="No path mappings configured." />}
         </div>
         <div className="unmapped-list">
+          {unmappedTotal > unmappedItems.length && (
+            <div className="notice warning">Showing {unmappedItems.length} examples from {unmappedTotal} unmapped server items.</div>
+          )}
           {unmappedItems.slice(0, 8).map((item) => (
             <div className="unmapped-row" key={`${item.serverId}-${item.externalId}`}>
               <span>{item.serverId}</span>
@@ -1476,6 +1497,73 @@ function Signal({ label, value }: { label: string; value: string }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+function diagnosticImportedItems(diagnostics: IntegrationDiagnostics): number {
+  const summary = diagnostics.summary;
+  return summary.movies + summary.series + summary.episodes + summary.videos;
+}
+
+function diagnosticUnmappedTotal(integrations: Integration[], diagnostics: Record<string, IntegrationDiagnostics | null>, fallback: number): number {
+  const totals = integrations
+    .map((integration) => diagnostics[integration.id]?.summary.unmappedFiles)
+    .filter((value): value is number => typeof value === 'number');
+  if (totals.length === 0) {
+    return fallback;
+  }
+  return totals.reduce((sum, value) => sum + value, 0);
+}
+
+function diagnosticActivityTotal(diagnostics: Record<string, IntegrationDiagnostics | null>, fallback: number): number {
+  const totals = Object.values(diagnostics)
+    .map((diagnosticsRow) => diagnosticsRow?.summary.activityRollups)
+    .filter((value): value is number => typeof value === 'number');
+  if (totals.length === 0) {
+    return fallback;
+  }
+  return totals.reduce((sum, value) => sum + value, 0);
+}
+
+function suggestServerPathPrefix(items: MediaServerItem[]): string {
+  const paths = items.map((item) => item.path || '').filter(Boolean);
+  if (paths.length === 0) {
+    return '';
+  }
+  const roots = paths.map((path) => mediaRootPrefix(path)).filter(Boolean);
+  if (roots.length > 0 && roots.every((root) => root === roots[0])) {
+    return roots[0];
+  }
+  return commonDirectoryPrefix(paths.slice(0, 25));
+}
+
+function mediaRootPrefix(path: string): string {
+  const parts = path.split('/').filter(Boolean);
+  const mediaMarkers = new Set(['media', 'movies', 'movie', 'tv-shows', 'tv', 'shows', 'series', 'anime']);
+  const markerIndex = parts.findIndex((part, index) => index > 0 && mediaMarkers.has(part.toLowerCase()));
+  if (markerIndex <= 0) {
+    return '';
+  }
+  const marker = parts[markerIndex].toLowerCase();
+  const end = marker === 'media' ? markerIndex + 1 : markerIndex;
+  return '/' + parts.slice(0, end).join('/');
+}
+
+function commonDirectoryPrefix(paths: string[]): string {
+  const split = paths
+    .map((path) => path.split('/').filter(Boolean).slice(0, -1))
+    .filter((parts) => parts.length > 0);
+  if (split.length === 0) {
+    return '';
+  }
+  const prefix: string[] = [];
+  for (let index = 0; index < split[0].length; index += 1) {
+    const part = split[0][index];
+    if (!split.every((candidate) => candidate[index] === part)) {
+      break;
+    }
+    prefix.push(part);
+  }
+  return prefix.length > 0 ? '/' + prefix.join('/') : '';
 }
 
 function JobTelemetry({
