@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Fishy97/mediarr/backend/internal/campaigns"
 	"github.com/Fishy97/mediarr/backend/internal/catalog"
 	"github.com/Fishy97/mediarr/backend/internal/filescan"
 	"github.com/Fishy97/mediarr/backend/internal/recommendations"
@@ -567,6 +568,33 @@ func (store *Store) migrate() error {
 			local_path_prefix TEXT NOT NULL,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS stewardship_campaigns (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			target_kinds TEXT NOT NULL DEFAULT '[]',
+			target_library_names TEXT NOT NULL DEFAULT '[]',
+			require_all_rules INTEGER NOT NULL DEFAULT 1,
+			minimum_confidence REAL NOT NULL DEFAULT 0,
+			minimum_storage_bytes INTEGER NOT NULL DEFAULT 0,
+			rules TEXT NOT NULL DEFAULT '[]',
+			last_run_at TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS stewardship_campaign_runs (
+			id TEXT PRIMARY KEY,
+			campaign_id TEXT NOT NULL,
+			status TEXT NOT NULL,
+			matched INTEGER NOT NULL DEFAULT 0,
+			suppressed INTEGER NOT NULL DEFAULT 0,
+			estimated_savings_bytes INTEGER NOT NULL DEFAULT 0,
+			verified_savings_bytes INTEGER NOT NULL DEFAULT 0,
+			error TEXT NOT NULL DEFAULT '',
+			started_at TEXT NOT NULL,
+			completed_at TEXT
 		)`,
 	}
 	for _, statement := range statements {
@@ -2033,6 +2061,246 @@ func (store *Store) DeletePathMapping(id string) error {
 	return err
 }
 
+func (store *Store) UpsertCampaign(campaign campaigns.Campaign) (campaigns.Campaign, error) {
+	if store == nil || store.DB == nil {
+		return campaigns.Campaign{}, errors.New("nil database store")
+	}
+	campaign.ID = strings.TrimSpace(campaign.ID)
+	campaign.Name = strings.TrimSpace(campaign.Name)
+	if campaign.ID == "" {
+		campaign.ID = randomID("cmp")
+	}
+	if campaign.Name == "" {
+		return campaigns.Campaign{}, errors.New("campaign name is required")
+	}
+	now := time.Now().UTC()
+	if campaign.CreatedAt.IsZero() {
+		campaign.CreatedAt = now
+	}
+	campaign.UpdatedAt = now
+	targetKinds, err := json.Marshal(normalizeStringSlice(campaign.TargetKinds))
+	if err != nil {
+		return campaigns.Campaign{}, err
+	}
+	targetLibraryNames, err := json.Marshal(normalizeStringSlice(campaign.TargetLibraryNames))
+	if err != nil {
+		return campaigns.Campaign{}, err
+	}
+	rules, err := json.Marshal(campaign.Rules)
+	if err != nil {
+		return campaigns.Campaign{}, err
+	}
+	enabled := 0
+	if campaign.Enabled {
+		enabled = 1
+	}
+	requireAllRules := 0
+	if campaign.RequireAllRules {
+		requireAllRules = 1
+	}
+	_, err = store.DB.Exec(`INSERT INTO stewardship_campaigns (
+			id, name, description, enabled, target_kinds, target_library_names, require_all_rules,
+			minimum_confidence, minimum_storage_bytes, rules, last_run_at, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name,
+			description = excluded.description,
+			enabled = excluded.enabled,
+			target_kinds = excluded.target_kinds,
+			target_library_names = excluded.target_library_names,
+			require_all_rules = excluded.require_all_rules,
+			minimum_confidence = excluded.minimum_confidence,
+			minimum_storage_bytes = excluded.minimum_storage_bytes,
+			rules = excluded.rules,
+			updated_at = excluded.updated_at`,
+		campaign.ID,
+		campaign.Name,
+		strings.TrimSpace(campaign.Description),
+		enabled,
+		string(targetKinds),
+		string(targetLibraryNames),
+		requireAllRules,
+		clampConfidence(campaign.MinimumConfidence),
+		campaign.MinimumStorageBytes,
+		string(rules),
+		formatOptionalTime(campaign.LastRunAt),
+		campaign.CreatedAt.UTC().Format(time.RFC3339Nano),
+		campaign.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return campaigns.Campaign{}, err
+	}
+	return store.GetCampaign(campaign.ID)
+}
+
+func (store *Store) ListCampaigns() ([]campaigns.Campaign, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	rows, err := store.DB.Query(`SELECT id, name, description, enabled, target_kinds, target_library_names,
+			require_all_rules, minimum_confidence, minimum_storage_bytes, rules, last_run_at, created_at, updated_at
+		FROM stewardship_campaigns
+		ORDER BY updated_at DESC, name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var campaignsList []campaigns.Campaign
+	for rows.Next() {
+		campaign, err := scanCampaign(rows)
+		if err != nil {
+			return nil, err
+		}
+		campaignsList = append(campaignsList, campaign)
+	}
+	return campaignsList, rows.Err()
+}
+
+func (store *Store) GetCampaign(id string) (campaigns.Campaign, error) {
+	if store == nil || store.DB == nil {
+		return campaigns.Campaign{}, errors.New("nil database store")
+	}
+	return scanCampaign(store.DB.QueryRow(`SELECT id, name, description, enabled, target_kinds, target_library_names,
+			require_all_rules, minimum_confidence, minimum_storage_bytes, rules, last_run_at, created_at, updated_at
+		FROM stewardship_campaigns
+		WHERE id = ?`, strings.TrimSpace(id)))
+}
+
+func (store *Store) DeleteCampaign(id string) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	tx, err := store.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM stewardship_campaign_runs WHERE campaign_id = ?`, strings.TrimSpace(id)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM stewardship_campaigns WHERE id = ?`, strings.TrimSpace(id)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (store *Store) RecordCampaignRun(run campaigns.Run) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	run.ID = strings.TrimSpace(run.ID)
+	run.CampaignID = strings.TrimSpace(run.CampaignID)
+	run.Status = strings.TrimSpace(run.Status)
+	if run.ID == "" {
+		run.ID = randomID("cmp_run")
+	}
+	if run.CampaignID == "" {
+		return errors.New("campaign id is required")
+	}
+	if run.Status == "" {
+		run.Status = "completed"
+	}
+	if run.StartedAt.IsZero() {
+		run.StartedAt = time.Now().UTC()
+	}
+	tx, err := store.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT INTO stewardship_campaign_runs (
+			id, campaign_id, status, matched, suppressed, estimated_savings_bytes, verified_savings_bytes,
+			error, started_at, completed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			status = excluded.status,
+			matched = excluded.matched,
+			suppressed = excluded.suppressed,
+			estimated_savings_bytes = excluded.estimated_savings_bytes,
+			verified_savings_bytes = excluded.verified_savings_bytes,
+			error = excluded.error,
+			completed_at = excluded.completed_at`,
+		run.ID,
+		run.CampaignID,
+		run.Status,
+		run.Matched,
+		run.Suppressed,
+		run.EstimatedSavingsBytes,
+		run.VerifiedSavingsBytes,
+		run.Error,
+		run.StartedAt.UTC().Format(time.RFC3339Nano),
+		formatOptionalTime(run.CompletedAt),
+	); err != nil {
+		return err
+	}
+	lastRunAt := run.CompletedAt
+	if lastRunAt.IsZero() {
+		lastRunAt = run.StartedAt
+	}
+	if _, err := tx.Exec(`UPDATE stewardship_campaigns SET last_run_at = ?, updated_at = ? WHERE id = ?`,
+		lastRunAt.UTC().Format(time.RFC3339Nano),
+		time.Now().UTC().Format(time.RFC3339Nano),
+		run.CampaignID,
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (store *Store) ListCampaignRuns(campaignID string) ([]campaigns.Run, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	rows, err := store.DB.Query(`SELECT id, campaign_id, status, matched, suppressed, estimated_savings_bytes,
+			verified_savings_bytes, error, started_at, completed_at
+		FROM stewardship_campaign_runs
+		WHERE campaign_id = ?
+		ORDER BY started_at DESC, id DESC`, strings.TrimSpace(campaignID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var runs []campaigns.Run
+	for rows.Next() {
+		run, err := scanCampaignRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, run)
+	}
+	return runs, rows.Err()
+}
+
+func (store *Store) ReplaceCampaignRecommendations(campaignID string, recs []recommendations.Recommendation) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	campaignID = strings.TrimSpace(campaignID)
+	if campaignID == "" {
+		return errors.New("campaign id is required")
+	}
+	source := "campaign:" + campaignID
+	tx, err := store.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	existingStates, err := recommendationStates(tx)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM recommendations WHERE source = ? AND state IN ('new', 'reviewing') AND ignored_at IS NULL`, source); err != nil {
+		return err
+	}
+	for index := range recs {
+		recs[index].Source = source
+	}
+	if err := insertRecommendations(tx, recs, existingStates); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (store *Store) ReplaceRecommendations(recs []recommendations.Recommendation) error {
 	if store == nil || store.DB == nil {
 		return errors.New("nil database store")
@@ -2047,9 +2315,16 @@ func (store *Store) ReplaceRecommendations(recs []recommendations.Recommendation
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM recommendations WHERE ignored_at IS NULL AND state NOT IN ('ignored', 'protected')`); err != nil {
+	if _, err := tx.Exec(`DELETE FROM recommendations WHERE ignored_at IS NULL AND state NOT IN ('ignored', 'protected', 'accepted_for_manual_action')`); err != nil {
 		return err
 	}
+	if err := insertRecommendations(tx, recs, existingStates); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func insertRecommendations(tx *sql.Tx, recs []recommendations.Recommendation, existingStates map[string]recommendations.State) error {
 	stmt, err := tx.Prepare(`INSERT INTO recommendations (
 		id, action, state, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive,
 		ai_rationale, ai_tags, ai_confidence, ai_source,
@@ -2062,7 +2337,7 @@ func (store *Store) ReplaceRecommendations(recs []recommendations.Recommendation
 
 	for _, rec := range recs {
 		rec = rec.WithDefaults()
-		if existingState := existingStates[rec.ID]; existingState == recommendations.StateIgnored || existingState == recommendations.StateProtected {
+		if existingState := existingStates[rec.ID]; existingState == recommendations.StateIgnored || existingState == recommendations.StateProtected || existingState == recommendations.StateAcceptedForManualAction {
 			continue
 		} else if existingState != "" {
 			rec.State = existingState
@@ -2118,7 +2393,7 @@ func (store *Store) ReplaceRecommendations(recs []recommendations.Recommendation
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (store *Store) ListRecommendations() ([]recommendations.Recommendation, error) {
@@ -2717,6 +2992,14 @@ type recommendationScanner interface {
 	Scan(dest ...any) error
 }
 
+type campaignScanner interface {
+	Scan(dest ...any) error
+}
+
+type campaignRunScanner interface {
+	Scan(dest ...any) error
+}
+
 func recommendationStates(tx *sql.Tx) (map[string]recommendations.State, error) {
 	rows, err := tx.Query(`SELECT id, state FROM recommendations`)
 	if err != nil {
@@ -2733,6 +3016,83 @@ func recommendationStates(tx *sql.Tx) (map[string]recommendations.State, error) 
 		states[id] = normalizeRecommendationState(recommendations.State(state))
 	}
 	return states, rows.Err()
+}
+
+func scanCampaign(scanner campaignScanner) (campaigns.Campaign, error) {
+	var campaign campaigns.Campaign
+	var enabled int
+	var requireAllRules int
+	var targetKinds string
+	var targetLibraryNames string
+	var rules string
+	var lastRunAt sql.NullString
+	var createdAt string
+	var updatedAt string
+	if err := scanner.Scan(
+		&campaign.ID,
+		&campaign.Name,
+		&campaign.Description,
+		&enabled,
+		&targetKinds,
+		&targetLibraryNames,
+		&requireAllRules,
+		&campaign.MinimumConfidence,
+		&campaign.MinimumStorageBytes,
+		&rules,
+		&lastRunAt,
+		&createdAt,
+		&updatedAt,
+	); err != nil {
+		return campaigns.Campaign{}, err
+	}
+	campaign.Enabled = enabled == 1
+	campaign.RequireAllRules = requireAllRules == 1
+	if targetKinds == "" {
+		targetKinds = "[]"
+	}
+	if err := json.Unmarshal([]byte(targetKinds), &campaign.TargetKinds); err != nil {
+		return campaigns.Campaign{}, err
+	}
+	if targetLibraryNames == "" {
+		targetLibraryNames = "[]"
+	}
+	if err := json.Unmarshal([]byte(targetLibraryNames), &campaign.TargetLibraryNames); err != nil {
+		return campaigns.Campaign{}, err
+	}
+	if rules == "" {
+		rules = "[]"
+	}
+	if err := json.Unmarshal([]byte(rules), &campaign.Rules); err != nil {
+		return campaigns.Campaign{}, err
+	}
+	campaign.LastRunAt = parseSQLTime(lastRunAt)
+	campaign.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	campaign.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+	campaign.MinimumConfidence = clampConfidence(campaign.MinimumConfidence)
+	return campaign, nil
+}
+
+func scanCampaignRun(scanner campaignRunScanner) (campaigns.Run, error) {
+	var run campaigns.Run
+	var startedAt string
+	var completedAt sql.NullString
+	if err := scanner.Scan(
+		&run.ID,
+		&run.CampaignID,
+		&run.Status,
+		&run.Matched,
+		&run.Suppressed,
+		&run.EstimatedSavingsBytes,
+		&run.VerifiedSavingsBytes,
+		&run.Error,
+		&startedAt,
+		&completedAt,
+	); err != nil {
+		return campaigns.Run{}, err
+	}
+	run.StartedAt, _ = time.Parse(time.RFC3339Nano, startedAt)
+	run.CompletedAt = parseSQLTime(completedAt)
+	return run, nil
 }
 
 func scanRecommendation(scanner recommendationScanner) (recommendations.Recommendation, error) {
@@ -2852,6 +3212,24 @@ func parseSQLTime(value sql.NullString) time.Time {
 	}
 	parsed, _ := time.Parse(time.RFC3339Nano, value.String)
 	return parsed
+}
+
+func normalizeStringSlice(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
 }
 
 func clampConfidence(value float64) float64 {
