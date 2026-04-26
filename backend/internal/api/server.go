@@ -20,6 +20,7 @@ import (
 	"github.com/Fishy97/mediarr/backend/internal/ai"
 	"github.com/Fishy97/mediarr/backend/internal/audit"
 	"github.com/Fishy97/mediarr/backend/internal/auth"
+	"github.com/Fishy97/mediarr/backend/internal/campaigns"
 	"github.com/Fishy97/mediarr/backend/internal/database"
 	"github.com/Fishy97/mediarr/backend/internal/filescan"
 	"github.com/Fishy97/mediarr/backend/internal/integrations"
@@ -137,6 +138,8 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("/api/v1/integrations", server.integrationsHandler)
 	server.mux.HandleFunc("/api/v1/integrations/", server.integrationActionHandler)
 	server.mux.HandleFunc("/api/v1/activity/rollups", server.activityRollupsHandler)
+	server.mux.HandleFunc("/api/v1/campaigns", server.campaignsHandler)
+	server.mux.HandleFunc("/api/v1/campaigns/", server.campaignHandler)
 	server.mux.HandleFunc("/api/v1/path-mappings", server.pathMappingsHandler)
 	server.mux.HandleFunc("/api/v1/path-mappings/", server.pathMappingHandler)
 	server.mux.HandleFunc("/api/v1/ai/status", server.aiStatusHandler)
@@ -1291,6 +1294,201 @@ func (server *Server) activityRollupsHandler(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, envelope{Data: rollups})
 }
 
+func (server *Server) campaignsHandler(w http.ResponseWriter, r *http.Request) {
+	if server.store == nil {
+		http.Error(w, "campaign store is not configured", http.StatusBadRequest)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		campaignList, err := server.store.ListCampaigns()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, envelope{Data: campaignList})
+	case http.MethodPost:
+		var request campaigns.Campaign
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		campaign, err := server.store.UpsertCampaign(request)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		server.record("campaign.created", "Stewardship campaign saved", map[string]any{"id": campaign.ID, "name": campaign.Name})
+		writeJSON(w, http.StatusCreated, envelope{Data: campaign})
+	default:
+		methodNotAllowed(w, r)
+	}
+}
+
+func (server *Server) campaignHandler(w http.ResponseWriter, r *http.Request) {
+	if server.store == nil {
+		http.Error(w, "campaign store is not configured", http.StatusBadRequest)
+		return
+	}
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/campaigns/"), "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		http.NotFound(w, r)
+		return
+	}
+	id := parts[0]
+	if len(parts) == 2 {
+		switch parts[1] {
+		case "simulate":
+			server.simulateCampaignHandler(w, r, id)
+		case "run":
+			server.runCampaignHandler(w, r, id)
+		case "runs":
+			server.campaignRunsHandler(w, r, id)
+		default:
+			http.NotFound(w, r)
+		}
+		return
+	}
+	if len(parts) != 1 {
+		http.NotFound(w, r)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		campaign, err := server.store.GetCampaign(id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, envelope{Data: campaign})
+	case http.MethodPut:
+		var request campaigns.Campaign
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		request.ID = id
+		campaign, err := server.store.UpsertCampaign(request)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		server.record("campaign.updated", "Stewardship campaign updated", map[string]any{"id": campaign.ID, "name": campaign.Name})
+		writeJSON(w, http.StatusOK, envelope{Data: campaign})
+	case http.MethodDelete:
+		if err := server.store.DeleteCampaign(id); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		server.record("campaign.deleted", "Stewardship campaign deleted", map[string]any{"id": id})
+		writeJSON(w, http.StatusOK, envelope{Data: map[string]bool{"ok": true}})
+	default:
+		methodNotAllowed(w, r)
+	}
+}
+
+func (server *Server) simulateCampaignHandler(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, r)
+		return
+	}
+	_, result, err := server.simulateCampaign(id, time.Now().UTC())
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, sql.ErrNoRows) {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: result})
+}
+
+func (server *Server) runCampaignHandler(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, r)
+		return
+	}
+	started := time.Now().UTC()
+	campaign, result, err := server.simulateCampaign(id, started)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, sql.ErrNoRows) {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	run := campaigns.Run{
+		ID:                    randomCampaignRunID(started),
+		CampaignID:            campaign.ID,
+		Status:                "completed",
+		Matched:               result.Matched,
+		Suppressed:            result.Suppressed,
+		EstimatedSavingsBytes: result.TotalEstimatedSavingsBytes,
+		VerifiedSavingsBytes:  result.TotalVerifiedSavingsBytes,
+		StartedAt:             started,
+		CompletedAt:           time.Now().UTC(),
+	}
+	recs := campaignRecommendations(campaign, run.ID, result)
+	if err := server.store.RecordCampaignRun(run); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := server.store.ReplaceCampaignRecommendations(campaign.ID, recs); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	server.mu.Lock()
+	server.recommendations = recs
+	server.mu.Unlock()
+	server.record("campaign.run", "Stewardship campaign run completed", map[string]any{"id": campaign.ID, "matched": result.Matched, "suppressed": result.Suppressed})
+	writeJSON(w, http.StatusOK, envelope{Data: map[string]any{"run": run, "result": result}})
+}
+
+func (server *Server) campaignRunsHandler(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r)
+		return
+	}
+	runs, err := server.store.ListCampaignRuns(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: runs})
+}
+
+func (server *Server) simulateCampaign(id string, now time.Time) (campaigns.Campaign, campaigns.Result, error) {
+	campaign, err := server.store.GetCampaign(id)
+	if err != nil {
+		return campaigns.Campaign{}, campaigns.Result{}, err
+	}
+	activityMedia, err := server.store.ListActivityRecommendationMedia()
+	if err != nil {
+		return campaigns.Campaign{}, campaigns.Result{}, err
+	}
+	candidates := campaigns.CandidatesFromActivity(activityMedia, now)
+	return campaign, campaigns.Simulate(campaign, candidates, now), nil
+}
+
+func campaignRecommendations(campaign campaigns.Campaign, runID string, result campaigns.Result) []recommendations.Recommendation {
+	recs := make([]recommendations.Recommendation, 0, result.Matched)
+	for _, item := range result.Items {
+		if item.Suppressed {
+			continue
+		}
+		recs = append(recs, campaigns.RecommendationForMatch(campaign, runID, item))
+	}
+	sort.SliceStable(recs, func(i, j int) bool {
+		if recs[i].SpaceSavedBytes == recs[j].SpaceSavedBytes {
+			return recs[i].ID < recs[j].ID
+		}
+		return recs[i].SpaceSavedBytes > recs[j].SpaceSavedBytes
+	})
+	return recs
+}
+
 func (server *Server) pathMappingsHandler(w http.ResponseWriter, r *http.Request) {
 	if server.store == nil {
 		http.Error(w, "path mapping store is not configured", http.StatusBadRequest)
@@ -1895,6 +2093,13 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func randomCampaignRunID(started time.Time) string {
+	if started.IsZero() {
+		started = time.Now().UTC()
+	}
+	return "campaign_run_" + strconv.FormatInt(started.UnixNano(), 36)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
