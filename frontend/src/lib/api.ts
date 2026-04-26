@@ -25,6 +25,7 @@ import type {
   ScanResult,
   SetupStatus,
   PathMappingVerification,
+  SupportBundleResult,
 } from '../types';
 
 type Envelope<T> = { data: T };
@@ -225,6 +226,9 @@ export const api = {
   },
   async createBackup(): Promise<{ path: string }> {
     return (await request<Envelope<{ path: string }>>('/api/v1/backups', { method: 'POST' })).data;
+  },
+  async createSupportBundle(): Promise<SupportBundleResult> {
+    return (await request<Envelope<SupportBundleResult>>('/api/v1/support/bundles', { method: 'POST' })).data;
   },
   async restoreBackup(path: string, dryRun: boolean): Promise<BackupRestoreResult> {
     return (await request<Envelope<BackupRestoreResult>>('/api/v1/backups/restore', {

@@ -13,6 +13,7 @@ Mediarr 1.5 is a Docker-hosted library scanner, catalog, and review dashboard fo
 - persist catalog rows, user metadata corrections, subtitle sidecars, and review recommendations in SQLite
 - detect duplicate catalog items and estimate recoverable space
 - create, inspect, and restore `/config` backups with a pre-restore backup
+- create redacted support bundles with ingestion proof, recent jobs, settings status, recommendations, and safety posture
 - protect the API with first-run admin setup, password login, sessions, and bearer-token automation
 - configure provider credentials without returning secrets through the API
 - request Jellyfin, Plex, and Emby library refreshes as sync targets
@@ -37,7 +38,7 @@ Mediarr remains deliberately conservative: it does not delete media, does not do
 
 - Docker Compose-first deployment on port `8080`
 - Go backend with SQLite, WAL mode, audit logging, backup creation, scanner, parser, and recommendation engine
-- React/TypeScript frontend for dashboard, libraries, catalog, review queue, integrations, provider health, settings, and backups
+- React/TypeScript frontend for dashboard, libraries, catalog, review queue, integrations, provider health, settings, backups, and support bundles
 - Read-only media mounts by default
 - Suggest-only cleanup recommendations with affected paths, confidence, source, and recoverable storage
 - Provider health and credential surfaces for TMDb, AniList, TheTVDB, OpenSubtitles, and local sidecars
@@ -238,6 +239,16 @@ curl -X POST http://localhost:8080/api/v1/backups/restore \
   -d '{"path":"/config/backups/mediarr-example.zip","dryRun":false}'
 ```
 
+### 6. Support Bundle
+
+Use the Settings screen or:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/support/bundles
+```
+
+Support bundles are written under `./config/support`. They include redacted provider and media-server settings, path mappings, recent jobs, recommendations, ingestion diagnostics, and safety proof. They do not include media files, the raw SQLite database, raw provider payloads, or API keys.
+
 ## Local Development
 
 ```bash
@@ -264,6 +275,7 @@ Recommended production defaults:
 - put the app behind a trusted reverse proxy for TLS
 - verify release image provenance before upgrading public instances
 - back up `./config` regularly
+- create a redacted support bundle before filing ingestion issues
 - use backup restore dry-run before restoring an archive
 - do not expose port `8080` directly to the public internet
 

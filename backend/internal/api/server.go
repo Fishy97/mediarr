@@ -23,6 +23,7 @@ import (
 	"github.com/Fishy97/mediarr/backend/internal/integrations"
 	"github.com/Fishy97/mediarr/backend/internal/metadata"
 	"github.com/Fishy97/mediarr/backend/internal/recommendations"
+	"github.com/Fishy97/mediarr/backend/internal/support"
 )
 
 type Deps struct {
@@ -134,6 +135,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("/api/v1/ai/status", server.aiStatusHandler)
 	server.mux.HandleFunc("/api/v1/backups", server.backupsHandler)
 	server.mux.HandleFunc("/api/v1/backups/restore", server.backupRestoreHandler)
+	server.mux.HandleFunc("/api/v1/support/bundles", server.supportBundlesHandler)
 	server.mux.HandleFunc("/api/v1/audit", server.auditHandler)
 	server.mux.HandleFunc("/api/v1/media/files/", methodNotAllowed)
 	server.mux.HandleFunc("/", server.frontend)
@@ -1439,6 +1441,33 @@ func (server *Server) backupRestoreHandler(w http.ResponseWriter, r *http.Reques
 	}
 	server.record("backup.restored", "Backup restored", map[string]any{"path": request.Path, "preRestoreBackup": result.PreRestoreBackup})
 	writeJSON(w, http.StatusOK, envelope{Data: result})
+}
+
+func (server *Server) supportBundlesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.configDir == "" {
+		http.Error(w, "config directory not configured", http.StatusBadRequest)
+		return
+	}
+	if server.store == nil {
+		http.Error(w, "database store not configured", http.StatusBadRequest)
+		return
+	}
+	result, err := support.CreateBundle(support.Config{
+		Store:     server.store,
+		OutputDir: filepath.Join(server.configDir, "support"),
+		Service:   "mediarr",
+		Version:   "1.5.0",
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	server.record("support_bundle.created", "Support bundle created", map[string]any{"path": result.Path, "files": len(result.Files), "sizeBytes": result.SizeBytes})
+	writeJSON(w, http.StatusCreated, envelope{Data: result})
 }
 
 func (server *Server) auditHandler(w http.ResponseWriter, r *http.Request) {

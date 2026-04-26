@@ -316,7 +316,26 @@ For host-level backups, back up the whole `config` directory:
 tar -czf mediarr-config-$(date +%Y%m%d).tar.gz config
 ```
 
-## 9. Upgrades
+## 9. Support Bundles
+
+Support bundles are designed for production troubleshooting when ingestion proof, path mappings, jobs, and recommendation evidence need to be reviewed without exposing API keys or copying the full database.
+
+Create one from the Settings screen, or use:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/support/bundles \
+  -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN"
+```
+
+Archives are written to:
+
+```text
+./config/support
+```
+
+Support bundles include redacted provider and media-server settings, path mappings, recent jobs, recommendations, ingestion diagnostics, and safety proof. They do not include media files, the raw SQLite database, raw provider payloads, or API keys. They can include media titles and paths, so treat them as private operational artifacts.
+
+## 10. Upgrades
 
 ```bash
 cd mediarr
@@ -327,7 +346,7 @@ docker compose ps
 
 The app stores durable state in `./config`, so rebuilding the image does not remove catalog data.
 
-## 10. Optional Local AI
+## 11. Optional Local AI
 
 Ollama is included as an optional Compose profile. Start Mediarr with local AI enabled:
 
@@ -354,7 +373,7 @@ docker compose up -d
 docker compose --profile ai up -d
 ```
 
-## 11. Reverse Proxy
+## 12. Reverse Proxy
 
 For a production server, put Mediarr behind a reverse proxy such as Caddy, Nginx Proxy Manager, Traefik, or Nginx. Do not expose port `8080` directly to the public internet.
 
@@ -365,7 +384,7 @@ Minimum reverse proxy expectations:
 - forward to `http://127.0.0.1:8080` or `http://<server-ip>:8080`
 - keep `MEDIARR_ADMIN_TOKEN` set
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 ### Container Is Not Healthy
 

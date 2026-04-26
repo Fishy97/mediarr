@@ -295,6 +295,13 @@ export type BackupRestoreResult = {
   restored?: string[];
 };
 
+export type SupportBundleResult = {
+  path: string;
+  sizeBytes: number;
+  files: string[];
+  createdAt: string;
+};
+
 export type ScanResult = {
   libraryId: string;
   startedAt: string;

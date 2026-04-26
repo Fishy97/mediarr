@@ -49,6 +49,7 @@ All API routes are rooted at `/api/v1`.
 | GET | `/ai/status` | Optional local AI health and model availability |
 | POST | `/backups` | Create a `/config` backup |
 | POST | `/backups/restore` | Inspect or restore a `/config` backup |
+| POST | `/support/bundles` | Create a redacted diagnostics archive under `/config/support` |
 | GET | `/audit` | Audit log lines |
 
 No media file deletion route is provided.
@@ -64,3 +65,5 @@ Provider and media-server API calls use bounded retry behavior for `429` and `5x
 Integration settings include `autoSyncEnabled` and `autoSyncIntervalMinutes`. Auto-sync defaults to enabled at 360 minutes. Saving a valid URL and API key/token queues the first sync immediately, and the backend scheduler keeps due integrations fresh while avoiding duplicate active jobs.
 
 Integration diagnostics reuse the same evidence model as the live Jellyfin acceptance suite. They summarize persisted imported data, not raw provider payloads: movie/series/episode counts, file counts, server-reported bytes, locally verified bytes, unmapped files, activity rollups, warning messages, and top recommendations.
+
+Support bundles package redacted provider and integration settings, path mappings, recent jobs, recommendation state, ingestion diagnostics, and safety proof into a zip archive. They intentionally exclude media files, the raw SQLite database, raw provider payloads, and API keys. The archive may still include media titles and paths because those are necessary to troubleshoot ingestion evidence.

@@ -19,6 +19,7 @@ Use this checklist before tagging a public Mediarr release.
 - recommendation evidence, protect, and accept-manual routes work
 - integration diagnostics route and in-app ingestion proof panel work after media-server sync
 - path mapping unmapped and verify routes work
+- support bundle creation works from the UI and API, and redaction tests prove provider/media-server API keys are excluded
 - background job cancel, retry, and stale recovery routes work
 - `scripts/acceptance-jellyfin-live.sh` builds and documents the opt-in live Jellyfin acceptance workflow
 - GHCR image workflow is present for tagged releases
@@ -35,6 +36,6 @@ docker compose --profile ai up -d
 ```
 
 - repository contains `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, Docker Compose guide, provider guide, AI guide, and REST API docs
-- `/config` backup creation and restore dry-run work from the UI
+- `/config` backup creation, restore dry-run, and support bundle creation work from the UI
 - media mounts are read-only in the default Compose file
 - release notes and `docs/threat-model.md` are updated for the release

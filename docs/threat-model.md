@@ -8,6 +8,7 @@ Mediarr is a self-hosted stewardship service for already-downloaded media. It is
 - Keep cleanup recommendations advisory and non-destructive.
 - Protect `/config`, because it contains the SQLite database, sessions, provider settings, integration settings, audit logs, backups, and user corrections.
 - Avoid returning provider or media-server secrets to the browser.
+- Make support exports useful for operations without including API keys, media files, raw provider payloads, or the raw database.
 - Make long-running scan and sync behavior observable, cancelable, and recoverable.
 - Preserve user decisions such as protected or ignored recommendations across regeneration.
 
@@ -28,6 +29,7 @@ Mediarr is a self-hosted stewardship service for already-downloaded media. It is
 | Mediarr to metadata providers | Provider adapters | Provider API responses and outages | Provider cache, health status, graceful failure, user corrections override provider guesses |
 | Mediarr to local AI | Deterministic recommendation engine | Ollama model output | JSON validation, confidence score, advisory-only storage, no destructive authority |
 | Backup restore | Admin-approved `/config` archive | Zip file contents | Dry-run inspect, pre-restore backup, zip-slip path validation |
+| Support bundle export | Redacted operational snapshot | Support recipients and external issue trackers | Secrets redacted, raw DB and media files excluded, operators warned that media titles and paths can be present |
 
 ## Key Risks And Mitigations
 
@@ -52,8 +54,9 @@ Mitigations:
 - Provider and integration settings return only configured status and key suffixes.
 - Tokens are stored server-side in `/config/mediarr.db`.
 - Job telemetry uses titles and basenames instead of full raw paths when possible.
+- Support bundles redact stored provider and media-server API keys and exclude raw provider payloads, media files, and the raw SQLite database.
 - Admin sessions use HTTP-only cookies, SameSite Lax, and Secure when the request is HTTPS or arrives through an HTTPS reverse proxy.
-- Operators are instructed to protect `/config` and `/config/backups`.
+- Operators are instructed to protect `/config`, `/config/backups`, and `/config/support`.
 
 ### Incorrect Recommendations
 

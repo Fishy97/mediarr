@@ -914,6 +914,13 @@ code {
   color: #cbd5e1;
 }
 
+.muted-copy {
+  margin: 0;
+  max-width: 62ch;
+  color: #94a3b8;
+  line-height: 1.6;
+}
+
 .form-panel {
   display: grid;
   gap: 14px;

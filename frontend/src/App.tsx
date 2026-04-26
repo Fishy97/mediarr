@@ -236,6 +236,19 @@ export function App() {
     }
   }
 
+  async function createSupportBundle() {
+    setBusy(true);
+    try {
+      const result = await api.createSupportBundle();
+      setBackupNotice(`Support bundle created: ${result.path} (${result.files.length} files, ${formatBytes(result.sizeBytes)}).`);
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Support bundle failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function restoreBackup(path: string, dryRun: boolean) {
     setBusy(true);
     try {
@@ -591,7 +604,15 @@ export function App() {
             busy={busy}
           />
         )}
-        {view === 'settings' && <SettingsView onBackup={() => void createBackup()} onRestore={(path, dryRun) => void restoreBackup(path, dryRun)} notice={backupNotice} busy={busy} />}
+        {view === 'settings' && (
+          <SettingsView
+            onBackup={() => void createBackup()}
+            onSupportBundle={() => void createSupportBundle()}
+            onRestore={(path, dryRun) => void restoreBackup(path, dryRun)}
+            notice={backupNotice}
+            busy={busy}
+          />
+        )}
       </main>
     </div>
   );
@@ -1608,11 +1629,13 @@ function ProviderSettingForm({
 
 function SettingsView({
   onBackup,
+  onSupportBundle,
   onRestore,
   notice,
   busy,
 }: {
   onBackup: () => void;
+  onSupportBundle: () => void;
   onRestore: (path: string, dryRun: boolean) => void;
   notice: string | null;
   busy: boolean;
@@ -1644,6 +1667,17 @@ function SettingsView({
           </button>
         </div>
         {notice && <div className="notice success">{notice}</div>}
+      </div>
+      <div className="panel form-panel">
+        <div className="panel-heading">
+          <h2>Support Bundle</h2>
+          <span>/config/support</span>
+        </div>
+        <p className="muted-copy">Export redacted settings, ingestion diagnostics, path mappings, jobs, recommendations, and safety proof for support without bundling media files or raw database contents.</p>
+        <button className="secondary-button" type="button" onClick={onSupportBundle} disabled={busy}>
+          <ShieldCheck size={16} />
+          Create support bundle
+        </button>
       </div>
       <div className="panel">
         <div className="panel-heading">
