@@ -62,7 +62,16 @@ No media file deletion route is provided.
 
 Long-running scan and sync requests return a job object immediately. Poll `/jobs/{id}` for `status`, `phase`, `message`, `processed`, `total`, `currentLabel`, imported counts, and recent events. Jobs support `queued`, `running`, `completed`, `failed`, `canceled`, and `stale` states. Listing jobs marks old queued/running rows stale after 24 hours without progress.
 
-Recommendation evidence is intentionally verbose. Clients should display storage verification separately from confidence: `local_verified` means Mediarr found a matching local file, `path_mapped` means a mapping resolved the server path, `server_reported` means savings came from the media server, and `unmapped` is blocked from cleanup recommendations.
+Recommendation evidence is intentionally verbose. Clients should display storage verification separately from confidence and separate estimated savings from verified savings. Evidence responses include `storage.estimatedSavingsBytes`, `storage.verifiedSavingsBytes`, `storage.verification`, `storage.certainty`, activity rollups, source rule, and proof points.
+
+Storage certainty labels have fixed meanings:
+
+- `server_reported` / `estimate`: Jellyfin/Plex/Emby reports this path and size. Mediarr has not verified it on disk.
+- `path_mapped` / `mapped_estimate`: Mediarr translated the server path to a local mount, but size still needs local confirmation.
+- `local_verified` / `verified`: Mediarr found the file on a read-only mount and confirmed the size.
+- `unmapped`: Mediarr cannot connect the server path to a local file path yet.
+
+Recommendation actions are suggest-only. `accept-manual` records that an administrator accepted the suggestion for manual action; it does not delete, move, quarantine, or overwrite media files.
 
 Provider and media-server API calls use bounded retry behavior for `429` and `5xx` responses. `Retry-After` is honored when present, capped to avoid wedging background jobs indefinitely.
 

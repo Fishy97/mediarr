@@ -28,7 +28,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { api, getAuthToken } from './lib/api';
-import { formatBytes, formatConfidence, formatVerification, storageCertaintyDescription, storageCertaintyForVerification } from './lib/format';
+import { formatBytes, formatConfidence, formatVerification, storageCertaintyDefinition, storageCertaintyDescription, storageCertaintyForVerification } from './lib/format';
 import { groupAffectedPaths } from './lib/pathGroups';
 import type {
   AIStatus,
@@ -1068,6 +1068,12 @@ function RecommendationQueue({
                   <Signal label="Estimated savings" value={formatBytes(estimatedSavingsBytes)} />
                   <Signal label="Verified savings" value={formatBytes(verifiedSavingsBytes)} />
                 </div>
+                <div className="proof-summary">
+                  <ProofRow label="Why suggested" value={recommendationWhySuggested(rec)} />
+                  <ProofRow label="Storage certainty" value={storageCertaintyDefinition(rec.verification || rec.evidence?.storageBasis || storageCertainty)} />
+                  <ProofRow label="Activity proof" value={recommendationActivityProof(rec)} />
+                  <ProofRow label="Safety" value="Mediarr will not delete this. Accepting marks it for manual action only." />
+                </div>
                 <div className={storageCertainty === 'verified' ? 'notice success' : 'notice warning'}>
                   {storageCertaintyDescription(storageCertainty)}
                 </div>
@@ -1108,6 +1114,7 @@ function RecommendationQueue({
 }
 
 function RecommendationEvidencePanel({ evidence }: { evidence: RecommendationEvidence }) {
+  const storageDefinition = storageCertaintyDefinition(evidence.storage.verification || evidence.storage.basis || evidence.storage.certainty);
   return (
     <div className="evidence-panel">
       <div className="signal-grid">
@@ -1115,8 +1122,14 @@ function RecommendationEvidencePanel({ evidence }: { evidence: RecommendationEvi
         <Signal label="Risk" value={evidence.storage.risk} />
         <Signal label="Estimated" value={formatBytes(evidence.storage.estimatedSavingsBytes || evidence.storage.spaceSavedBytes)} />
         <Signal label="Verified" value={formatBytes(evidence.storage.verifiedSavingsBytes || 0)} />
-        <Signal label="Rule" value={evidence.source.rule.replace('rule:', '')} />
+        <Signal label="Rule source" value={evidence.source.rule.replace('rule:', '')} />
+        <Signal label="Threshold" value={thresholdProofLabel(evidence.raw)} />
+        <Signal label="Last played" value={evidence.activity.lastPlayedAt ? formatDateTime(evidence.activity.lastPlayedAt) : evidence.activity.serverId ? 'Never watched by imported users' : 'N/A'} />
+        <Signal label="Watched users" value={String(evidence.activity.uniqueUsers)} />
+        <Signal label="Favorites/protection" value={evidence.activity.favoriteCount > 0 ? `${evidence.activity.favoriteCount} signal(s)` : 'None imported'} />
       </div>
+      <ProofRow label="Storage certainty" value={storageDefinition} />
+      <ProofRow label="Safety" value="Mediarr will not delete this. Accepting marks it for manual action only." />
       <div className="proof-grid">
         {evidence.proof.map((point) => (
           <div className="proof-point" key={`${point.label}-${point.value}`}>
@@ -1556,6 +1569,15 @@ function Signal({ label, value }: { label: string; value: string }) {
   );
 }
 
+function ProofRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="proof-row">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
 function recommendationEstimatedSavings(rec: Recommendation): number {
   return parseEvidenceNumber(rec.evidence?.estimatedSavingsBytes, rec.spaceSavedBytes);
 }
@@ -1563,6 +1585,40 @@ function recommendationEstimatedSavings(rec: Recommendation): number {
 function recommendationVerifiedSavings(rec: Recommendation): number {
   const fallback = rec.verification === 'local_verified' ? rec.spaceSavedBytes : 0;
   return parseEvidenceNumber(rec.evidence?.verifiedSavingsBytes, fallback);
+}
+
+function recommendationWhySuggested(rec: Recommendation): string {
+  const thresholdDays = rec.evidence?.thresholdDays;
+  const action = formatRecommendationAction(rec.action).toLowerCase();
+  if (thresholdDays) {
+    return `${action} rule from ${rec.source}; threshold older than ${thresholdDays} days.`;
+  }
+  return `${action} rule from ${rec.source}.`;
+}
+
+function recommendationActivityProof(rec: Recommendation): string {
+  if (!rec.serverId) {
+    return 'Local filesystem scan evidence; no media-server activity was imported for this recommendation.';
+  }
+  const users = rec.uniqueUsers ?? 0;
+  const plays = rec.playCount ?? 0;
+  const favorites = rec.favoriteCount ?? 0;
+  const lastPlayed = rec.lastPlayedAt ? `last played ${formatDateTime(rec.lastPlayedAt)}` : 'never watched by imported users';
+  const protectedText = favorites > 0 ? `${favorites} favorite/protected signal${favorites === 1 ? '' : 's'}` : 'no favorite/protected signals';
+  return `${lastPlayed}; ${plays} total play${plays === 1 ? '' : 's'} across ${users} watched user${users === 1 ? '' : 's'}; ${protectedText}.`;
+}
+
+function thresholdProofLabel(raw: Record<string, string>): string {
+  if (raw.thresholdDays) {
+    return `Older than ${raw.thresholdDays} days`;
+  }
+  if (raw.ageDays) {
+    return `${raw.ageDays} days old`;
+  }
+  if (raw.inactiveDays) {
+    return `${raw.inactiveDays} days inactive`;
+  }
+  return 'Rule default';
 }
 
 function parseEvidenceNumber(value: string | undefined, fallback: number): number {

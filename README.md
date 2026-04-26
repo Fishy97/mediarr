@@ -26,7 +26,7 @@ Mediarr 1.5 is a Docker-hosted library scanner, catalog, and review dashboard fo
 - create activity-aware cleanup recommendations for inactive and never-watched movies, series, and anime-style libraries
 - run an opt-in live Jellyfin acceptance suite against real NAS libraries without modifying media
 - show in-app ingestion diagnostics with imported counts, local verification coverage, unmapped paths, warnings, and top suggestions
-- show recommendation proof with trust state, storage verification, activity evidence, source rule, and audit-backed actions
+- show recommendation proof with trust state, estimated savings, verified savings, storage certainty, activity evidence, source rule, and audit-backed actions
 - protect recommendations or accept them for manual action without enabling permanent deletion
 - review unmapped Jellyfin/Plex/Emby paths, save path mappings, and verify mappings against local files
 - attach optional local AI rationales to deterministic recommendations for bounded batches when the Ollama sidecar is enabled
@@ -41,6 +41,7 @@ Mediarr remains deliberately conservative: it does not delete media, does not do
 - React/TypeScript frontend for dashboard, libraries, catalog, review queue, integrations, provider health, settings, backups, and support bundles
 - Read-only media mounts by default
 - Suggest-only cleanup recommendations with affected paths, confidence, source, and recoverable storage
+- Evidence-first recommendation cards with grouped affected files, confidence, activity proof, estimated savings, and verified savings
 - Provider health and credential surfaces for TMDb, AniList, TheTVDB, OpenSubtitles, and local sidecars
 - Integration status, refresh actions, and inventory/activity sync for Jellyfin, Plex, and Emby
 - Path evidence labels that distinguish locally verified, path-mapped, and server-reported savings
@@ -80,7 +81,7 @@ The AI sidecar is optional. When enabled, Compose starts Ollama and a one-shot m
 Set `MOVIES_DIR`, `SERIES_DIR`, and `ANIME_DIR` in `.env` to point at your media folders. The compose file mounts them read-only.
 
 For a full Ubuntu server walkthrough, see [Docker Compose Deployment Guide](docs/deployment/docker-compose.md).
-Provider behavior is documented in [Provider Guide](docs/providers.md), optional local AI behavior is documented in [Local AI Guide](docs/ai.md), and the production security posture is documented in [Threat Model](docs/threat-model.md).
+Provider behavior is documented in [Provider Guide](docs/providers.md), recommendation evidence is documented in [Recommendation Proof Model](docs/recommendation-proof.md), optional local AI behavior is documented in [Local AI Guide](docs/ai.md), and the production security posture is documented in [Threat Model](docs/threat-model.md).
 
 Run a scan from the UI or with:
 
@@ -129,7 +130,7 @@ Auto-sync is enabled by default and runs every 6 hours. You can disable it or ch
 
 If Jellyfin, Plex, or Emby reports paths that differ from Mediarr's container mounts, use **Integrations > Path Mapping** to map the server prefix to the Mediarr-visible prefix. Mediarr can then verify mapped files against the local filesystem and raise evidence from `server_reported` to `path_mapped` or `local_verified`.
 
-Recommendation cards are evidence-first. Use **Proof** to inspect the rule, storage verification, activity signals, and risk level; use **Manual** to mark a recommendation accepted for human action; use **Protect** to keep the media out of the open queue.
+Recommendation cards are evidence-first. Use **Proof** to inspect the rule, threshold, storage certainty, activity signals, and risk level. The card separates **estimated savings** from **verified savings** so a server-reported value cannot be mistaken for guaranteed disk recovery. Use **Manual** to mark a recommendation accepted for human action; use **Protect** to keep the media out of the open queue. Mediarr will not delete media files.
 
 ### Live Jellyfin Acceptance Suite
 

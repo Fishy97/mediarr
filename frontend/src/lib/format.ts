@@ -58,3 +58,20 @@ export function storageCertaintyDescription(value?: string): string {
       return 'Estimated from media-server data. Verify a path mapping before treating this as guaranteed disk savings.';
   }
 }
+
+export function storageCertaintyDefinition(value?: string): string {
+  switch (value) {
+    case 'verified':
+    case 'local_verified':
+      return 'Locally verified: Mediarr found the file on a read-only mount and confirmed the size.';
+    case 'mapped_estimate':
+    case 'path_mapped':
+      return 'Path mapped estimate: Mediarr translated the server path to a local mount, but size still needs local confirmation.';
+    case 'unmapped':
+      return 'Unmapped: Mediarr cannot connect the server path to a local file path yet.';
+    case 'estimate':
+    case 'server_reported':
+    default:
+      return 'Server estimate: Jellyfin/Plex/Emby reports this path and size. Mediarr has not verified it on disk.';
+  }
+}
