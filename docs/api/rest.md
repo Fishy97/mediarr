@@ -37,7 +37,7 @@ All API routes are rooted at `/api/v1`.
 | POST | `/campaigns/{id}/what-if` | Evaluate a campaign and include request/protection conflicts plus unmapped blockers |
 | POST | `/campaigns/{id}/run` | Record a campaign run and create suggest-only campaign recommendations |
 | POST | `/campaigns/{id}/publish-preview` | Create a dry-run Leaving Soon collection publication plan from verified campaign matches |
-| POST | `/campaigns/{id}/publish` | Publish a verified collection plan; requires `confirmPublish: true` and does not delete media |
+| POST | `/campaigns/{id}/publish` | Publish a verified Jellyfin collection plan; requires `confirmPublish: true` and does not delete media |
 | GET | `/campaigns/{id}/runs` | Campaign run history |
 | GET | `/campaign-templates` | Built-in stewardship campaign templates |
 | POST | `/campaign-templates/{id}/create` | Create an editable campaign from a built-in template |
@@ -99,7 +99,7 @@ Recommendation actions are suggest-only. `accept-manual` records that an adminis
 
 Campaign actions are also suggest-only. Campaign simulation returns matched items, suppressed items, estimated savings, verified savings, and confidence ranges without writing recommendations. Campaign runs create recommendations with action `review_campaign_match`, source `campaign:{id}`, `destructive=false`, and evidence fields such as `campaignId`, `campaignName`, `campaignRunId`, `matchedRules`, `estimatedSavingsBytes`, and `verifiedSavingsBytes`. Re-running a campaign replaces only open recommendations from the same campaign source and preserves ignored, protected, and accepted-for-manual decisions.
 
-Campaign what-if responses add the operational conflicts an admin needs before acting: `requestConflicts`, `protectionConflicts`, and `blockedUnmapped` counts, plus estimated and verified bytes. Publication preview responses are dry-runs by default and include every candidate with `publishable` and `blockedReason`. The publish endpoint requires `confirmPublish: true`; it creates a collection for verified items and still performs no delete, unmonitor, move, or quarantine action.
+Campaign what-if responses add the operational conflicts an admin needs before acting: `requestConflicts`, `protectionConflicts`, and `blockedUnmapped` counts, plus estimated and verified bytes. Publication preview responses are dry-runs by default and include every candidate with `publishable` and `blockedReason`. The publish endpoint currently writes Jellyfin collections only and requires `confirmPublish: true`; Plex plans can be previewed but are blocked from write execution until a Plex collection adapter is added. Publication still performs no delete, unmonitor, move, or quarantine action.
 
 Request-source sync is read-only. Seerr-compatible imports store normalized request state, availability, requester, provider IDs, and timestamps. Tautulli sync is also read-only; it enriches Plex rollups after Plex inventory has been imported. Raw provider payloads are not stored by default.
 

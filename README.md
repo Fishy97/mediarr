@@ -154,7 +154,7 @@ Recommendation cards are evidence-first. Use **Proof** to inspect the rule, thre
 
 Use **Campaigns** to create saved stewardship rules over the normalized media-server activity model. A campaign can target movies, series, or anime, require one or all rules, set minimum confidence and storage thresholds, and suppress favorite/protected or low-evidence matches. **Simulate** previews matched and suppressed items without changing the review queue. **Run campaign** records a run and creates ordinary non-destructive review recommendations with campaign evidence attached.
 
-Campaign templates provide safe starting points for common stewardship reviews. **What-if** adds request/protection conflict counts and unmapped blockers. **Preview collection** creates a dry-run Leaving Soon publication plan that lists publishable and blocked items. Publishing is separate from deletion; it creates a collection only for verified items and never removes media.
+Campaign templates provide safe starting points for common stewardship reviews. **What-if** adds request/protection conflict counts and unmapped blockers. **Preview collection** creates a dry-run Leaving Soon publication plan that lists publishable and blocked items. Publishing is separate from deletion; Jellyfin collection publishing is supported for verified items, while Plex publication remains preview-only until its collection-write adapter is added. Mediarr never removes media.
 
 ### Live Jellyfin Acceptance Suite
 
