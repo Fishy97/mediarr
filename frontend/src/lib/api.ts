@@ -1,6 +1,7 @@
 import type {
   AIStatus,
   ActivityRollup,
+  AppearanceSettings,
   AuthResponse,
   AuthUser,
   Backup,
@@ -157,6 +158,15 @@ export const api = {
     return (await request<Envelope<ProviderSetting>>(`/api/v1/provider-settings/${encodeURIComponent(provider)}`, {
       method: 'PUT',
       body: JSON.stringify(setting),
+    })).data;
+  },
+  async appearance(): Promise<AppearanceSettings> {
+    return (await request<Envelope<AppearanceSettings>>('/api/v1/appearance')).data;
+  },
+  async updateAppearance(appearance: AppearanceSettings): Promise<AppearanceSettings> {
+    return (await request<Envelope<AppearanceSettings>>('/api/v1/appearance', {
+      method: 'PUT',
+      body: JSON.stringify(appearance),
     })).data;
   },
   async aiStatus(): Promise<AIStatus> {

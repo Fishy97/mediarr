@@ -29,11 +29,13 @@ import {
   UserRound,
 } from 'lucide-react';
 import { api, getAuthToken } from './lib/api';
+import { applyAppearanceSettings } from './lib/appearance';
 import { formatBytes, formatConfidence, formatVerification, storageCertaintyDefinition, storageCertaintyDescription, storageCertaintyForVerification } from './lib/format';
 import { groupAffectedPaths } from './lib/pathGroups';
 import type {
   AIStatus,
   ActivityRollup,
+  AppearanceSettings,
   AuthUser,
   Backup,
   Campaign,
@@ -79,6 +81,7 @@ type View = 'dashboard' | 'libraries' | 'catalog' | 'recommendations' | 'campaig
 const integrationItemSampleLimit = 100;
 const unmappedItemSampleLimit = 50;
 const activityRollupSampleLimit = 250;
+const defaultAppearance: AppearanceSettings = { theme: 'system', customCss: '' };
 
 export function App() {
   const [view, setView] = useState<View>('dashboard');
@@ -116,6 +119,7 @@ export function App() {
   const [backupNotice, setBackupNotice] = useState<string | null>(null);
   const [backups, setBackups] = useState<Backup[]>([]);
   const [supportBundles, setSupportBundles] = useState<SupportBundle[]>([]);
+  const [appearance, setAppearance] = useState<AppearanceSettings>(defaultAppearance);
   const [busy, setBusy] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [setupRequired, setSetupRequired] = useState(false);
@@ -124,7 +128,7 @@ export function App() {
 
   async function refresh() {
     try {
-      const [health, libs, catalogRows, scanRows, recs, campaignRows, templateRows, providerRows, providerSettingRows, integrationSettingRows, integrationRows, ai, backupRows, bundleRows, ledger, sourceRows, signalRows, notificationRows, protectionRows] = await Promise.all([
+      const [health, libs, catalogRows, scanRows, recs, campaignRows, templateRows, providerRows, providerSettingRows, integrationSettingRows, integrationRows, appearanceSettings, ai, backupRows, bundleRows, ledger, sourceRows, signalRows, notificationRows, protectionRows] = await Promise.all([
         api.health(),
         api.libraries(),
         api.catalog(),
@@ -136,6 +140,7 @@ export function App() {
         api.providerSettings(),
         api.integrationSettings(),
         api.integrations(),
+        api.appearance(),
         api.aiStatus(),
         api.backups(),
         api.supportBundles(),
@@ -156,6 +161,7 @@ export function App() {
       setProviderSettings(providerSettingRows);
       setIntegrationSettings(integrationSettingRows);
       setIntegrations(integrationRows);
+      setAppearance(appearanceSettings);
       setAIStatus(ai);
       setBackups(backupRows);
       setSupportBundles(bundleRows);
@@ -240,6 +246,21 @@ export function App() {
   useEffect(() => {
     void bootstrap();
   }, []);
+
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-color-scheme: light)');
+    const sync = () => applyAppearanceSettings(document, appearance, query.matches);
+    sync();
+    if (appearance.theme !== 'system') {
+      return undefined;
+    }
+    if (typeof query.addEventListener === 'function') {
+      query.addEventListener('change', sync);
+      return () => query.removeEventListener('change', sync);
+    }
+    query.addListener(sync);
+    return () => query.removeListener(sync);
+  }, [appearance]);
 
   useEffect(() => {
     if (!user) {
@@ -332,6 +353,20 @@ export function App() {
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Backup restore failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateAppearance(nextAppearance: AppearanceSettings) {
+    setBusy(true);
+    try {
+      const updated = await api.updateAppearance(nextAppearance);
+      setAppearance(updated);
+      setBackupNotice('Appearance settings saved');
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to update appearance settings');
     } finally {
       setBusy(false);
     }
@@ -908,6 +943,8 @@ export function App() {
         )}
         {view === 'settings' && (
           <SettingsView
+            appearance={appearance}
+            onAppearanceSave={(nextAppearance) => void updateAppearance(nextAppearance)}
             onBackup={() => void createBackup()}
             onSupportBundle={() => void createSupportBundle()}
             onRestore={(name, dryRun) => void restoreBackup(name, dryRun)}
@@ -2811,6 +2848,8 @@ function ProviderSettingForm({
 }
 
 function SettingsView({
+  appearance,
+  onAppearanceSave,
   onBackup,
   onSupportBundle,
   onRestore,
@@ -2819,6 +2858,8 @@ function SettingsView({
   notice,
   busy,
 }: {
+  appearance: AppearanceSettings;
+  onAppearanceSave: (appearance: AppearanceSettings) => void;
   onBackup: () => void;
   onSupportBundle: () => void;
   onRestore: (name: string, dryRun: boolean) => void;
@@ -2828,6 +2869,8 @@ function SettingsView({
   busy: boolean;
 }) {
   const [selectedBackup, setSelectedBackup] = useState('');
+  const [theme, setTheme] = useState<AppearanceSettings['theme']>(appearance.theme);
+  const [customCss, setCustomCss] = useState(appearance.customCss);
   useEffect(() => {
     if (backups.length === 0) {
       setSelectedBackup('');
@@ -2837,9 +2880,62 @@ function SettingsView({
       setSelectedBackup(backups[0].name);
     }
   }, [backups, selectedBackup]);
+  useEffect(() => {
+    setTheme(appearance.theme);
+    setCustomCss(appearance.customCss);
+  }, [appearance]);
   const activeBackup = backups.find((backup) => backup.name === selectedBackup) ?? backups[0];
   return (
     <section className="settings-layout">
+      {notice && <div className="notice success settings-notice">{notice}</div>}
+      <div className="panel form-panel appearance-panel">
+        <div className="panel-heading">
+          <h2>Appearance</h2>
+          <span>{theme}</span>
+        </div>
+        <label>
+          Theme
+          <select value={theme} onChange={(event) => setTheme(event.target.value as AppearanceSettings['theme'])}>
+            <option value="system">System</option>
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+          </select>
+        </label>
+        <label>
+          Custom CSS
+          <textarea
+            value={customCss}
+            onChange={(event) => setCustomCss(event.target.value)}
+            maxLength={20000}
+            spellCheck={false}
+            rows={8}
+          />
+        </label>
+        <div className="button-row">
+          <button
+            className="primary-button"
+            type="button"
+            onClick={() => onAppearanceSave({ theme, customCss })}
+            disabled={busy}
+          >
+            <Save size={18} />
+            Save appearance
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => {
+              setTheme('system');
+              setCustomCss('');
+              onAppearanceSave(defaultAppearance);
+            }}
+            disabled={busy}
+          >
+            <RotateCcw size={16} />
+            Reset
+          </button>
+        </div>
+      </div>
       <div className="panel form-panel">
         <div className="panel-heading">
           <h2>Backups</h2>
@@ -2887,7 +2983,6 @@ function SettingsView({
             </div>
           ))}
         </div>
-        {notice && <div className="notice success">{notice}</div>}
       </div>
       <div className="panel form-panel">
         <div className="panel-heading">

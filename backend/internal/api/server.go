@@ -136,6 +136,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("/api/v1/provider-settings/", server.providerSettingHandler)
 	server.mux.HandleFunc("/api/v1/integration-settings", server.integrationSettingsHandler)
 	server.mux.HandleFunc("/api/v1/integration-settings/", server.integrationSettingHandler)
+	server.mux.HandleFunc("/api/v1/appearance", server.appearanceHandler)
 	server.mux.HandleFunc("/api/v1/integrations", server.integrationsHandler)
 	server.mux.HandleFunc("/api/v1/integrations/", server.integrationActionHandler)
 	server.mux.HandleFunc("/api/v1/activity/rollups", server.activityRollupsHandler)
@@ -906,6 +907,37 @@ func (server *Server) integrationSettingHandler(w http.ResponseWriter, r *http.R
 		}
 	}
 	writeJSON(w, http.StatusOK, envelope{Data: setting})
+}
+
+func (server *Server) appearanceHandler(w http.ResponseWriter, r *http.Request) {
+	if server.store == nil {
+		http.Error(w, "settings store is not configured", http.StatusBadRequest)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		settings, err := server.store.GetAppearanceSettings()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, envelope{Data: settings})
+	case http.MethodPut:
+		var input database.AppearanceSettingsInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		settings, err := server.store.UpdateAppearanceSettings(input)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		server.record("appearance.updated", "Appearance settings updated", map[string]any{"theme": settings.Theme, "customCssBytes": len([]byte(settings.CustomCSS))})
+		writeJSON(w, http.StatusOK, envelope{Data: settings})
+	default:
+		methodNotAllowed(w, r)
+	}
 }
 
 func (server *Server) integrationsHandler(w http.ResponseWriter, r *http.Request) {

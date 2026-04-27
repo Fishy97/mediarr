@@ -629,6 +629,12 @@ export type AuthResponse = {
   expiresAt?: string;
 };
 
+export type AppearanceSettings = {
+  theme: 'system' | 'dark' | 'light';
+  customCss: string;
+  updatedAt?: string;
+};
+
 export type AIStatus = {
   status: string;
   model: string;

@@ -10,6 +10,8 @@ All API routes are rooted at `/api/v1`.
 | POST | `/auth/login` | Create an authenticated session |
 | POST | `/auth/logout` | Revoke the current session |
 | GET | `/auth/me` | Current authenticated user |
+| GET | `/appearance` | Persisted system/dark/light theme and custom CSS |
+| PUT | `/appearance` | Update Appearance settings |
 | GET | `/libraries` | Configured libraries |
 | POST | `/libraries` | Add a library |
 | GET | `/jobs` | Recent background jobs; supports `?active=true`, `?kind=`, `?targetId=`, and `?limit=` |

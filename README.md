@@ -59,6 +59,7 @@ Mediarr remains deliberately conservative: it does not delete media, does not do
 - Stewardship campaign templates, what-if simulation, and verified Leaving Soon collection previews
 - Seerr request-source ingestion, Tautulli activity enrichment, storage ledger, notifications, and protection request workflow
 - Catalog correction workflow with user overrides taking precedence over scan guesses
+- Persisted Appearance settings with system, dark, light, and admin-controlled custom CSS stored in `/config`
 
 ## Quick Start
 
@@ -72,6 +73,8 @@ docker compose up --build -d
 Open [http://localhost:8080](http://localhost:8080).
 
 Mediarr ships with no default password. On a fresh `/config` volume, the first browser visit is forced through **First run setup**, where you create the local admin account. The setup endpoint is disabled after the first admin exists.
+
+The local admin account and Appearance settings live in the mounted `./config` volume. They are ignored by git and are not baked into the Docker image, so another user cloning the public repo or running Compose starts with their own empty `/config`.
 
 ### Launch Modes
 
@@ -155,6 +158,10 @@ Recommendation cards are evidence-first. Use **Proof** to inspect the rule, thre
 Use **Campaigns** to create saved stewardship rules over the normalized media-server activity model. A campaign can target movies, series, or anime, require one or all rules, set minimum confidence and storage thresholds, and suppress favorite/protected or low-evidence matches. **Simulate** previews matched and suppressed items without changing the review queue. **Run campaign** records a run and creates ordinary non-destructive review recommendations with campaign evidence attached.
 
 Campaign templates provide safe starting points for common stewardship reviews. **What-if** adds request/protection conflict counts and unmapped blockers. **Preview collection** creates a dry-run Leaving Soon publication plan that lists publishable and blocked items. Publishing is separate from deletion; Jellyfin collection publishing is supported for verified items, while Plex publication remains preview-only until its collection-write adapter is added. Mediarr never removes media.
+
+### Appearance
+
+Use **Settings > Appearance** to choose `system`, `dark`, or `light` mode and optionally add custom CSS. Custom CSS is saved in `/config`, capped at 20 KB, and rejects imports, `url(...)`, and legacy scriptable CSS tokens.
 
 ### Live Jellyfin Acceptance Suite
 

@@ -73,6 +73,23 @@ describe('api auth helpers', () => {
     }));
   });
 
+  test('appearance settings call persisted theme endpoints', async () => {
+    const appearance = { theme: 'light', customCss: '.panel { border-radius: 6px; }' } as const;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ data: { theme: 'system', customCss: '' } }))
+      .mockResolvedValueOnce(jsonResponse({ data: appearance }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.appearance()).resolves.toEqual({ theme: 'system', customCss: '' });
+    await expect(api.updateAppearance(appearance)).resolves.toEqual(appearance);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/appearance', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/appearance', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify(appearance),
+    }));
+  });
+
   test('catalog correction calls item correction endpoints', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ data: { ok: true } }));
     vi.stubGlobal('fetch', fetchMock);
