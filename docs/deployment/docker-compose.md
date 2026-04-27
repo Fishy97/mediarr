@@ -7,6 +7,7 @@ The default deployment is intentionally conservative:
 - media folders are mounted read-only
 - app state is stored under `./config`
 - cleanup recommendations are suggest-only
+- there is no default password; first launch requires creating the local admin account in the web UI
 - the container has a healthcheck
 - the container runs as `PUID:PGID`
 
@@ -150,13 +151,140 @@ Run a scan from the web UI, or use the API:
 curl -X POST http://localhost:8080/api/v1/scans
 ```
 
-Then view the catalog:
+The scan runs as a background job. Track active work from the web UI or with:
+
+```bash
+curl "http://localhost:8080/api/v1/jobs?active=true"
+curl http://localhost:8080/api/v1/jobs/<job-id>
+```
+
+Jobs can be canceled or retried from the web UI. The same controls are available through the API:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/jobs/<job-id>/cancel
+curl -X POST http://localhost:8080/api/v1/jobs/<job-id>/retry
+```
+
+When the job completes, view the catalog:
 
 ```bash
 curl http://localhost:8080/api/v1/catalog
 ```
 
-## 7. Backups
+## 7. Sync Jellyfin, Plex, Or Emby Activity
+
+Open the Integrations screen, choose Jellyfin, Plex, or Emby, and enter the media-server URL plus API key/token. Mediarr stores the settings in `/config/mediarr.db` and shows only redacted credential status in the browser.
+
+Environment variables such as `MEDIARR_JELLYFIN_URL`, `MEDIARR_JELLYFIN_API_KEY`, `MEDIARR_PLEX_URL`, `MEDIARR_PLEX_TOKEN`, `MEDIARR_EMBY_URL`, and `MEDIARR_EMBY_API_KEY` are still supported for automation, but they are not required for normal setup.
+
+You can also configure integrations through the API:
+
+```bash
+curl -X PUT http://localhost:8080/api/v1/integration-settings/jellyfin \
+  -H "Content-Type: application/json" \
+  -d '{"baseUrl":"http://jellyfin:8096","apiKey":"your-jellyfin-api-key"}'
+
+curl -X PUT http://localhost:8080/api/v1/integration-settings/plex \
+  -H "Content-Type: application/json" \
+  -d '{"baseUrl":"http://plex:32400","apiKey":"your-plex-token"}'
+
+curl -X PUT http://localhost:8080/api/v1/integration-settings/emby \
+  -H "Content-Type: application/json" \
+  -d '{"baseUrl":"http://emby:8096","apiKey":"your-emby-api-key"}'
+```
+
+From the API:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/integrations/jellyfin/sync
+curl -X POST http://localhost:8080/api/v1/integrations/plex/sync
+curl -X POST http://localhost:8080/api/v1/integrations/emby/sync
+```
+
+Syncs also run as background jobs. The Integrations screen shows the active phase, current item/title, imported counts, unmapped count, retry policy, auto-sync interval, next sync estimate, and recent events while a media server is being read.
+
+Mediarr imports media-server inventory, file paths, file sizes, and activity rollups such as play count and last played date. It uses those signals to create suggest-only cleanup recommendations for inactive or never-watched media.
+
+Auto-sync is enabled by default. Saving a valid Jellyfin, Plex, or Emby connection queues the first sync immediately, and Mediarr checks for due integrations on startup and on a background schedule. The default interval is 6 hours. You can disable auto-sync or change the interval per integration from the UI.
+
+After a sync has completed, each media-server card shows an **Ingestion Proof** panel. It summarizes imported movies, series, episodes, anime-path/library matches, files, unmapped files, server-reported size, locally verified size, warnings, and top suggestion impact. This is the in-app version of the acceptance report and is meant to tell admins whether Mediarr has enough evidence to make trustworthy recommendations.
+
+Use path mappings when Jellyfin, Plex, or Emby sees a different path than the Mediarr container. For example, if Plex reports `/mnt/media/movies` but Mediarr sees `/media/movies`, create a mapping from `/mnt/media` to `/media` in the Integrations screen.
+
+After saving a mapping, run **Verify**. Mediarr checks mapped files against the local filesystem and updates the evidence label:
+
+- `local_verified`: mapped path exists and the size matches the server-reported file
+- `path_mapped`: prefix mapping resolved the path but the file could not be fully verified
+- `server_reported`: no usable local mapping exists yet
+- `unmapped`: the item remains in the path review queue and is blocked from cleanup recommendations
+
+The unmapped queue is deliberate. Mediarr should not tell an admin to remove something unless it can explain exactly where the file is and how the savings were calculated.
+
+Activity data can expose household viewing behavior. Keep Mediarr behind authentication, avoid exposing it directly to the public internet, and treat imported activity as local operational data.
+
+Plex syncs store the most recent imported watch-history cursor. Later syncs request history at or after that cursor and preserve prior rollups, so large Plex libraries do not need to rebuild playback activity from scratch on every run.
+
+## 8. Validate A Live Jellyfin NAS Library
+
+Mediarr includes an opt-in live acceptance suite for production Jellyfin validation. It is designed for real libraries, not mocked fixture libraries. The suite reads Jellyfin inventory and user activity, imports the data into an isolated scratch Mediarr database, generates advisory recommendations, and writes reports to `acceptance-reports/`.
+
+It is read-only:
+
+- no Jellyfin library refresh is requested
+- no media file is deleted, moved, renamed, or edited
+- no normal `/config/mediarr.db` state is changed
+- scratch database files stay under `acceptance-reports/` unless `MEDIARR_ACCEPTANCE_STORE_DIR` is set
+- API keys are read from the environment and are not written to the report
+
+Run it from a checkout:
+
+```bash
+MEDIARR_ACCEPTANCE_JELLYFIN_URL="http://nas:8096" \
+MEDIARR_ACCEPTANCE_JELLYFIN_API_KEY="your-jellyfin-api-key" \
+MEDIARR_ACCEPTANCE_PATH_MAPS="/volume1/media=/media" \
+MEDIARR_ACCEPTANCE_REQUIRE_LOCAL_VERIFY=true \
+scripts/acceptance-jellyfin-live.sh
+```
+
+The script builds and runs the Mediarr Docker image by default, then executes `/app/mediarr-acceptance` inside a one-off container. This keeps the workflow aligned with normal Ubuntu Compose deployment and does not require Go on the server. Developers can set `MEDIARR_ACCEPTANCE_RUNNER=go` to run the same command with `go run`.
+
+Use `MEDIARR_ACCEPTANCE_PATH_MAPS` when the host running the suite can see the same NAS media read-only under a different path. Multiple mappings are separated with semicolons:
+
+```bash
+MEDIARR_ACCEPTANCE_PATH_MAPS="/volume1/movies=/media/movies;/volume1/anime=/media/anime"
+```
+
+If you cannot mount the NAS media locally, omit `MEDIARR_ACCEPTANCE_PATH_MAPS` and leave `MEDIARR_ACCEPTANCE_REQUIRE_LOCAL_VERIFY=false`. The report will still validate Jellyfin-reported inventory, file sizes, last-used data, and recommendations, but it will mark reclaimable storage as server-reported rather than locally verified.
+
+Optional controls:
+
+- `MEDIARR_ACCEPTANCE_REDACT_TITLES=true` redacts titles, paths, and current-item progress labels in reports.
+- `MEDIARR_ACCEPTANCE_REPORT_DIR=/path/to/reports` changes the report directory.
+- `MEDIARR_ACCEPTANCE_TIMEOUT=8h` changes the maximum runtime for very large libraries.
+
+Read the generated Markdown report first. It summarizes movies, series, episodes, anime-library items, file sizes, local verification coverage, unmapped paths, last-used activity rollups, and top suggestions.
+
+Use the in-app Review Queue after the same sync to validate the operator experience:
+
+- large series should appear as one recommendation titled with the series name, not as a wall of episode rows
+- cards should show confidence, estimated savings, verified savings, and storage certainty
+- server-reported recommendations should warn that savings are estimated until path mappings are verified
+- expanding a series should group affected files by season or parent folder
+- accepting a recommendation should mark it for manual action only and must not delete media
+
+## Reverse Proxy And TLS
+
+For internet-adjacent access, place Mediarr behind a trusted reverse proxy such as Caddy, Traefik, or Nginx and terminate TLS there. Do not expose port `8080` directly to the public internet.
+
+Minimum proxy guidance:
+
+- forward `Host`, `X-Forwarded-For`, and `X-Forwarded-Proto`
+- keep Mediarr on a private Docker or LAN network
+- require HTTPS at the proxy
+- keep first-run admin setup private until the admin account exists
+- back up `./config` before upgrades
+
+## 8. Backups
 
 Backups include the SQLite database, settings, audit log, provider cache, artwork cache, and user review state.
 
@@ -164,6 +292,21 @@ Create a backup from the UI, or use:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/backups
+```
+
+List backups:
+
+```bash
+curl http://localhost:8080/api/v1/backups \
+  -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN"
+```
+
+Download one by generated archive name:
+
+```bash
+curl -o mediarr-backup.zip \
+  -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN" \
+  http://localhost:8080/api/v1/backups/mediarr-20260426T120000.000000000Z.zip
 ```
 
 Backups are written to:
@@ -178,7 +321,7 @@ Inspect a backup before restoring it:
 curl -X POST http://localhost:8080/api/v1/backups/restore \
   -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"path":"/config/backups/mediarr-example.zip","dryRun":true}'
+  -d '{"name":"mediarr-20260426T120000.000000000Z.zip","dryRun":true}'
 ```
 
 Restore creates a fresh pre-restore backup before replacing files under `/config`:
@@ -187,8 +330,10 @@ Restore creates a fresh pre-restore backup before replacing files under `/config
 curl -X POST http://localhost:8080/api/v1/backups/restore \
   -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"path":"/config/backups/mediarr-example.zip","dryRun":false}'
+  -d '{"name":"mediarr-20260426T120000.000000000Z.zip","dryRun":false,"confirmRestore":true}'
 ```
+
+Backup download and restore paths reject unsafe archive names and path traversal. The UI uses the same selected-backup flow and asks for confirmation before restore.
 
 For host-level backups, back up the whole `config` directory:
 
@@ -196,7 +341,41 @@ For host-level backups, back up the whole `config` directory:
 tar -czf mediarr-config-$(date +%Y%m%d).tar.gz config
 ```
 
-## 8. Upgrades
+## 9. Support Bundles
+
+Support bundles are designed for production troubleshooting when ingestion proof, path mappings, jobs, and recommendation evidence need to be reviewed without exposing API keys or copying the full database.
+
+Create one from the Settings screen, or use:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/support/bundles \
+  -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN"
+```
+
+List available support bundles:
+
+```bash
+curl http://localhost:8080/api/v1/support/bundles \
+  -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN"
+```
+
+Download one by the generated archive name:
+
+```bash
+curl -o mediarr-support.zip \
+  -H "Authorization: Bearer $MEDIARR_ADMIN_TOKEN" \
+  http://localhost:8080/api/v1/support/bundles/mediarr-support-20260426T120000.000000000Z.zip
+```
+
+Archives are written to:
+
+```text
+./config/support
+```
+
+Support bundles include redacted provider and media-server settings, path mappings, recent jobs, recommendations, ingestion diagnostics, and safety proof. They do not include media files, the raw SQLite database, raw provider payloads, or API keys. Download paths reject unsafe archive names and path traversal. Bundles can include media titles and paths, so treat them as private operational artifacts.
+
+## 10. Upgrades
 
 ```bash
 cd mediarr
@@ -207,7 +386,7 @@ docker compose ps
 
 The app stores durable state in `./config`, so rebuilding the image does not remove catalog data.
 
-## 9. Optional Local AI
+## 11. Optional Local AI
 
 Ollama is included as an optional Compose profile. Start Mediarr with local AI enabled:
 
@@ -234,7 +413,7 @@ docker compose up -d
 docker compose --profile ai up -d
 ```
 
-## 10. Reverse Proxy
+## 12. Reverse Proxy
 
 For a production server, put Mediarr behind a reverse proxy such as Caddy, Nginx Proxy Manager, Traefik, or Nginx. Do not expose port `8080` directly to the public internet.
 
@@ -245,7 +424,7 @@ Minimum reverse proxy expectations:
 - forward to `http://127.0.0.1:8080` or `http://<server-ip>:8080`
 - keep `MEDIARR_ADMIN_TOKEN` set
 
-## 11. Troubleshooting
+## 13. Troubleshooting
 
 ### Container Is Not Healthy
 

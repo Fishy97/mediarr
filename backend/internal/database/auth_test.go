@@ -63,3 +63,37 @@ func TestAdminUserAndSessionLifecycle(t *testing.T) {
 		t.Fatal("deleted session should not authenticate")
 	}
 }
+
+func TestDeleteExpiredSessionsKeepsActiveSessions(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	user, err := store.CreateAdminUser("admin@example.test", "hash-not-plaintext")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := store.CreateSession("expired-session", user.ID, now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateSession("active-session", user.ID, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	deleted, err := store.DeleteExpiredSessions(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted sessions = %d, want 1", deleted)
+	}
+	if _, err := store.UserBySessionHash("expired-session", now); err == nil {
+		t.Fatal("expired session should not authenticate after pruning")
+	}
+	if _, err := store.UserBySessionHash("active-session", now); err != nil {
+		t.Fatalf("active session should remain valid: %v", err)
+	}
+}

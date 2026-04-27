@@ -6,17 +6,38 @@ It deliberately does not search for, download, torrent, index, or acquire media.
 
 ## Project Status
 
-Mediarr V1 is a Docker-hosted library scanner, catalog, and review dashboard for already-downloaded media. It can:
+Mediarr 1.6 is a Docker-hosted library scanner, catalog, and stewardship dashboard for already-downloaded media. It can:
 
 - scan movie, series, and anime folders mounted read-only
 - parse common movie, series, and anime filename patterns
 - persist catalog rows, user metadata corrections, subtitle sidecars, and review recommendations in SQLite
 - detect duplicate catalog items and estimate recoverable space
 - create, inspect, and restore `/config` backups with a pre-restore backup
+- create redacted support bundles with ingestion proof, recent jobs, settings status, recommendations, and safety posture
 - protect the API with first-run admin setup, password login, sessions, and bearer-token automation
 - configure provider credentials without returning secrets through the API
 - request Jellyfin, Plex, and Emby library refreshes as sync targets
-- attach optional local AI rationales to deterministic recommendations when the Ollama sidecar is enabled
+- sync Jellyfin, Plex, and Emby inventory, file evidence, and user activity into a normalized activity model
+- automatically queue the first media-server sync after connection and keep integrations fresh on a schedule
+- resume Plex watch-history imports from the last stored cursor while preserving prior rollups
+- show durable background-job telemetry for filesystem scans and media-server syncs, including phase, counters, current item, and recent events
+- cancel, retry, and mark stale background work so long-running scans and syncs remain transparent
+- retry provider and media-server requests with bounded, Retry-After-aware backoff
+- create activity-aware cleanup recommendations for inactive and never-watched movies, series, and anime-style libraries
+- create stewardship campaigns: saved rules that simulate against imported Jellyfin/Plex/Emby activity before producing suggest-only review items
+- create stewardship campaigns from built-in templates for cold movies, abandoned series, anime backlog, high-storage verified media, never-watched large files, and requested-but-never-watched media
+- run what-if simulations that show matched items, suppressed items, storage impact, unmapped blockers, request conflicts, and protection conflicts without changing the review queue
+- import request intent from Seerr-compatible services such as Jellyseerr and Overseerr
+- enrich Plex activity with optional Tautulli watch history
+- preview verified **Leaving Soon** collection publishing from campaign results without deleting or unmonitoring media
+- maintain a storage ledger that separates locally verified savings, mapped estimates, server-reported estimates, unmapped blockers, protected bytes, accepted manual action, and requested media
+- show stewardship notifications and protection request approvals in the dashboard
+- run an opt-in live Jellyfin acceptance suite against real NAS libraries without modifying media
+- show in-app ingestion diagnostics with imported counts, local verification coverage, unmapped paths, warnings, and top suggestions
+- show recommendation proof with trust state, estimated savings, verified savings, storage certainty, activity evidence, source rule, and audit-backed actions
+- protect recommendations or accept them for manual action without enabling permanent deletion
+- review unmapped Jellyfin/Plex/Emby paths, save path mappings, and verify mappings against local files
+- attach optional local AI rationales to deterministic recommendations for bounded batches when the Ollama sidecar is enabled
 - expose a web UI and REST API
 
 Mediarr remains deliberately conservative: it does not delete media, does not download media, and does not treat provider or AI output as catalog truth unless a user applies a correction.
@@ -25,11 +46,18 @@ Mediarr remains deliberately conservative: it does not delete media, does not do
 
 - Docker Compose-first deployment on port `8080`
 - Go backend with SQLite, WAL mode, audit logging, backup creation, scanner, parser, and recommendation engine
-- React/TypeScript frontend for dashboard, libraries, catalog, review queue, integrations, provider health, settings, and backups
+- React/TypeScript frontend for dashboard, libraries, catalog, review queue, integrations, provider health, settings, backups, and support bundles
 - Read-only media mounts by default
 - Suggest-only cleanup recommendations with affected paths, confidence, source, and recoverable storage
+- Evidence-first recommendation cards with grouped affected files, contextual confidence scoring, activity proof, estimated savings, and verified savings
 - Provider health and credential surfaces for TMDb, AniList, TheTVDB, OpenSubtitles, and local sidecars
-- Integration status and refresh actions for Jellyfin, Plex, Emby, and optional local Ollama
+- Integration status, refresh actions, and inventory/activity sync for Jellyfin, Plex, and Emby
+- Path evidence labels that distinguish locally verified, path-mapped, and server-reported savings
+- Path mapping workbench for resolving server-reported paths to Mediarr-visible container paths
+- Recommendation trust states: new, reviewing, protected, ignored, and accepted for manual action
+- Stewardship campaign builder with rule editing, simulation totals, suppression reasons, run history, and campaign-generated review suggestions
+- Stewardship campaign templates, what-if simulation, and verified Leaving Soon collection previews
+- Seerr request-source ingestion, Tautulli activity enrichment, storage ledger, notifications, and protection request workflow
 - Catalog correction workflow with user overrides taking precedence over scan guesses
 
 ## Quick Start
@@ -42,6 +70,8 @@ docker compose up --build -d
 ```
 
 Open [http://localhost:8080](http://localhost:8080).
+
+Mediarr ships with no default password. On a fresh `/config` volume, the first browser visit is forced through **First run setup**, where you create the local admin account. The setup endpoint is disabled after the first admin exists.
 
 ### Launch Modes
 
@@ -62,13 +92,85 @@ The AI sidecar is optional. When enabled, Compose starts Ollama and a one-shot m
 Set `MOVIES_DIR`, `SERIES_DIR`, and `ANIME_DIR` in `.env` to point at your media folders. The compose file mounts them read-only.
 
 For a full Ubuntu server walkthrough, see [Docker Compose Deployment Guide](docs/deployment/docker-compose.md).
-Provider behavior is documented in [Provider Guide](docs/providers.md), and optional local AI behavior is documented in [Local AI Guide](docs/ai.md).
+Provider behavior is documented in [Provider Guide](docs/providers.md), recommendation evidence is documented in [Recommendation Proof Model](docs/recommendation-proof.md), optional local AI behavior is documented in [Local AI Guide](docs/ai.md), and the production security posture is documented in [Threat Model](docs/threat-model.md).
 
 Run a scan from the UI or with:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/scans
 ```
+
+Scan and sync requests return a background job immediately. Track progress from the dashboard or with:
+
+```bash
+curl "http://localhost:8080/api/v1/jobs?active=true"
+curl http://localhost:8080/api/v1/jobs/<job-id>
+curl -X POST http://localhost:8080/api/v1/jobs/<job-id>/cancel
+curl -X POST http://localhost:8080/api/v1/jobs/<job-id>/retry
+```
+
+Connect Jellyfin, Plex, or Emby from **Integrations** in the web UI by entering the server URL and API key/token. Mediarr stores those credentials in `/config/mediarr.db` and only returns redacted key status to the browser.
+
+You can also configure integrations through the REST API:
+
+```bash
+curl -X PUT http://localhost:8080/api/v1/integration-settings/jellyfin \
+  -H "Content-Type: application/json" \
+  -d '{"baseUrl":"http://jellyfin:8096","apiKey":"your-jellyfin-api-key"}'
+
+curl -X PUT http://localhost:8080/api/v1/integration-settings/plex \
+  -H "Content-Type: application/json" \
+  -d '{"baseUrl":"http://plex:32400","apiKey":"your-plex-token"}'
+
+curl -X PUT http://localhost:8080/api/v1/integration-settings/emby \
+  -H "Content-Type: application/json" \
+  -d '{"baseUrl":"http://emby:8096","apiKey":"your-emby-api-key"}'
+```
+
+Mediarr automatically queues the first sync after a valid connection is saved, then keeps the integration fresh on the configured schedule. Manual Sync remains available from the UI Integrations screen, or with:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/integrations/jellyfin/sync
+curl -X POST http://localhost:8080/api/v1/integrations/plex/sync
+curl -X POST http://localhost:8080/api/v1/integrations/emby/sync
+```
+
+`refresh` asks the media server to rescan its own libraries. `sync` imports inventory and activity into Mediarr so it can create cleanup suggestions. Activity data can reveal household viewing behavior, so Mediarr stores only the normalized fields needed for recommendations and never returns media-server tokens through the API.
+
+Auto-sync is enabled by default and runs every 6 hours. You can disable it or change the interval per integration in the Integrations screen.
+
+### Stewardship Signals
+
+Use **Integrations > Stewardship Signals** to connect optional signal sources:
+
+- **Seerr/Jellyseerr/Overseerr** imports request status, availability, requester, and provider IDs. Request data helps Mediarr avoid treating recently requested media as easy cleanup.
+- **Tautulli** imports Plex watch-history rows and applies them to the normalized Plex activity rollups. Run a Plex sync first so Mediarr has Plex inventory to enrich.
+
+These imports are read-only from Mediarr's point of view. They do not clear requests, modify watch history, or delete media.
+
+If Jellyfin, Plex, or Emby reports paths that differ from Mediarr's container mounts, use **Integrations > Path Mapping** to map the server prefix to the Mediarr-visible prefix. Mediarr can then verify mapped files against the local filesystem and raise evidence from `server_reported` to `path_mapped` or `local_verified`.
+
+Recommendation cards are evidence-first. Use **Proof** to inspect the rule, threshold, storage certainty, activity signals, and risk level. The card separates **estimated savings** from **verified savings** so a server-reported value cannot be mistaken for guaranteed disk recovery. Use **Manual** to mark a recommendation accepted for human action; use **Protect** to keep the media out of the open queue. Mediarr will not delete media files.
+
+Use **Campaigns** to create saved stewardship rules over the normalized media-server activity model. A campaign can target movies, series, or anime, require one or all rules, set minimum confidence and storage thresholds, and suppress favorite/protected or low-evidence matches. **Simulate** previews matched and suppressed items without changing the review queue. **Run campaign** records a run and creates ordinary non-destructive review recommendations with campaign evidence attached.
+
+Campaign templates provide safe starting points for common stewardship reviews. **What-if** adds request/protection conflict counts and unmapped blockers. **Preview collection** creates a dry-run Leaving Soon publication plan that lists publishable and blocked items. Publishing is separate from deletion; Jellyfin collection publishing is supported for verified items, while Plex publication remains preview-only until its collection-write adapter is added. Mediarr never removes media.
+
+### Live Jellyfin Acceptance Suite
+
+For production validation against a real NAS Jellyfin instance, run the opt-in live acceptance suite. It calls Jellyfin read-only, imports into an isolated scratch Mediarr database, generates activity recommendations, and writes local JSON/Markdown reports under `acceptance-reports/`.
+
+```bash
+MEDIARR_ACCEPTANCE_JELLYFIN_URL="http://nas:8096" \
+MEDIARR_ACCEPTANCE_JELLYFIN_API_KEY="your-jellyfin-api-key" \
+MEDIARR_ACCEPTANCE_PATH_MAPS="/volume1/media=/media" \
+MEDIARR_ACCEPTANCE_REQUIRE_LOCAL_VERIFY=true \
+scripts/acceptance-jellyfin-live.sh
+```
+
+`MEDIARR_ACCEPTANCE_PATH_MAPS` is optional and accepts semicolon-separated mappings such as `/server/movies=/media/movies;/server/anime=/media/anime`. If the NAS paths are not mounted locally, omit the mapping and the report will clearly separate server-reported size from locally verified size. The suite never deletes, moves, refreshes, or writes media files.
+
+The script runs through Docker by default so Ubuntu hosts do not need Go installed. Use `MEDIARR_ACCEPTANCE_RUNNER=go` only when running from a development checkout with Go available.
 
 ## Ubuntu Server Deployment
 
@@ -142,16 +244,17 @@ Use the Settings screen or:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/backups
+curl http://localhost:8080/api/v1/backups
 ```
 
-Backups are written under `./config/backups`.
+Backups are written under `./config/backups` and can be downloaded from the Settings screen.
 
 Restore dry-run:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/backups/restore \
   -H 'Content-Type: application/json' \
-  -d '{"path":"/config/backups/mediarr-example.zip","dryRun":true}'
+  -d '{"name":"mediarr-20260426T120000.000000000Z.zip","dryRun":true}'
 ```
 
 Restore execution creates a new pre-restore backup first:
@@ -159,8 +262,19 @@ Restore execution creates a new pre-restore backup first:
 ```bash
 curl -X POST http://localhost:8080/api/v1/backups/restore \
   -H 'Content-Type: application/json' \
-  -d '{"path":"/config/backups/mediarr-example.zip","dryRun":false}'
+  -d '{"name":"mediarr-20260426T120000.000000000Z.zip","dryRun":false,"confirmRestore":true}'
 ```
+
+### 6. Support Bundle
+
+Use the Settings screen or:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/support/bundles
+curl http://localhost:8080/api/v1/support/bundles
+```
+
+Support bundles are written under `./config/support` and can be downloaded from the Settings screen. They include redacted provider and media-server settings, path mappings, recent jobs, recommendations, ingestion diagnostics, and safety proof. They do not include media files, the raw SQLite database, raw provider payloads, or API keys.
 
 ## Local Development
 
@@ -177,6 +291,12 @@ go test ./...
 go run ./cmd/mediarr
 ```
 
+Run the full local release gate before pushing production changes:
+
+```bash
+make ci
+```
+
 ## Safety Model
 
 Mediarr does not expose a permanent delete endpoint. Recommendations are review items only. A future quarantine workflow can be added behind explicit write-path configuration, but the default filesystem posture is read-only media and writable `/config`.
@@ -186,9 +306,13 @@ Recommended production defaults:
 - mount media folders read-only
 - set `MEDIARR_ADMIN_TOKEN`
 - put the app behind a trusted reverse proxy for TLS
+- verify release image provenance before upgrading public instances
 - back up `./config` regularly
+- create a redacted support bundle before filing ingestion issues
 - use backup restore dry-run before restoring an archive
 - do not expose port `8080` directly to the public internet
+
+CI enforces the no-delete invariant with `scripts/verify-no-delete.sh`, and tagged GHCR images are published with GitHub artifact provenance attestations.
 
 ## License
 

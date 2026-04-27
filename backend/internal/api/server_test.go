@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Fishy97/mediarr/backend/internal/recommendations"
@@ -61,5 +62,22 @@ func TestServerDoesNotExposeDestructiveMediaDeleteEndpoint(t *testing.T) {
 
 	if res.Code != http.StatusMethodNotAllowed && res.Code != http.StatusNotFound {
 		t.Fatalf("DELETE media returned %d; expected not found or method not allowed", res.Code)
+	}
+}
+
+func TestFreshServerDashboardCollectionsReturnEmptyArrays(t *testing.T) {
+	server := NewServer(Deps{})
+
+	for _, path := range []string{"/api/v1/libraries", "/api/v1/scans", "/api/v1/recommendations"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		res := httptest.NewRecorder()
+		server.ServeHTTP(res, req)
+
+		if res.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200", path, res.Code)
+		}
+		if strings.Contains(res.Body.String(), `"data":null`) {
+			t.Fatalf("%s returned null data; empty collections must encode as []: %s", path, res.Body.String())
+		}
 	}
 }

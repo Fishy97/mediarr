@@ -60,3 +60,39 @@ func TestScannerSkipsUnsupportedFiles(t *testing.T) {
 		t.Fatalf("files scanned = %d, want 0", result.FilesScanned)
 	}
 }
+
+func TestScannerReportsProgressWithoutFullPaths(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "Arrival.2016.1080p.mkv"), []byte("fake media bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "Blade.Runner.2049.2017.mkv"), []byte("fake media bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var events []Progress
+	scanner := Scanner{
+		Progress: func(progress Progress) {
+			events = append(events, progress)
+		},
+	}
+	if _, err := scanner.Scan(Library{ID: "lib_movies", Kind: "movies", Root: root}); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(events) < 3 {
+		t.Fatalf("progress events = %#v", events)
+	}
+	if events[0].Phase != "discovering" || events[0].Message == "" {
+		t.Fatalf("first event = %#v", events[0])
+	}
+	last := events[len(events)-1]
+	if last.Phase != "complete" || last.Processed != 2 || last.Total != 2 {
+		t.Fatalf("last event = %#v", last)
+	}
+	for _, event := range events {
+		if event.CurrentLabel == filepath.Join(root, "Arrival.2016.1080p.mkv") {
+			t.Fatalf("progress leaked full path: %#v", event)
+		}
+	}
+}

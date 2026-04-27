@@ -12,9 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Fishy97/mediarr/backend/internal/campaigns"
 	"github.com/Fishy97/mediarr/backend/internal/catalog"
 	"github.com/Fishy97/mediarr/backend/internal/filescan"
 	"github.com/Fishy97/mediarr/backend/internal/recommendations"
+	"github.com/Fishy97/mediarr/backend/internal/stewardship"
 
 	_ "modernc.org/sqlite"
 )
@@ -68,6 +70,27 @@ type ProviderSettingInput struct {
 	ClearBaseURL bool   `json:"clearBaseUrl"`
 }
 
+type IntegrationSetting struct {
+	Integration             string    `json:"integration"`
+	BaseURL                 string    `json:"baseUrl,omitempty"`
+	APIKey                  string    `json:"-"`
+	APIKeyConfigured        bool      `json:"apiKeyConfigured"`
+	APIKeyLast4             string    `json:"apiKeyLast4,omitempty"`
+	AutoSyncEnabled         bool      `json:"autoSyncEnabled"`
+	AutoSyncIntervalMinutes int       `json:"autoSyncIntervalMinutes"`
+	UpdatedAt               time.Time `json:"updatedAt"`
+}
+
+type IntegrationSettingInput struct {
+	Integration             string `json:"integration"`
+	BaseURL                 string `json:"baseUrl"`
+	APIKey                  string `json:"apiKey"`
+	ClearAPIKey             bool   `json:"clearApiKey"`
+	ClearBaseURL            bool   `json:"clearBaseUrl"`
+	AutoSyncEnabled         *bool  `json:"autoSyncEnabled,omitempty"`
+	AutoSyncIntervalMinutes int    `json:"autoSyncIntervalMinutes,omitempty"`
+}
+
 type CatalogCorrection struct {
 	MediaFileID  string       `json:"mediaFileId"`
 	Title        string       `json:"title"`
@@ -88,6 +111,200 @@ type CatalogCorrectionInput struct {
 	Provider     string       `json:"provider,omitempty"`
 	ProviderID   string       `json:"providerId,omitempty"`
 	Confidence   float64      `json:"confidence"`
+}
+
+type MediaServer struct {
+	ID           string    `json:"id"`
+	Kind         string    `json:"kind"`
+	Name         string    `json:"name"`
+	BaseURL      string    `json:"baseUrl"`
+	Status       string    `json:"status"`
+	LastSyncedAt time.Time `json:"lastSyncedAt,omitempty"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+type MediaServerUser struct {
+	ServerID    string    `json:"serverId"`
+	ExternalID  string    `json:"externalId"`
+	DisplayName string    `json:"displayName"`
+	LastSeenAt  time.Time `json:"lastSeenAt,omitempty"`
+}
+
+type MediaServerLibrary struct {
+	ServerID   string `json:"serverId"`
+	ExternalID string `json:"externalId"`
+	Name       string `json:"name"`
+	Kind       string `json:"kind"`
+	ItemCount  int    `json:"itemCount"`
+}
+
+type MediaServerItem struct {
+	ServerID          string            `json:"serverId"`
+	ExternalID        string            `json:"externalId"`
+	LibraryExternalID string            `json:"libraryExternalId"`
+	ParentExternalID  string            `json:"parentExternalId,omitempty"`
+	Kind              string            `json:"kind"`
+	Title             string            `json:"title"`
+	Year              int               `json:"year,omitempty"`
+	Path              string            `json:"path,omitempty"`
+	ProviderIDs       map[string]string `json:"providerIds"`
+	RuntimeSeconds    int               `json:"runtimeSeconds,omitempty"`
+	DateCreated       time.Time         `json:"dateCreated,omitempty"`
+	MatchConfidence   float64           `json:"matchConfidence"`
+	UpdatedAt         time.Time         `json:"updatedAt"`
+}
+
+type MediaServerFile struct {
+	ServerID         string  `json:"serverId"`
+	ItemExternalID   string  `json:"itemExternalId"`
+	Path             string  `json:"path"`
+	SizeBytes        int64   `json:"sizeBytes"`
+	Container        string  `json:"container,omitempty"`
+	LocalPath        string  `json:"localPath,omitempty"`
+	LocalMediaFileID string  `json:"localMediaFileId,omitempty"`
+	Verification     string  `json:"verification"`
+	MatchConfidence  float64 `json:"matchConfidence"`
+}
+
+type MediaActivityRollup struct {
+	ServerID       string    `json:"serverId"`
+	ItemExternalID string    `json:"itemExternalId"`
+	PlayCount      int       `json:"playCount"`
+	UniqueUsers    int       `json:"uniqueUsers"`
+	WatchedUsers   int       `json:"watchedUsers"`
+	FavoriteCount  int       `json:"favoriteCount"`
+	LastPlayedAt   time.Time `json:"lastPlayedAt,omitempty"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+type MediaSyncJob struct {
+	ID              string    `json:"id"`
+	ServerID        string    `json:"serverId"`
+	Status          string    `json:"status"`
+	Phase           string    `json:"phase,omitempty"`
+	Message         string    `json:"message,omitempty"`
+	CurrentLabel    string    `json:"currentLabel,omitempty"`
+	Processed       int       `json:"processed,omitempty"`
+	Total           int       `json:"total,omitempty"`
+	ItemsImported   int       `json:"itemsImported"`
+	RollupsImported int       `json:"rollupsImported"`
+	UnmappedItems   int       `json:"unmappedItems"`
+	Cursor          string    `json:"cursor,omitempty"`
+	Error           string    `json:"error,omitempty"`
+	StartedAt       time.Time `json:"startedAt"`
+	CompletedAt     time.Time `json:"completedAt,omitempty"`
+}
+
+type Job struct {
+	ID              string    `json:"id"`
+	Kind            string    `json:"kind"`
+	TargetID        string    `json:"targetId,omitempty"`
+	Status          string    `json:"status"`
+	Phase           string    `json:"phase"`
+	Message         string    `json:"message"`
+	CurrentLabel    string    `json:"currentLabel,omitempty"`
+	Processed       int       `json:"processed"`
+	Total           int       `json:"total"`
+	ItemsImported   int       `json:"itemsImported"`
+	RollupsImported int       `json:"rollupsImported"`
+	UnmappedItems   int       `json:"unmappedItems"`
+	Error           string    `json:"error,omitempty"`
+	StartedAt       time.Time `json:"startedAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+	CompletedAt     time.Time `json:"completedAt,omitempty"`
+}
+
+type JobInput struct {
+	Kind         string
+	TargetID     string
+	Status       string
+	Phase        string
+	Message      string
+	CurrentLabel string
+	Total        int
+}
+
+type JobUpdate struct {
+	Status          string
+	Phase           string
+	Message         string
+	CurrentLabel    string
+	Processed       *int
+	Total           *int
+	ItemsImported   *int
+	RollupsImported *int
+	UnmappedItems   *int
+	Error           string
+	Completed       bool
+}
+
+type JobFilter struct {
+	Kind     string
+	TargetID string
+	Status   string
+	Active   bool
+	Limit    int
+}
+
+type JobEvent struct {
+	ID           string    `json:"id"`
+	JobID        string    `json:"jobId"`
+	Level        string    `json:"level"`
+	Phase        string    `json:"phase"`
+	Message      string    `json:"message"`
+	CurrentLabel string    `json:"currentLabel,omitempty"`
+	Processed    int       `json:"processed"`
+	Total        int       `json:"total"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
+type JobEventInput struct {
+	JobID        string
+	Level        string
+	Phase        string
+	Message      string
+	CurrentLabel string
+	Processed    int
+	Total        int
+}
+
+type PathMapping struct {
+	ID               string    `json:"id"`
+	ServerID         string    `json:"serverId,omitempty"`
+	ServerPathPrefix string    `json:"serverPathPrefix"`
+	LocalPathPrefix  string    `json:"localPathPrefix"`
+	CreatedAt        time.Time `json:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt"`
+}
+
+type PathMappingVerification struct {
+	Mapping       PathMapping `json:"mapping"`
+	MatchedFiles  int         `json:"matchedFiles"`
+	MappedFiles   int         `json:"mappedFiles"`
+	VerifiedFiles int         `json:"verifiedFiles"`
+	MissingFiles  int         `json:"missingFiles"`
+	UpdatedAt     time.Time   `json:"updatedAt"`
+}
+
+type MediaServerSnapshot struct {
+	Server    MediaServer           `json:"server"`
+	Users     []MediaServerUser     `json:"users"`
+	Libraries []MediaServerLibrary  `json:"libraries"`
+	Items     []MediaServerItem     `json:"items"`
+	Files     []MediaServerFile     `json:"files"`
+	Rollups   []MediaActivityRollup `json:"rollups"`
+	Job       MediaSyncJob          `json:"job"`
+}
+
+type MediaServerItemFilter struct {
+	ServerID     string
+	UnmappedOnly bool
+	Limit        int
+}
+
+type MediaActivityRollupFilter struct {
+	ServerID string
+	Limit    int
 }
 
 func Open(configDir string) (*Store, error) {
@@ -166,6 +383,7 @@ func (store *Store) migrate() error {
 		`CREATE TABLE IF NOT EXISTS recommendations (
 			id TEXT PRIMARY KEY,
 			action TEXT NOT NULL,
+			state TEXT NOT NULL DEFAULT 'new',
 			title TEXT NOT NULL,
 			explanation TEXT NOT NULL,
 			space_saved_bytes INTEGER NOT NULL,
@@ -219,6 +437,44 @@ func (store *Store) migrate() error {
 			api_key TEXT NOT NULL DEFAULT '',
 			updated_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS integration_settings (
+			integration TEXT PRIMARY KEY,
+			base_url TEXT NOT NULL DEFAULT '',
+			api_key TEXT NOT NULL DEFAULT '',
+			auto_sync_enabled INTEGER NOT NULL DEFAULT 1,
+			auto_sync_interval_minutes INTEGER NOT NULL DEFAULT 360,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS jobs (
+			id TEXT PRIMARY KEY,
+			kind TEXT NOT NULL,
+			target_id TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL,
+			phase TEXT NOT NULL DEFAULT '',
+			message TEXT NOT NULL DEFAULT '',
+			current_label TEXT NOT NULL DEFAULT '',
+			processed INTEGER NOT NULL DEFAULT 0,
+			total INTEGER NOT NULL DEFAULT 0,
+			items_imported INTEGER NOT NULL DEFAULT 0,
+			rollups_imported INTEGER NOT NULL DEFAULT 0,
+			unmapped_items INTEGER NOT NULL DEFAULT 0,
+			error TEXT NOT NULL DEFAULT '',
+			started_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			completed_at TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS job_events (
+			id TEXT PRIMARY KEY,
+			job_id TEXT NOT NULL,
+			level TEXT NOT NULL,
+			phase TEXT NOT NULL DEFAULT '',
+			message TEXT NOT NULL,
+			current_label TEXT NOT NULL DEFAULT '',
+			processed INTEGER NOT NULL DEFAULT 0,
+			total INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
+		)`,
 		`CREATE TABLE IF NOT EXISTS catalog_corrections (
 			media_file_id TEXT PRIMARY KEY,
 			title TEXT NOT NULL,
@@ -230,6 +486,194 @@ func (store *Store) migrate() error {
 			confidence REAL NOT NULL,
 			updated_at TEXT NOT NULL,
 			FOREIGN KEY(media_file_id) REFERENCES media_files(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS media_servers (
+			id TEXT PRIMARY KEY,
+			kind TEXT NOT NULL,
+			name TEXT NOT NULL,
+			base_url TEXT NOT NULL,
+			status TEXT NOT NULL,
+			last_synced_at TEXT,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS media_server_users (
+			server_id TEXT NOT NULL,
+			external_id TEXT NOT NULL,
+			display_name TEXT NOT NULL,
+			last_seen_at TEXT,
+			PRIMARY KEY (server_id, external_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS media_server_libraries (
+			server_id TEXT NOT NULL,
+			external_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			item_count INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (server_id, external_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS media_server_items (
+			server_id TEXT NOT NULL,
+			external_id TEXT NOT NULL,
+			library_external_id TEXT NOT NULL DEFAULT '',
+			parent_external_id TEXT NOT NULL DEFAULT '',
+			kind TEXT NOT NULL,
+			title TEXT NOT NULL,
+			year INTEGER NOT NULL DEFAULT 0,
+			path TEXT NOT NULL DEFAULT '',
+			provider_ids TEXT NOT NULL DEFAULT '{}',
+			runtime_seconds INTEGER NOT NULL DEFAULT 0,
+			date_created TEXT,
+			match_confidence REAL NOT NULL DEFAULT 0,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (server_id, external_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS media_server_files (
+			server_id TEXT NOT NULL,
+			item_external_id TEXT NOT NULL,
+			path TEXT NOT NULL,
+			size_bytes INTEGER NOT NULL DEFAULT 0,
+			container TEXT NOT NULL DEFAULT '',
+			local_path TEXT NOT NULL DEFAULT '',
+			local_media_file_id TEXT NOT NULL DEFAULT '',
+			verification TEXT NOT NULL DEFAULT 'server_reported',
+			match_confidence REAL NOT NULL DEFAULT 0,
+			PRIMARY KEY (server_id, item_external_id, path)
+		)`,
+		`CREATE TABLE IF NOT EXISTS media_activity_rollups (
+			server_id TEXT NOT NULL,
+			item_external_id TEXT NOT NULL,
+			play_count INTEGER NOT NULL DEFAULT 0,
+			unique_users INTEGER NOT NULL DEFAULT 0,
+			watched_users INTEGER NOT NULL DEFAULT 0,
+			favorite_count INTEGER NOT NULL DEFAULT 0,
+			last_played_at TEXT,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (server_id, item_external_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS media_sync_jobs (
+			id TEXT PRIMARY KEY,
+			server_id TEXT NOT NULL,
+			status TEXT NOT NULL,
+			items_imported INTEGER NOT NULL DEFAULT 0,
+			rollups_imported INTEGER NOT NULL DEFAULT 0,
+			unmapped_items INTEGER NOT NULL DEFAULT 0,
+			cursor TEXT NOT NULL DEFAULT '',
+			error TEXT NOT NULL DEFAULT '',
+			started_at TEXT NOT NULL,
+			completed_at TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS integration_path_mappings (
+			id TEXT PRIMARY KEY,
+			server_id TEXT NOT NULL DEFAULT '',
+			server_path_prefix TEXT NOT NULL,
+			local_path_prefix TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS stewardship_campaigns (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			target_kinds TEXT NOT NULL DEFAULT '[]',
+			target_library_names TEXT NOT NULL DEFAULT '[]',
+			require_all_rules INTEGER NOT NULL DEFAULT 1,
+			minimum_confidence REAL NOT NULL DEFAULT 0,
+			minimum_storage_bytes INTEGER NOT NULL DEFAULT 0,
+			rules TEXT NOT NULL DEFAULT '[]',
+			last_run_at TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS stewardship_campaign_runs (
+			id TEXT PRIMARY KEY,
+			campaign_id TEXT NOT NULL,
+			status TEXT NOT NULL,
+			matched INTEGER NOT NULL DEFAULT 0,
+			suppressed INTEGER NOT NULL DEFAULT 0,
+			estimated_savings_bytes INTEGER NOT NULL DEFAULT 0,
+			verified_savings_bytes INTEGER NOT NULL DEFAULT 0,
+			error TEXT NOT NULL DEFAULT '',
+			started_at TEXT NOT NULL,
+			completed_at TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS request_sources (
+			id TEXT PRIMARY KEY,
+			kind TEXT NOT NULL,
+			name TEXT NOT NULL,
+			base_url TEXT NOT NULL DEFAULT '',
+			api_key TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			last_synced_at TEXT,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS media_request_signals (
+			source_id TEXT NOT NULL,
+			external_request_id TEXT NOT NULL,
+			media_type TEXT NOT NULL,
+			external_media_id TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT '',
+			availability TEXT NOT NULL DEFAULT '',
+			requested_by TEXT NOT NULL DEFAULT '',
+			provider_ids TEXT NOT NULL DEFAULT '{}',
+			estimated_bytes INTEGER NOT NULL DEFAULT 0,
+			requested_at TEXT,
+			approved_at TEXT,
+			available_at TEXT,
+			updated_at TEXT,
+			PRIMARY KEY (source_id, external_request_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS tautulli_sync_jobs (
+			id TEXT PRIMARY KEY,
+			status TEXT NOT NULL,
+			items_imported INTEGER NOT NULL DEFAULT 0,
+			cursor TEXT NOT NULL DEFAULT '',
+			error TEXT NOT NULL DEFAULT '',
+			started_at TEXT NOT NULL,
+			completed_at TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS collection_publications (
+			id TEXT PRIMARY KEY,
+			campaign_id TEXT NOT NULL,
+			server_id TEXT NOT NULL,
+			collection_title TEXT NOT NULL,
+			dry_run INTEGER NOT NULL DEFAULT 1,
+			status TEXT NOT NULL,
+			publishable_items INTEGER NOT NULL DEFAULT 0,
+			blocked_items INTEGER NOT NULL DEFAULT 0,
+			publishable_estimated_bytes INTEGER NOT NULL DEFAULT 0,
+			blocked_estimated_bytes INTEGER NOT NULL DEFAULT 0,
+			items_json TEXT NOT NULL DEFAULT '[]',
+			error TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			published_at TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS notifications (
+			id TEXT PRIMARY KEY,
+			level TEXT NOT NULL,
+			title TEXT NOT NULL,
+			body TEXT NOT NULL DEFAULT '',
+			event_type TEXT NOT NULL DEFAULT '',
+			fields TEXT NOT NULL DEFAULT '{}',
+			read INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			read_at TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS protection_requests (
+			id TEXT PRIMARY KEY,
+			recommendation_id TEXT NOT NULL DEFAULT '',
+			server_id TEXT NOT NULL DEFAULT '',
+			external_item_id TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL,
+			path TEXT NOT NULL DEFAULT '',
+			reason TEXT NOT NULL DEFAULT '',
+			requested_by TEXT NOT NULL,
+			status TEXT NOT NULL,
+			decision_by TEXT NOT NULL DEFAULT '',
+			decision_note TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			decided_at TEXT
 		)`,
 	}
 	for _, statement := range statements {
@@ -247,10 +691,39 @@ func (store *Store) migrate() error {
 		name       string
 		definition string
 	}{
+		{name: "auto_sync_enabled", definition: "INTEGER NOT NULL DEFAULT 1"},
+		{name: "auto_sync_interval_minutes", definition: "INTEGER NOT NULL DEFAULT 360"},
+	} {
+		if err := store.ensureColumn("integration_settings", column.name, column.definition); err != nil {
+			return err
+		}
+	}
+	for _, column := range []struct {
+		name       string
+		definition string
+	}{
+		{name: "state", definition: "TEXT NOT NULL DEFAULT 'new'"},
 		{name: "ai_rationale", definition: "TEXT NOT NULL DEFAULT ''"},
 		{name: "ai_tags", definition: "TEXT NOT NULL DEFAULT '[]'"},
 		{name: "ai_confidence", definition: "REAL NOT NULL DEFAULT 0"},
 		{name: "ai_source", definition: "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := store.ensureColumn("recommendations", column.name, column.definition); err != nil {
+			return err
+		}
+	}
+	for _, column := range []struct {
+		name       string
+		definition string
+	}{
+		{name: "server_id", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "external_item_id", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "last_played_at", definition: "TEXT"},
+		{name: "play_count", definition: "INTEGER NOT NULL DEFAULT 0"},
+		{name: "unique_users", definition: "INTEGER NOT NULL DEFAULT 0"},
+		{name: "favorite_count", definition: "INTEGER NOT NULL DEFAULT 0"},
+		{name: "verification", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "evidence", definition: "TEXT NOT NULL DEFAULT '{}'"},
 	} {
 		if err := store.ensureColumn("recommendations", column.name, column.definition); err != nil {
 			return err
@@ -360,6 +833,24 @@ func (store *Store) DeleteSession(tokenHash string) error {
 	}
 	_, err := store.DB.Exec(`DELETE FROM sessions WHERE token_hash = ?`, tokenHash)
 	return err
+}
+
+func (store *Store) DeleteExpiredSessions(now time.Time) (int, error) {
+	if store == nil || store.DB == nil {
+		return 0, errors.New("nil database store")
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	result, err := store.DB.Exec(`DELETE FROM sessions WHERE expires_at <= ?`, now.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return 0, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(affected), nil
 }
 
 func (store *Store) userFromQuery(query string, args ...any) (User, error) {
@@ -558,6 +1049,1385 @@ func (store *Store) ListCatalog() ([]CatalogItem, error) {
 	return items, rows.Err()
 }
 
+func (store *Store) ReplaceMediaServerSnapshot(snapshot MediaServerSnapshot) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	serverID := strings.TrimSpace(snapshot.Server.ID)
+	if serverID == "" {
+		return errors.New("media server id is required")
+	}
+	now := time.Now().UTC()
+	snapshot.Server.ID = serverID
+	snapshot.Server.Kind = strings.ToLower(strings.TrimSpace(snapshot.Server.Kind))
+	snapshot.Server.Name = strings.TrimSpace(snapshot.Server.Name)
+	snapshot.Server.BaseURL = strings.TrimRight(strings.TrimSpace(snapshot.Server.BaseURL), "/")
+	snapshot.Server.Status = strings.TrimSpace(snapshot.Server.Status)
+	if snapshot.Server.Status == "" {
+		snapshot.Server.Status = "configured"
+	}
+	if snapshot.Server.UpdatedAt.IsZero() {
+		snapshot.Server.UpdatedAt = now
+	}
+	if snapshot.Job.ID == "" {
+		snapshot.Job.ID = randomID("sync")
+	}
+	if snapshot.Job.ServerID == "" {
+		snapshot.Job.ServerID = serverID
+	}
+	if snapshot.Job.Status == "" {
+		snapshot.Job.Status = "completed"
+	}
+	if snapshot.Job.StartedAt.IsZero() {
+		snapshot.Job.StartedAt = now
+	}
+	if snapshot.Job.CompletedAt.IsZero() && snapshot.Job.Status == "completed" {
+		snapshot.Job.CompletedAt = now
+	}
+	if snapshot.Server.LastSyncedAt.IsZero() {
+		snapshot.Server.LastSyncedAt = snapshot.Job.CompletedAt
+	}
+	tx, err := store.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`INSERT INTO media_servers (
+		id, kind, name, base_url, status, last_synced_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(id) DO UPDATE SET
+		kind = excluded.kind,
+		name = excluded.name,
+		base_url = excluded.base_url,
+		status = excluded.status,
+		last_synced_at = excluded.last_synced_at,
+		updated_at = excluded.updated_at`,
+		snapshot.Server.ID,
+		snapshot.Server.Kind,
+		snapshot.Server.Name,
+		snapshot.Server.BaseURL,
+		snapshot.Server.Status,
+		formatOptionalTime(snapshot.Server.LastSyncedAt),
+		snapshot.Server.UpdatedAt.Format(time.RFC3339Nano),
+	); err != nil {
+		return err
+	}
+
+	for _, table := range []string{"media_server_users", "media_server_libraries", "media_server_items", "media_server_files", "media_activity_rollups"} {
+		if _, err := tx.Exec(`DELETE FROM `+table+` WHERE server_id = ?`, serverID); err != nil {
+			return err
+		}
+	}
+
+	userStmt, err := tx.Prepare(`INSERT INTO media_server_users (server_id, external_id, display_name, last_seen_at) VALUES (?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer userStmt.Close()
+	for _, user := range snapshot.Users {
+		user.ServerID = defaultString(user.ServerID, serverID)
+		if strings.TrimSpace(user.ExternalID) == "" {
+			continue
+		}
+		if _, err := userStmt.Exec(user.ServerID, strings.TrimSpace(user.ExternalID), strings.TrimSpace(user.DisplayName), formatOptionalTime(user.LastSeenAt)); err != nil {
+			return err
+		}
+	}
+
+	libraryStmt, err := tx.Prepare(`INSERT INTO media_server_libraries (server_id, external_id, name, kind, item_count) VALUES (?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer libraryStmt.Close()
+	for _, library := range snapshot.Libraries {
+		library.ServerID = defaultString(library.ServerID, serverID)
+		if strings.TrimSpace(library.ExternalID) == "" {
+			continue
+		}
+		if _, err := libraryStmt.Exec(library.ServerID, strings.TrimSpace(library.ExternalID), strings.TrimSpace(library.Name), strings.TrimSpace(library.Kind), library.ItemCount); err != nil {
+			return err
+		}
+	}
+
+	itemStmt, err := tx.Prepare(`INSERT INTO media_server_items (
+		server_id, external_id, library_external_id, parent_external_id, kind, title, year, path, provider_ids, runtime_seconds, date_created, match_confidence, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer itemStmt.Close()
+	for _, item := range snapshot.Items {
+		item.ServerID = defaultString(item.ServerID, serverID)
+		if strings.TrimSpace(item.ExternalID) == "" {
+			continue
+		}
+		if item.ProviderIDs == nil {
+			item.ProviderIDs = map[string]string{}
+		}
+		providerIDs, err := json.Marshal(item.ProviderIDs)
+		if err != nil {
+			return err
+		}
+		if item.UpdatedAt.IsZero() {
+			item.UpdatedAt = now
+		}
+		if _, err := itemStmt.Exec(
+			item.ServerID,
+			strings.TrimSpace(item.ExternalID),
+			strings.TrimSpace(item.LibraryExternalID),
+			strings.TrimSpace(item.ParentExternalID),
+			strings.TrimSpace(item.Kind),
+			strings.TrimSpace(item.Title),
+			item.Year,
+			strings.TrimSpace(item.Path),
+			string(providerIDs),
+			item.RuntimeSeconds,
+			formatOptionalTime(item.DateCreated),
+			clampConfidence(item.MatchConfidence),
+			item.UpdatedAt.Format(time.RFC3339Nano),
+		); err != nil {
+			return err
+		}
+	}
+
+	fileStmt, err := tx.Prepare(`INSERT INTO media_server_files (
+		server_id, item_external_id, path, size_bytes, container, local_path, local_media_file_id, verification, match_confidence
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer fileStmt.Close()
+	for _, file := range snapshot.Files {
+		file.ServerID = defaultString(file.ServerID, serverID)
+		if strings.TrimSpace(file.ItemExternalID) == "" || strings.TrimSpace(file.Path) == "" {
+			continue
+		}
+		if file.Verification == "" {
+			file.Verification = "server_reported"
+		}
+		if _, err := fileStmt.Exec(
+			file.ServerID,
+			strings.TrimSpace(file.ItemExternalID),
+			strings.TrimSpace(file.Path),
+			file.SizeBytes,
+			strings.TrimSpace(file.Container),
+			strings.TrimSpace(file.LocalPath),
+			strings.TrimSpace(file.LocalMediaFileID),
+			strings.TrimSpace(file.Verification),
+			clampConfidence(file.MatchConfidence),
+		); err != nil {
+			return err
+		}
+	}
+
+	rollupStmt, err := tx.Prepare(`INSERT INTO media_activity_rollups (
+		server_id, item_external_id, play_count, unique_users, watched_users, favorite_count, last_played_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer rollupStmt.Close()
+	for _, rollup := range snapshot.Rollups {
+		rollup.ServerID = defaultString(rollup.ServerID, serverID)
+		if strings.TrimSpace(rollup.ItemExternalID) == "" {
+			continue
+		}
+		if rollup.UpdatedAt.IsZero() {
+			rollup.UpdatedAt = now
+		}
+		if _, err := rollupStmt.Exec(
+			rollup.ServerID,
+			strings.TrimSpace(rollup.ItemExternalID),
+			rollup.PlayCount,
+			rollup.UniqueUsers,
+			rollup.WatchedUsers,
+			rollup.FavoriteCount,
+			formatOptionalTime(rollup.LastPlayedAt),
+			rollup.UpdatedAt.Format(time.RFC3339Nano),
+		); err != nil {
+			return err
+		}
+	}
+
+	if _, err := tx.Exec(`INSERT INTO media_sync_jobs (
+		id, server_id, status, items_imported, rollups_imported, unmapped_items, cursor, error, started_at, completed_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		snapshot.Job.ID,
+		serverID,
+		snapshot.Job.Status,
+		snapshot.Job.ItemsImported,
+		snapshot.Job.RollupsImported,
+		snapshot.Job.UnmappedItems,
+		snapshot.Job.Cursor,
+		snapshot.Job.Error,
+		snapshot.Job.StartedAt.UTC().Format(time.RFC3339Nano),
+		formatOptionalTime(snapshot.Job.CompletedAt),
+	); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (store *Store) ListMediaServerItems(filter MediaServerItemFilter) ([]MediaServerItem, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	query := `SELECT server_id, external_id, library_external_id, parent_external_id, kind, title, year, path, provider_ids, runtime_seconds, date_created, match_confidence, updated_at
+		FROM media_server_items`
+	args := []any{}
+	conditions := []string{}
+	if strings.TrimSpace(filter.ServerID) != "" {
+		conditions = append(conditions, "server_id = ?")
+		args = append(args, strings.TrimSpace(filter.ServerID))
+	}
+	if filter.UnmappedOnly {
+		conditions = append(conditions, `EXISTS (
+			SELECT 1 FROM media_server_files
+			WHERE media_server_files.server_id = media_server_items.server_id
+			AND media_server_files.item_external_id = media_server_items.external_id
+			AND (media_server_files.local_path = '' OR media_server_files.verification = 'unmapped')
+		)`)
+	}
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	query += " ORDER BY title, path"
+	if filter.Limit > 0 {
+		limit := filter.Limit
+		if limit > 500 {
+			limit = 500
+		}
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+	rows, err := store.DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []MediaServerItem{}
+	for rows.Next() {
+		var item MediaServerItem
+		var providerIDs string
+		var dateCreated sql.NullString
+		var updatedAt string
+		if err := rows.Scan(
+			&item.ServerID,
+			&item.ExternalID,
+			&item.LibraryExternalID,
+			&item.ParentExternalID,
+			&item.Kind,
+			&item.Title,
+			&item.Year,
+			&item.Path,
+			&providerIDs,
+			&item.RuntimeSeconds,
+			&dateCreated,
+			&item.MatchConfidence,
+			&updatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(providerIDs), &item.ProviderIDs); err != nil {
+			return nil, err
+		}
+		if item.ProviderIDs == nil {
+			item.ProviderIDs = map[string]string{}
+		}
+		item.DateCreated = parseSQLTime(dateCreated)
+		item.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (store *Store) GetMediaServerSnapshot(serverID string) (MediaServerSnapshot, error) {
+	if store == nil || store.DB == nil {
+		return MediaServerSnapshot{}, errors.New("nil database store")
+	}
+	serverID = strings.TrimSpace(serverID)
+	if serverID == "" {
+		return MediaServerSnapshot{}, errors.New("media server id is required")
+	}
+	var snapshot MediaServerSnapshot
+	var lastSyncedAt sql.NullString
+	var updatedAt string
+	if err := store.DB.QueryRow(`SELECT id, kind, name, base_url, status, last_synced_at, updated_at
+		FROM media_servers
+		WHERE id = ?`, serverID).Scan(
+		&snapshot.Server.ID,
+		&snapshot.Server.Kind,
+		&snapshot.Server.Name,
+		&snapshot.Server.BaseURL,
+		&snapshot.Server.Status,
+		&lastSyncedAt,
+		&updatedAt,
+	); err != nil {
+		return MediaServerSnapshot{}, err
+	}
+	snapshot.Server.LastSyncedAt = parseSQLTime(lastSyncedAt)
+	snapshot.Server.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+
+	users, err := store.listMediaServerUsers(serverID)
+	if err != nil {
+		return MediaServerSnapshot{}, err
+	}
+	libraries, err := store.listMediaServerLibraries(serverID)
+	if err != nil {
+		return MediaServerSnapshot{}, err
+	}
+	items, err := store.ListMediaServerItems(MediaServerItemFilter{ServerID: serverID})
+	if err != nil {
+		return MediaServerSnapshot{}, err
+	}
+	files, err := store.listMediaServerFiles(serverID)
+	if err != nil {
+		return MediaServerSnapshot{}, err
+	}
+	rollups, err := store.ListMediaActivityRollups(MediaActivityRollupFilter{ServerID: serverID})
+	if err != nil {
+		return MediaServerSnapshot{}, err
+	}
+	job, err := store.LatestMediaSyncJob(serverID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return MediaServerSnapshot{}, err
+	}
+	snapshot.Users = users
+	snapshot.Libraries = libraries
+	snapshot.Items = items
+	snapshot.Files = files
+	snapshot.Rollups = rollups
+	snapshot.Job = job
+	return snapshot, nil
+}
+
+func (store *Store) listMediaServerUsers(serverID string) ([]MediaServerUser, error) {
+	rows, err := store.DB.Query(`SELECT server_id, external_id, display_name, last_seen_at
+		FROM media_server_users
+		WHERE server_id = ?
+		ORDER BY display_name, external_id`, serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	users := []MediaServerUser{}
+	for rows.Next() {
+		var user MediaServerUser
+		var lastSeenAt sql.NullString
+		if err := rows.Scan(&user.ServerID, &user.ExternalID, &user.DisplayName, &lastSeenAt); err != nil {
+			return nil, err
+		}
+		user.LastSeenAt = parseSQLTime(lastSeenAt)
+		users = append(users, user)
+	}
+	return users, rows.Err()
+}
+
+func (store *Store) listMediaServerLibraries(serverID string) ([]MediaServerLibrary, error) {
+	rows, err := store.DB.Query(`SELECT server_id, external_id, name, kind, item_count
+		FROM media_server_libraries
+		WHERE server_id = ?
+		ORDER BY name, external_id`, serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	libraries := []MediaServerLibrary{}
+	for rows.Next() {
+		var library MediaServerLibrary
+		if err := rows.Scan(&library.ServerID, &library.ExternalID, &library.Name, &library.Kind, &library.ItemCount); err != nil {
+			return nil, err
+		}
+		libraries = append(libraries, library)
+	}
+	return libraries, rows.Err()
+}
+
+func (store *Store) listMediaServerFiles(serverID string) ([]MediaServerFile, error) {
+	rows, err := store.DB.Query(`SELECT server_id, item_external_id, path, size_bytes, container, local_path, local_media_file_id, verification, match_confidence
+		FROM media_server_files
+		WHERE server_id = ?
+		ORDER BY item_external_id, path`, serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	files := []MediaServerFile{}
+	for rows.Next() {
+		var file MediaServerFile
+		if err := rows.Scan(
+			&file.ServerID,
+			&file.ItemExternalID,
+			&file.Path,
+			&file.SizeBytes,
+			&file.Container,
+			&file.LocalPath,
+			&file.LocalMediaFileID,
+			&file.Verification,
+			&file.MatchConfidence,
+		); err != nil {
+			return nil, err
+		}
+		files = append(files, file)
+	}
+	return files, rows.Err()
+}
+
+func (store *Store) ListMediaActivityRollups(filter MediaActivityRollupFilter) ([]MediaActivityRollup, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	query := `SELECT server_id, item_external_id, play_count, unique_users, watched_users, favorite_count, last_played_at, updated_at
+		FROM media_activity_rollups`
+	args := []any{}
+	if strings.TrimSpace(filter.ServerID) != "" {
+		query += " WHERE server_id = ?"
+		args = append(args, strings.TrimSpace(filter.ServerID))
+	}
+	query += " ORDER BY server_id, item_external_id"
+	if filter.Limit > 0 {
+		limit := filter.Limit
+		if limit > 500 {
+			limit = 500
+		}
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+	rows, err := store.DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	rollups := []MediaActivityRollup{}
+	for rows.Next() {
+		var rollup MediaActivityRollup
+		var lastPlayed sql.NullString
+		var updatedAt string
+		if err := rows.Scan(&rollup.ServerID, &rollup.ItemExternalID, &rollup.PlayCount, &rollup.UniqueUsers, &rollup.WatchedUsers, &rollup.FavoriteCount, &lastPlayed, &updatedAt); err != nil {
+			return nil, err
+		}
+		rollup.LastPlayedAt = parseSQLTime(lastPlayed)
+		rollup.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+		rollups = append(rollups, rollup)
+	}
+	return rollups, rows.Err()
+}
+
+func (store *Store) ReplaceMediaActivityRollups(serverID string, rollups []MediaActivityRollup) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	serverID = strings.TrimSpace(serverID)
+	if serverID == "" {
+		return errors.New("server id is required")
+	}
+	tx, err := store.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM media_activity_rollups WHERE server_id = ?`, serverID); err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(`INSERT INTO media_activity_rollups (
+		server_id, item_external_id, play_count, unique_users, watched_users, favorite_count, last_played_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	now := time.Now().UTC()
+	for _, rollup := range rollups {
+		rollup.ServerID = defaultString(rollup.ServerID, serverID)
+		if rollup.ServerID != serverID || strings.TrimSpace(rollup.ItemExternalID) == "" {
+			continue
+		}
+		if rollup.UpdatedAt.IsZero() {
+			rollup.UpdatedAt = now
+		}
+		if _, err := stmt.Exec(
+			rollup.ServerID,
+			strings.TrimSpace(rollup.ItemExternalID),
+			rollup.PlayCount,
+			rollup.UniqueUsers,
+			rollup.WatchedUsers,
+			rollup.FavoriteCount,
+			formatOptionalTime(rollup.LastPlayedAt),
+			rollup.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (store *Store) ListActivityRecommendationMedia() ([]recommendations.ActivityMedia, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	rows, err := store.DB.Query(`SELECT
+			items.server_id,
+			items.external_id,
+			items.parent_external_id,
+			COALESCE(parent.title, ''),
+			COALESCE(libraries.name, ''),
+			items.kind,
+			items.title,
+			COALESCE(NULLIF(files.local_path, ''), files.path),
+			files.size_bytes,
+			items.date_created,
+			rollups.last_played_at,
+			COALESCE(rollups.play_count, 0),
+			COALESCE(rollups.unique_users, 0),
+			COALESCE(rollups.favorite_count, 0),
+			files.verification,
+			CASE
+				WHEN files.match_confidence > 0 AND items.match_confidence > 0 AND files.match_confidence < items.match_confidence THEN files.match_confidence
+				WHEN items.match_confidence > 0 THEN items.match_confidence
+				ELSE files.match_confidence
+			END
+		FROM media_server_items AS items
+		JOIN media_server_files AS files
+			ON files.server_id = items.server_id
+			AND files.item_external_id = items.external_id
+		LEFT JOIN media_activity_rollups AS rollups
+			ON rollups.server_id = items.server_id
+			AND rollups.item_external_id = items.external_id
+		LEFT JOIN media_server_items AS parent
+			ON parent.server_id = items.server_id
+			AND parent.external_id = items.parent_external_id
+		LEFT JOIN media_server_libraries AS libraries
+			ON libraries.server_id = items.server_id
+			AND libraries.external_id = items.library_external_id
+		ORDER BY items.title, files.path`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	media := []recommendations.ActivityMedia{}
+	for rows.Next() {
+		var item recommendations.ActivityMedia
+		var addedAt sql.NullString
+		var lastPlayedAt sql.NullString
+		if err := rows.Scan(
+			&item.ServerID,
+			&item.ExternalItemID,
+			&item.ParentExternalItemID,
+			&item.ParentTitle,
+			&item.LibraryName,
+			&item.Kind,
+			&item.Title,
+			&item.Path,
+			&item.SizeBytes,
+			&addedAt,
+			&lastPlayedAt,
+			&item.PlayCount,
+			&item.UniqueUsers,
+			&item.FavoriteCount,
+			&item.Verification,
+			&item.MatchConfidence,
+		); err != nil {
+			return nil, err
+		}
+		item.AddedAt = parseSQLTime(addedAt)
+		item.LastPlayedAt = parseSQLTime(lastPlayedAt)
+		media = append(media, item)
+	}
+	return media, rows.Err()
+}
+
+func (store *Store) LatestMediaSyncJob(serverID string) (MediaSyncJob, error) {
+	if store == nil || store.DB == nil {
+		return MediaSyncJob{}, errors.New("nil database store")
+	}
+	var job MediaSyncJob
+	var startedAt string
+	var completedAt sql.NullString
+	err := store.DB.QueryRow(`SELECT id, server_id, status, items_imported, rollups_imported, unmapped_items, cursor, error, started_at, completed_at
+		FROM media_sync_jobs
+		WHERE server_id = ?
+		ORDER BY started_at DESC
+		LIMIT 1`, strings.TrimSpace(serverID)).Scan(
+		&job.ID,
+		&job.ServerID,
+		&job.Status,
+		&job.ItemsImported,
+		&job.RollupsImported,
+		&job.UnmappedItems,
+		&job.Cursor,
+		&job.Error,
+		&startedAt,
+		&completedAt,
+	)
+	if err != nil {
+		return MediaSyncJob{}, err
+	}
+	job.StartedAt, _ = time.Parse(time.RFC3339Nano, startedAt)
+	job.CompletedAt = parseSQLTime(completedAt)
+	return job, nil
+}
+
+func (store *Store) CreateJob(input JobInput) (Job, error) {
+	if store == nil || store.DB == nil {
+		return Job{}, errors.New("nil database store")
+	}
+	kind := normalizeJobKind(input.Kind)
+	if !knownJobKind(kind) {
+		return Job{}, errors.New("unknown job kind")
+	}
+	status := normalizeJobStatus(input.Status)
+	if status == "" {
+		status = "queued"
+	}
+	if !knownJobStatus(status) {
+		return Job{}, errors.New("unknown job status")
+	}
+	now := time.Now().UTC()
+	job := Job{
+		ID:           randomID("job"),
+		Kind:         kind,
+		TargetID:     strings.TrimSpace(input.TargetID),
+		Status:       status,
+		Phase:        strings.TrimSpace(input.Phase),
+		Message:      strings.TrimSpace(input.Message),
+		CurrentLabel: strings.TrimSpace(input.CurrentLabel),
+		Total:        maxInt(input.Total, 0),
+		StartedAt:    now,
+		UpdatedAt:    now,
+	}
+	if job.Phase == "" {
+		job.Phase = status
+	}
+	if job.Message == "" {
+		job.Message = "Job queued"
+	}
+	_, err := store.DB.Exec(`INSERT INTO jobs (
+		id, kind, target_id, status, phase, message, current_label, processed, total,
+		items_imported, rollups_imported, unmapped_items, error, started_at, updated_at, completed_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		job.ID,
+		job.Kind,
+		job.TargetID,
+		job.Status,
+		job.Phase,
+		job.Message,
+		job.CurrentLabel,
+		job.Processed,
+		job.Total,
+		job.ItemsImported,
+		job.RollupsImported,
+		job.UnmappedItems,
+		job.Error,
+		job.StartedAt.Format(time.RFC3339Nano),
+		job.UpdatedAt.Format(time.RFC3339Nano),
+		formatOptionalTime(job.CompletedAt),
+	)
+	if err != nil {
+		return Job{}, err
+	}
+	return job, nil
+}
+
+func (store *Store) UpdateJob(id string, update JobUpdate) (Job, error) {
+	if store == nil || store.DB == nil {
+		return Job{}, errors.New("nil database store")
+	}
+	job, err := store.GetJob(id)
+	if err != nil {
+		return Job{}, err
+	}
+	if strings.TrimSpace(update.Status) != "" {
+		status := normalizeJobStatus(update.Status)
+		if !knownJobStatus(status) {
+			return Job{}, errors.New("unknown job status")
+		}
+		job.Status = status
+	}
+	if strings.TrimSpace(update.Phase) != "" {
+		job.Phase = strings.TrimSpace(update.Phase)
+	}
+	if strings.TrimSpace(update.Message) != "" {
+		job.Message = strings.TrimSpace(update.Message)
+	}
+	if strings.TrimSpace(update.CurrentLabel) != "" {
+		job.CurrentLabel = strings.TrimSpace(update.CurrentLabel)
+	}
+	if update.Processed != nil {
+		job.Processed = maxInt(*update.Processed, 0)
+	}
+	if update.Total != nil {
+		job.Total = maxInt(*update.Total, 0)
+	}
+	if update.ItemsImported != nil {
+		job.ItemsImported = maxInt(*update.ItemsImported, 0)
+	}
+	if update.RollupsImported != nil {
+		job.RollupsImported = maxInt(*update.RollupsImported, 0)
+	}
+	if update.UnmappedItems != nil {
+		job.UnmappedItems = maxInt(*update.UnmappedItems, 0)
+	}
+	if strings.TrimSpace(update.Error) != "" {
+		job.Error = strings.TrimSpace(update.Error)
+	}
+	if update.Completed || job.Status == "completed" || job.Status == "failed" || job.Status == "canceled" || job.Status == "stale" {
+		if job.CompletedAt.IsZero() {
+			job.CompletedAt = time.Now().UTC()
+		}
+	}
+	job.UpdatedAt = time.Now().UTC()
+	_, err = store.DB.Exec(`UPDATE jobs SET
+		status = ?, phase = ?, message = ?, current_label = ?, processed = ?, total = ?,
+		items_imported = ?, rollups_imported = ?, unmapped_items = ?, error = ?,
+		updated_at = ?, completed_at = ?
+		WHERE id = ?`,
+		job.Status,
+		job.Phase,
+		job.Message,
+		job.CurrentLabel,
+		job.Processed,
+		job.Total,
+		job.ItemsImported,
+		job.RollupsImported,
+		job.UnmappedItems,
+		job.Error,
+		job.UpdatedAt.Format(time.RFC3339Nano),
+		formatOptionalTime(job.CompletedAt),
+		job.ID,
+	)
+	if err != nil {
+		return Job{}, err
+	}
+	return job, nil
+}
+
+func (store *Store) GetJob(id string) (Job, error) {
+	if store == nil || store.DB == nil {
+		return Job{}, errors.New("nil database store")
+	}
+	return store.jobFromQuery(`SELECT id, kind, target_id, status, phase, message, current_label,
+		processed, total, items_imported, rollups_imported, unmapped_items, error, started_at, updated_at, completed_at
+		FROM jobs WHERE id = ?`, strings.TrimSpace(id))
+}
+
+func (store *Store) LatestJob(kind string, targetID string) (Job, error) {
+	if store == nil || store.DB == nil {
+		return Job{}, errors.New("nil database store")
+	}
+	return store.jobFromQuery(`SELECT id, kind, target_id, status, phase, message, current_label,
+		processed, total, items_imported, rollups_imported, unmapped_items, error, started_at, updated_at, completed_at
+		FROM jobs WHERE kind = ? AND target_id = ? ORDER BY started_at DESC LIMIT 1`, normalizeJobKind(kind), strings.TrimSpace(targetID))
+}
+
+func (store *Store) ListJobs(filter JobFilter) ([]Job, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	conditions := []string{}
+	args := []any{}
+	if kind := normalizeJobKind(filter.Kind); kind != "" {
+		conditions = append(conditions, "kind = ?")
+		args = append(args, kind)
+	}
+	if strings.TrimSpace(filter.TargetID) != "" {
+		conditions = append(conditions, "target_id = ?")
+		args = append(args, strings.TrimSpace(filter.TargetID))
+	}
+	if status := normalizeJobStatus(filter.Status); status != "" {
+		conditions = append(conditions, "status = ?")
+		args = append(args, status)
+	}
+	if filter.Active {
+		conditions = append(conditions, "status IN ('queued', 'running')")
+	}
+	query := `SELECT id, kind, target_id, status, phase, message, current_label,
+		processed, total, items_imported, rollups_imported, unmapped_items, error, started_at, updated_at, completed_at
+		FROM jobs`
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	query += " ORDER BY started_at DESC LIMIT ?"
+	args = append(args, limit)
+	rows, err := store.DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	jobs := []Job{}
+	for rows.Next() {
+		job, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, rows.Err()
+}
+
+func (store *Store) MarkStaleJobs(cutoff time.Time) (int, error) {
+	if store == nil || store.DB == nil {
+		return 0, errors.New("nil database store")
+	}
+	if cutoff.IsZero() {
+		return 0, errors.New("stale cutoff is required")
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := store.DB.Exec(`UPDATE jobs
+		SET status = 'stale',
+			phase = 'stale',
+			message = 'Marked stale after no progress',
+			error = 'job became stale before completion',
+			updated_at = ?,
+			completed_at = COALESCE(completed_at, ?)
+		WHERE status IN ('queued', 'running')
+		AND updated_at < ?`,
+		now,
+		now,
+		cutoff.UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(affected), nil
+}
+
+func (store *Store) AddJobEvent(input JobEventInput) (JobEvent, error) {
+	if store == nil || store.DB == nil {
+		return JobEvent{}, errors.New("nil database store")
+	}
+	input.JobID = strings.TrimSpace(input.JobID)
+	if input.JobID == "" {
+		return JobEvent{}, errors.New("job id is required")
+	}
+	event := JobEvent{
+		ID:           randomID("evt"),
+		JobID:        input.JobID,
+		Level:        normalizeJobEventLevel(input.Level),
+		Phase:        strings.TrimSpace(input.Phase),
+		Message:      strings.TrimSpace(input.Message),
+		CurrentLabel: strings.TrimSpace(input.CurrentLabel),
+		Processed:    maxInt(input.Processed, 0),
+		Total:        maxInt(input.Total, 0),
+		CreatedAt:    time.Now().UTC(),
+	}
+	if event.Message == "" {
+		return JobEvent{}, errors.New("job event message is required")
+	}
+	_, err := store.DB.Exec(`INSERT INTO job_events (
+		id, job_id, level, phase, message, current_label, processed, total, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		event.ID,
+		event.JobID,
+		event.Level,
+		event.Phase,
+		event.Message,
+		event.CurrentLabel,
+		event.Processed,
+		event.Total,
+		event.CreatedAt.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return JobEvent{}, err
+	}
+	return event, nil
+}
+
+func (store *Store) ListJobEvents(jobID string, limit int) ([]JobEvent, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	if limit <= 0 {
+		limit = 25
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	rows, err := store.DB.Query(`SELECT id, job_id, level, phase, message, current_label, processed, total, created_at
+		FROM job_events WHERE job_id = ? ORDER BY created_at DESC LIMIT ?`, strings.TrimSpace(jobID), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	events := []JobEvent{}
+	for rows.Next() {
+		var event JobEvent
+		var createdAt string
+		if err := rows.Scan(&event.ID, &event.JobID, &event.Level, &event.Phase, &event.Message, &event.CurrentLabel, &event.Processed, &event.Total, &createdAt); err != nil {
+			return nil, err
+		}
+		event.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+		events = append(events, event)
+	}
+	return events, rows.Err()
+}
+
+func (store *Store) UpsertPathMapping(mapping PathMapping) (PathMapping, error) {
+	if store == nil || store.DB == nil {
+		return PathMapping{}, errors.New("nil database store")
+	}
+	mapping.ID = strings.TrimSpace(mapping.ID)
+	mapping.ServerID = strings.TrimSpace(mapping.ServerID)
+	mapping.ServerPathPrefix = strings.TrimRight(strings.TrimSpace(mapping.ServerPathPrefix), "/")
+	mapping.LocalPathPrefix = strings.TrimRight(strings.TrimSpace(mapping.LocalPathPrefix), "/")
+	if mapping.ServerPathPrefix == "" || mapping.LocalPathPrefix == "" {
+		return PathMapping{}, errors.New("server and local path prefixes are required")
+	}
+	now := time.Now().UTC()
+	if mapping.ID == "" {
+		mapping.ID = randomID("map")
+	}
+	if mapping.CreatedAt.IsZero() {
+		mapping.CreatedAt = now
+	}
+	mapping.UpdatedAt = now
+	_, err := store.DB.Exec(`INSERT INTO integration_path_mappings (
+		id, server_id, server_path_prefix, local_path_prefix, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?)
+	ON CONFLICT(id) DO UPDATE SET
+		server_id = excluded.server_id,
+		server_path_prefix = excluded.server_path_prefix,
+		local_path_prefix = excluded.local_path_prefix,
+		updated_at = excluded.updated_at`,
+		mapping.ID,
+		mapping.ServerID,
+		mapping.ServerPathPrefix,
+		mapping.LocalPathPrefix,
+		mapping.CreatedAt.Format(time.RFC3339Nano),
+		mapping.UpdatedAt.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return PathMapping{}, err
+	}
+	return mapping, nil
+}
+
+func (store *Store) ListPathMappings() ([]PathMapping, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	rows, err := store.DB.Query(`SELECT id, server_id, server_path_prefix, local_path_prefix, created_at, updated_at
+		FROM integration_path_mappings
+		ORDER BY server_id, server_path_prefix`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	mappings := []PathMapping{}
+	for rows.Next() {
+		var mapping PathMapping
+		var createdAt string
+		var updatedAt string
+		if err := rows.Scan(&mapping.ID, &mapping.ServerID, &mapping.ServerPathPrefix, &mapping.LocalPathPrefix, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		mapping.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+		mapping.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+		mappings = append(mappings, mapping)
+	}
+	return mappings, rows.Err()
+}
+
+func (store *Store) GetPathMapping(id string) (PathMapping, error) {
+	if store == nil || store.DB == nil {
+		return PathMapping{}, errors.New("nil database store")
+	}
+	var mapping PathMapping
+	var createdAt string
+	var updatedAt string
+	err := store.DB.QueryRow(`SELECT id, server_id, server_path_prefix, local_path_prefix, created_at, updated_at
+		FROM integration_path_mappings
+		WHERE id = ?`, strings.TrimSpace(id)).Scan(
+		&mapping.ID,
+		&mapping.ServerID,
+		&mapping.ServerPathPrefix,
+		&mapping.LocalPathPrefix,
+		&createdAt,
+		&updatedAt,
+	)
+	if err != nil {
+		return PathMapping{}, err
+	}
+	mapping.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	mapping.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+	return mapping, nil
+}
+
+func (store *Store) VerifyPathMapping(id string) (PathMappingVerification, error) {
+	if store == nil || store.DB == nil {
+		return PathMappingVerification{}, errors.New("nil database store")
+	}
+	mapping, err := store.GetPathMapping(id)
+	if err != nil {
+		return PathMappingVerification{}, err
+	}
+	serverPrefix := strings.TrimRight(strings.TrimSpace(mapping.ServerPathPrefix), "/")
+	localPrefix := strings.TrimRight(strings.TrimSpace(mapping.LocalPathPrefix), "/")
+	if serverPrefix == "" || localPrefix == "" {
+		return PathMappingVerification{}, errors.New("path mapping prefixes are required")
+	}
+
+	query := `SELECT server_id, item_external_id, path, size_bytes
+		FROM media_server_files
+		WHERE (path = ? OR path LIKE ?)`
+	args := []any{serverPrefix, serverPrefix + "/%"}
+	if strings.TrimSpace(mapping.ServerID) != "" {
+		query += " AND server_id = ?"
+		args = append(args, strings.TrimSpace(mapping.ServerID))
+	}
+	query += " ORDER BY server_id, item_external_id, path"
+	rows, err := store.DB.Query(query, args...)
+	if err != nil {
+		return PathMappingVerification{}, err
+	}
+	defer rows.Close()
+
+	type mappedFile struct {
+		serverID       string
+		itemExternalID string
+		serverPath     string
+		localPath      string
+		sizeBytes      int64
+		verification   string
+		confidence     float64
+	}
+	files := []mappedFile{}
+	result := PathMappingVerification{Mapping: mapping, UpdatedAt: time.Now().UTC()}
+	for rows.Next() {
+		var file mappedFile
+		if err := rows.Scan(&file.serverID, &file.itemExternalID, &file.serverPath, &file.sizeBytes); err != nil {
+			return PathMappingVerification{}, err
+		}
+		file.localPath = translateMappedPath(file.serverPath, serverPrefix, localPrefix)
+		file.verification = "unmapped"
+		file.confidence = 0.4
+		result.MatchedFiles++
+		if info, err := os.Stat(file.localPath); err == nil && !info.IsDir() {
+			result.MappedFiles++
+			if file.sizeBytes <= 0 || info.Size() == file.sizeBytes {
+				file.verification = "local_verified"
+				file.confidence = 0.95
+				result.VerifiedFiles++
+			} else {
+				file.verification = "path_mapped"
+				file.confidence = 0.82
+			}
+		} else {
+			result.MissingFiles++
+		}
+		files = append(files, file)
+	}
+	if err := rows.Err(); err != nil {
+		return PathMappingVerification{}, err
+	}
+
+	tx, err := store.DB.Begin()
+	if err != nil {
+		return PathMappingVerification{}, err
+	}
+	defer tx.Rollback()
+	for _, file := range files {
+		if _, err := tx.Exec(`UPDATE media_server_files
+			SET local_path = ?, verification = ?, match_confidence = ?
+			WHERE server_id = ? AND item_external_id = ? AND path = ?`,
+			file.localPath,
+			file.verification,
+			file.confidence,
+			file.serverID,
+			file.itemExternalID,
+			file.serverPath,
+		); err != nil {
+			return PathMappingVerification{}, err
+		}
+		if file.confidence > 0 {
+			if _, err := tx.Exec(`UPDATE media_server_items
+				SET match_confidence = CASE WHEN match_confidence < ? THEN ? ELSE match_confidence END,
+					updated_at = ?
+				WHERE server_id = ? AND external_id = ?`,
+				file.confidence,
+				file.confidence,
+				result.UpdatedAt.Format(time.RFC3339Nano),
+				file.serverID,
+				file.itemExternalID,
+			); err != nil {
+				return PathMappingVerification{}, err
+			}
+		}
+	}
+	if _, err := tx.Exec(`UPDATE integration_path_mappings SET updated_at = ? WHERE id = ?`, result.UpdatedAt.Format(time.RFC3339Nano), mapping.ID); err != nil {
+		return PathMappingVerification{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return PathMappingVerification{}, err
+	}
+	result.Mapping.UpdatedAt = result.UpdatedAt
+	return result, nil
+}
+
+func (store *Store) DeletePathMapping(id string) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	_, err := store.DB.Exec(`DELETE FROM integration_path_mappings WHERE id = ?`, strings.TrimSpace(id))
+	return err
+}
+
+func (store *Store) UpsertCampaign(campaign campaigns.Campaign) (campaigns.Campaign, error) {
+	if store == nil || store.DB == nil {
+		return campaigns.Campaign{}, errors.New("nil database store")
+	}
+	campaign.ID = strings.TrimSpace(campaign.ID)
+	campaign.Name = strings.TrimSpace(campaign.Name)
+	if campaign.ID == "" {
+		campaign.ID = randomID("cmp")
+	}
+	if campaign.Name == "" {
+		return campaigns.Campaign{}, errors.New("campaign name is required")
+	}
+	now := time.Now().UTC()
+	if campaign.CreatedAt.IsZero() {
+		campaign.CreatedAt = now
+	}
+	campaign.UpdatedAt = now
+	targetKinds, err := json.Marshal(normalizeStringSlice(campaign.TargetKinds))
+	if err != nil {
+		return campaigns.Campaign{}, err
+	}
+	targetLibraryNames, err := json.Marshal(normalizeStringSlice(campaign.TargetLibraryNames))
+	if err != nil {
+		return campaigns.Campaign{}, err
+	}
+	rules, err := json.Marshal(campaign.Rules)
+	if err != nil {
+		return campaigns.Campaign{}, err
+	}
+	enabled := 0
+	if campaign.Enabled {
+		enabled = 1
+	}
+	requireAllRules := 0
+	if campaign.RequireAllRules {
+		requireAllRules = 1
+	}
+	_, err = store.DB.Exec(`INSERT INTO stewardship_campaigns (
+			id, name, description, enabled, target_kinds, target_library_names, require_all_rules,
+			minimum_confidence, minimum_storage_bytes, rules, last_run_at, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name,
+			description = excluded.description,
+			enabled = excluded.enabled,
+			target_kinds = excluded.target_kinds,
+			target_library_names = excluded.target_library_names,
+			require_all_rules = excluded.require_all_rules,
+			minimum_confidence = excluded.minimum_confidence,
+			minimum_storage_bytes = excluded.minimum_storage_bytes,
+			rules = excluded.rules,
+			updated_at = excluded.updated_at`,
+		campaign.ID,
+		campaign.Name,
+		strings.TrimSpace(campaign.Description),
+		enabled,
+		string(targetKinds),
+		string(targetLibraryNames),
+		requireAllRules,
+		clampConfidence(campaign.MinimumConfidence),
+		campaign.MinimumStorageBytes,
+		string(rules),
+		formatOptionalTime(campaign.LastRunAt),
+		campaign.CreatedAt.UTC().Format(time.RFC3339Nano),
+		campaign.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return campaigns.Campaign{}, err
+	}
+	return store.GetCampaign(campaign.ID)
+}
+
+func (store *Store) ListCampaigns() ([]campaigns.Campaign, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	rows, err := store.DB.Query(`SELECT id, name, description, enabled, target_kinds, target_library_names,
+			require_all_rules, minimum_confidence, minimum_storage_bytes, rules, last_run_at, created_at, updated_at
+		FROM stewardship_campaigns
+		ORDER BY updated_at DESC, name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var campaignsList []campaigns.Campaign
+	for rows.Next() {
+		campaign, err := scanCampaign(rows)
+		if err != nil {
+			return nil, err
+		}
+		campaignsList = append(campaignsList, campaign)
+	}
+	return campaignsList, rows.Err()
+}
+
+func (store *Store) GetCampaign(id string) (campaigns.Campaign, error) {
+	if store == nil || store.DB == nil {
+		return campaigns.Campaign{}, errors.New("nil database store")
+	}
+	return scanCampaign(store.DB.QueryRow(`SELECT id, name, description, enabled, target_kinds, target_library_names,
+			require_all_rules, minimum_confidence, minimum_storage_bytes, rules, last_run_at, created_at, updated_at
+		FROM stewardship_campaigns
+		WHERE id = ?`, strings.TrimSpace(id)))
+}
+
+func (store *Store) DeleteCampaign(id string) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	tx, err := store.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM stewardship_campaign_runs WHERE campaign_id = ?`, strings.TrimSpace(id)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM stewardship_campaigns WHERE id = ?`, strings.TrimSpace(id)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (store *Store) RecordCampaignRun(run campaigns.Run) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	run.ID = strings.TrimSpace(run.ID)
+	run.CampaignID = strings.TrimSpace(run.CampaignID)
+	run.Status = strings.TrimSpace(run.Status)
+	if run.ID == "" {
+		run.ID = randomID("cmp_run")
+	}
+	if run.CampaignID == "" {
+		return errors.New("campaign id is required")
+	}
+	if run.Status == "" {
+		run.Status = "completed"
+	}
+	if run.StartedAt.IsZero() {
+		run.StartedAt = time.Now().UTC()
+	}
+	tx, err := store.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT INTO stewardship_campaign_runs (
+			id, campaign_id, status, matched, suppressed, estimated_savings_bytes, verified_savings_bytes,
+			error, started_at, completed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			status = excluded.status,
+			matched = excluded.matched,
+			suppressed = excluded.suppressed,
+			estimated_savings_bytes = excluded.estimated_savings_bytes,
+			verified_savings_bytes = excluded.verified_savings_bytes,
+			error = excluded.error,
+			completed_at = excluded.completed_at`,
+		run.ID,
+		run.CampaignID,
+		run.Status,
+		run.Matched,
+		run.Suppressed,
+		run.EstimatedSavingsBytes,
+		run.VerifiedSavingsBytes,
+		run.Error,
+		run.StartedAt.UTC().Format(time.RFC3339Nano),
+		formatOptionalTime(run.CompletedAt),
+	); err != nil {
+		return err
+	}
+	lastRunAt := run.CompletedAt
+	if lastRunAt.IsZero() {
+		lastRunAt = run.StartedAt
+	}
+	if _, err := tx.Exec(`UPDATE stewardship_campaigns SET last_run_at = ?, updated_at = ? WHERE id = ?`,
+		lastRunAt.UTC().Format(time.RFC3339Nano),
+		time.Now().UTC().Format(time.RFC3339Nano),
+		run.CampaignID,
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (store *Store) ListCampaignRuns(campaignID string) ([]campaigns.Run, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	rows, err := store.DB.Query(`SELECT id, campaign_id, status, matched, suppressed, estimated_savings_bytes,
+			verified_savings_bytes, error, started_at, completed_at
+		FROM stewardship_campaign_runs
+		WHERE campaign_id = ?
+		ORDER BY started_at DESC, id DESC`, strings.TrimSpace(campaignID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var runs []campaigns.Run
+	for rows.Next() {
+		run, err := scanCampaignRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, run)
+	}
+	return runs, rows.Err()
+}
+
+func (store *Store) ReplaceCampaignRecommendations(campaignID string, recs []recommendations.Recommendation) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	campaignID = strings.TrimSpace(campaignID)
+	if campaignID == "" {
+		return errors.New("campaign id is required")
+	}
+	source := "campaign:" + campaignID
+	tx, err := store.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	existingStates, err := recommendationStates(tx)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM recommendations WHERE source = ? AND state IN ('new', 'reviewing') AND ignored_at IS NULL`, source); err != nil {
+		return err
+	}
+	for index := range recs {
+		recs[index].Source = source
+	}
+	if err := insertRecommendations(tx, recs, existingStates); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (store *Store) ReplaceRecommendations(recs []recommendations.Recommendation) error {
 	if store == nil || store.DB == nil {
 		return errors.New("nil database store")
@@ -568,18 +2438,37 @@ func (store *Store) ReplaceRecommendations(recs []recommendations.Recommendation
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`DELETE FROM recommendations WHERE ignored_at IS NULL`); err != nil {
+	existingStates, err := recommendationStates(tx)
+	if err != nil {
 		return err
 	}
+	if _, err := tx.Exec(`DELETE FROM recommendations WHERE ignored_at IS NULL AND state NOT IN ('ignored', 'protected', 'accepted_for_manual_action')`); err != nil {
+		return err
+	}
+	if err := insertRecommendations(tx, recs, existingStates); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func insertRecommendations(tx *sql.Tx, recs []recommendations.Recommendation, existingStates map[string]recommendations.State) error {
 	stmt, err := tx.Prepare(`INSERT INTO recommendations (
-		id, action, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive, ai_rationale, ai_tags, ai_confidence, ai_source
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		id, action, state, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive,
+		ai_rationale, ai_tags, ai_confidence, ai_source,
+		server_id, external_item_id, last_played_at, play_count, unique_users, favorite_count, verification, evidence
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
 	for _, rec := range recs {
+		rec = rec.WithDefaults()
+		if existingState := existingStates[rec.ID]; existingState == recommendations.StateIgnored || existingState == recommendations.StateProtected || existingState == recommendations.StateAcceptedForManualAction {
+			continue
+		} else if existingState != "" {
+			rec.State = existingState
+		}
 		paths, err := json.Marshal(rec.AffectedPaths)
 		if err != nil {
 			return err
@@ -592,6 +2481,14 @@ func (store *Store) ReplaceRecommendations(recs []recommendations.Recommendation
 		if err != nil {
 			return err
 		}
+		evidence := rec.Evidence
+		if evidence == nil {
+			evidence = map[string]string{}
+		}
+		evidenceJSON, err := json.Marshal(evidence)
+		if err != nil {
+			return err
+		}
 		destructive := 0
 		if rec.Destructive {
 			destructive = 1
@@ -599,6 +2496,7 @@ func (store *Store) ReplaceRecommendations(recs []recommendations.Recommendation
 		if _, err := stmt.Exec(
 			rec.ID,
 			string(rec.Action),
+			string(normalizeRecommendationState(rec.State)),
 			rec.Title,
 			rec.Explanation,
 			rec.SpaceSavedBytes,
@@ -610,20 +2508,31 @@ func (store *Store) ReplaceRecommendations(recs []recommendations.Recommendation
 			string(aiTags),
 			rec.AIConfidence,
 			rec.AISource,
+			rec.ServerID,
+			rec.ExternalItemID,
+			formatOptionalTime(rec.LastPlayedAt),
+			rec.PlayCount,
+			rec.UniqueUsers,
+			rec.FavoriteCount,
+			rec.Verification,
+			string(evidenceJSON),
 		); err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (store *Store) ListRecommendations() ([]recommendations.Recommendation, error) {
 	if store == nil || store.DB == nil {
 		return nil, errors.New("nil database store")
 	}
-	rows, err := store.DB.Query(`SELECT id, action, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive, ai_rationale, ai_tags, ai_confidence, ai_source
+	rows, err := store.DB.Query(`SELECT id, action, state, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive,
+			ai_rationale, ai_tags, ai_confidence, ai_source,
+			server_id, external_item_id, last_played_at, play_count, unique_users, favorite_count, verification, evidence
 		FROM recommendations
 		WHERE ignored_at IS NULL
+		AND state NOT IN ('ignored', 'protected')
 		ORDER BY space_saved_bytes DESC, id`)
 	if err != nil {
 		return nil, err
@@ -632,43 +2541,54 @@ func (store *Store) ListRecommendations() ([]recommendations.Recommendation, err
 
 	recs := []recommendations.Recommendation{}
 	for rows.Next() {
-		var rec recommendations.Recommendation
-		var action string
-		var paths string
-		var aiTags string
-		var destructive int
-		if err := rows.Scan(&rec.ID, &action, &rec.Title, &rec.Explanation, &rec.SpaceSavedBytes, &rec.Confidence, &rec.Source, &paths, &destructive, &rec.AIRationale, &aiTags, &rec.AIConfidence, &rec.AISource); err != nil {
+		rec, err := scanRecommendation(rows)
+		if err != nil {
 			return nil, err
 		}
-		rec.Action = recommendations.Action(action)
-		rec.Destructive = destructive == 1
-		if err := json.Unmarshal([]byte(paths), &rec.AffectedPaths); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal([]byte(aiTags), &rec.AITags); err != nil {
-			return nil, err
-		}
-		if rec.AITags == nil {
-			rec.AITags = []string{}
-		}
-		recs = append(recs, rec)
+		recs = append(recs, rec.WithDefaults())
 	}
 	return recs, rows.Err()
+}
+
+func (store *Store) GetRecommendation(id string) (recommendations.Recommendation, error) {
+	if store == nil || store.DB == nil {
+		return recommendations.Recommendation{}, errors.New("nil database store")
+	}
+	return scanRecommendation(store.DB.QueryRow(`SELECT id, action, state, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive,
+			ai_rationale, ai_tags, ai_confidence, ai_source,
+			server_id, external_item_id, last_played_at, play_count, unique_users, favorite_count, verification, evidence
+		FROM recommendations
+		WHERE id = ?`, strings.TrimSpace(id)))
+}
+
+func (store *Store) SetRecommendationState(id string, state recommendations.State) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	state = normalizeRecommendationState(state)
+	if _, err := store.GetRecommendation(id); err != nil {
+		return err
+	}
+	ignoredAt := sql.NullString{}
+	if state == recommendations.StateIgnored {
+		ignoredAt = sql.NullString{String: time.Now().UTC().Format(time.RFC3339Nano), Valid: true}
+	}
+	_, err := store.DB.Exec(`UPDATE recommendations SET state = ?, ignored_at = ? WHERE id = ?`, string(state), ignoredAt, strings.TrimSpace(id))
+	return err
 }
 
 func (store *Store) IgnoreRecommendation(id string) error {
 	if store == nil || store.DB == nil {
 		return errors.New("nil database store")
 	}
-	_, err := store.DB.Exec(`UPDATE recommendations SET ignored_at = ? WHERE id = ?`, time.Now().UTC().Format(time.RFC3339Nano), id)
-	return err
+	return store.SetRecommendationState(id, recommendations.StateIgnored)
 }
 
 func (store *Store) RestoreRecommendation(id string) error {
 	if store == nil || store.DB == nil {
 		return errors.New("nil database store")
 	}
-	_, err := store.DB.Exec(`UPDATE recommendations SET ignored_at = NULL WHERE id = ?`, id)
+	_, err := store.DB.Exec(`UPDATE recommendations SET state = ?, ignored_at = NULL WHERE id = ?`, string(recommendations.StateNew), strings.TrimSpace(id))
 	return err
 }
 
@@ -814,6 +2734,758 @@ func (store *Store) ListProviderSettingSecrets() ([]ProviderSetting, error) {
 	return settings, rows.Err()
 }
 
+func (store *Store) UpsertIntegrationSetting(input IntegrationSettingInput) (IntegrationSetting, error) {
+	if store == nil || store.DB == nil {
+		return IntegrationSetting{}, errors.New("nil database store")
+	}
+	integration := normalizeIntegrationName(input.Integration)
+	if !knownIntegration(integration) {
+		return IntegrationSetting{}, errors.New("unknown integration")
+	}
+
+	current := IntegrationSetting{AutoSyncEnabled: true, AutoSyncIntervalMinutes: defaultAutoSyncIntervalMinutes()}
+	var updatedAtRaw string
+	err := store.DB.QueryRow(
+		`SELECT integration, base_url, api_key, auto_sync_enabled, auto_sync_interval_minutes, updated_at FROM integration_settings WHERE integration = ?`,
+		integration,
+	).Scan(&current.Integration, &current.BaseURL, &current.APIKey, &current.AutoSyncEnabled, &current.AutoSyncIntervalMinutes, &updatedAtRaw)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return IntegrationSetting{}, err
+	}
+
+	baseURL := strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
+	if baseURL == "" && !input.ClearBaseURL {
+		baseURL = current.BaseURL
+	}
+	apiKey := current.APIKey
+	if input.ClearAPIKey {
+		apiKey = ""
+	} else if strings.TrimSpace(input.APIKey) != "" {
+		apiKey = strings.TrimSpace(input.APIKey)
+	}
+	autoSyncEnabled := current.AutoSyncEnabled
+	if input.AutoSyncEnabled != nil {
+		autoSyncEnabled = *input.AutoSyncEnabled
+	}
+	autoSyncInterval := current.AutoSyncIntervalMinutes
+	if autoSyncInterval <= 0 {
+		autoSyncInterval = defaultAutoSyncIntervalMinutes()
+	}
+	if input.AutoSyncIntervalMinutes > 0 {
+		autoSyncInterval = normalizeAutoSyncIntervalMinutes(input.AutoSyncIntervalMinutes)
+	}
+
+	updatedAt := time.Now().UTC()
+	_, err = store.DB.Exec(
+		`INSERT INTO integration_settings (integration, base_url, api_key, auto_sync_enabled, auto_sync_interval_minutes, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(integration) DO UPDATE SET
+			base_url = excluded.base_url,
+			api_key = excluded.api_key,
+			auto_sync_enabled = excluded.auto_sync_enabled,
+			auto_sync_interval_minutes = excluded.auto_sync_interval_minutes,
+			updated_at = excluded.updated_at`,
+		integration,
+		baseURL,
+		apiKey,
+		boolInt(autoSyncEnabled),
+		autoSyncInterval,
+		updatedAt.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return IntegrationSetting{}, err
+	}
+	return redactedIntegrationSetting(integration, baseURL, apiKey, autoSyncEnabled, autoSyncInterval, updatedAt), nil
+}
+
+func (store *Store) ListIntegrationSettings() ([]IntegrationSetting, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	rows, err := store.DB.Query(`SELECT integration, base_url, api_key, auto_sync_enabled, auto_sync_interval_minutes, updated_at FROM integration_settings ORDER BY integration`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	settings := []IntegrationSetting{}
+	for rows.Next() {
+		var setting IntegrationSetting
+		var updatedAtRaw string
+		if err := rows.Scan(&setting.Integration, &setting.BaseURL, &setting.APIKey, &setting.AutoSyncEnabled, &setting.AutoSyncIntervalMinutes, &updatedAtRaw); err != nil {
+			return nil, err
+		}
+		setting.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAtRaw)
+		settings = append(settings, redactedIntegrationSetting(setting.Integration, setting.BaseURL, setting.APIKey, setting.AutoSyncEnabled, normalizeAutoSyncIntervalMinutes(setting.AutoSyncIntervalMinutes), setting.UpdatedAt))
+	}
+	return settings, rows.Err()
+}
+
+func (store *Store) ListIntegrationSettingSecrets() ([]IntegrationSetting, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	rows, err := store.DB.Query(`SELECT integration, base_url, api_key, auto_sync_enabled, auto_sync_interval_minutes, updated_at FROM integration_settings ORDER BY integration`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	settings := []IntegrationSetting{}
+	for rows.Next() {
+		var setting IntegrationSetting
+		var updatedAtRaw string
+		if err := rows.Scan(&setting.Integration, &setting.BaseURL, &setting.APIKey, &setting.AutoSyncEnabled, &setting.AutoSyncIntervalMinutes, &updatedAtRaw); err != nil {
+			return nil, err
+		}
+		setting.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAtRaw)
+		setting.APIKeyConfigured = strings.TrimSpace(setting.APIKey) != ""
+		setting.APIKeyLast4 = last4(setting.APIKey)
+		setting.AutoSyncIntervalMinutes = normalizeAutoSyncIntervalMinutes(setting.AutoSyncIntervalMinutes)
+		settings = append(settings, setting)
+	}
+	return settings, rows.Err()
+}
+
+func (store *Store) UpsertRequestSource(input stewardship.RequestSourceInput) (stewardship.RequestSource, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.RequestSource{}, errors.New("nil database store")
+	}
+	kind := strings.ToLower(strings.TrimSpace(input.Kind))
+	if kind == "" {
+		kind = "seerr"
+	}
+	id := kind
+	if kind != "seerr" {
+		return stewardship.RequestSource{}, errors.New("unknown request source kind")
+	}
+	current := stewardship.RequestSource{ID: id, Kind: kind, Name: "Seerr", Enabled: true}
+	var lastSyncedAt sql.NullString
+	var updatedAtRaw string
+	err := store.DB.QueryRow(`SELECT id, kind, name, base_url, api_key, enabled, last_synced_at, updated_at
+		FROM request_sources WHERE id = ?`, id).Scan(
+		&current.ID,
+		&current.Kind,
+		&current.Name,
+		&current.BaseURL,
+		&current.APIKey,
+		&current.Enabled,
+		&lastSyncedAt,
+		&updatedAtRaw,
+	)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return stewardship.RequestSource{}, err
+	}
+	current.LastSyncedAt = parseSQLTime(lastSyncedAt)
+
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		name = current.Name
+	}
+	if name == "" {
+		name = "Seerr"
+	}
+	baseURL := strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
+	if baseURL == "" {
+		baseURL = current.BaseURL
+	}
+	apiKey := current.APIKey
+	if input.ClearAPIKey {
+		apiKey = ""
+	} else if strings.TrimSpace(input.APIKey) != "" {
+		apiKey = strings.TrimSpace(input.APIKey)
+	}
+	enabled := current.Enabled
+	if input.Enabled != nil {
+		enabled = *input.Enabled
+	}
+	updatedAt := time.Now().UTC()
+	_, err = store.DB.Exec(`INSERT INTO request_sources (
+			id, kind, name, base_url, api_key, enabled, last_synced_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			kind = excluded.kind,
+			name = excluded.name,
+			base_url = excluded.base_url,
+			api_key = excluded.api_key,
+			enabled = excluded.enabled,
+			updated_at = excluded.updated_at`,
+		id,
+		kind,
+		name,
+		baseURL,
+		apiKey,
+		boolInt(enabled),
+		formatOptionalTime(current.LastSyncedAt),
+		updatedAt.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return stewardship.RequestSource{}, err
+	}
+	return redactedRequestSource(stewardship.RequestSource{ID: id, Kind: kind, Name: name, BaseURL: baseURL, APIKey: apiKey, Enabled: enabled, LastSyncedAt: current.LastSyncedAt, UpdatedAt: updatedAt}), nil
+}
+
+func (store *Store) ListRequestSources() ([]stewardship.RequestSource, error) {
+	sources, err := store.listRequestSources(false)
+	if err != nil {
+		return nil, err
+	}
+	for index := range sources {
+		sources[index] = redactedRequestSource(sources[index])
+	}
+	return sources, nil
+}
+
+func (store *Store) ListRequestSourceSecrets() ([]stewardship.RequestSource, error) {
+	return store.listRequestSources(true)
+}
+
+func (store *Store) listRequestSources(includeSecrets bool) ([]stewardship.RequestSource, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	rows, err := store.DB.Query(`SELECT id, kind, name, base_url, api_key, enabled, last_synced_at, updated_at
+		FROM request_sources ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	sources := []stewardship.RequestSource{}
+	for rows.Next() {
+		var source stewardship.RequestSource
+		var lastSyncedAt sql.NullString
+		var updatedAtRaw string
+		if err := rows.Scan(&source.ID, &source.Kind, &source.Name, &source.BaseURL, &source.APIKey, &source.Enabled, &lastSyncedAt, &updatedAtRaw); err != nil {
+			return nil, err
+		}
+		source.LastSyncedAt = parseSQLTime(lastSyncedAt)
+		source.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAtRaw)
+		source.APIKeyConfigured = strings.TrimSpace(source.APIKey) != ""
+		source.APIKeyLast4 = last4(source.APIKey)
+		if !includeSecrets {
+			source.APIKey = ""
+		}
+		sources = append(sources, source)
+	}
+	return sources, rows.Err()
+}
+
+func (store *Store) ReplaceRequestSignals(sourceID string, signals []stewardship.RequestSignal) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return errors.New("request source id is required")
+	}
+	tx, err := store.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM media_request_signals WHERE source_id = ?`, sourceID); err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(`INSERT INTO media_request_signals (
+			source_id, external_request_id, media_type, external_media_id, title, status, availability,
+			requested_by, provider_ids, estimated_bytes, requested_at, approved_at, available_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	now := time.Now().UTC()
+	for _, signal := range signals {
+		signal.SourceID = defaultString(signal.SourceID, sourceID)
+		if strings.TrimSpace(signal.ExternalRequestID) == "" {
+			continue
+		}
+		if signal.ProviderIDs == nil {
+			signal.ProviderIDs = map[string]string{}
+		}
+		providerIDs, err := json.Marshal(signal.ProviderIDs)
+		if err != nil {
+			return err
+		}
+		if signal.UpdatedAt.IsZero() {
+			signal.UpdatedAt = now
+		}
+		if _, err := stmt.Exec(
+			signal.SourceID,
+			strings.TrimSpace(signal.ExternalRequestID),
+			strings.TrimSpace(signal.MediaType),
+			strings.TrimSpace(signal.ExternalMediaID),
+			strings.TrimSpace(signal.Title),
+			strings.TrimSpace(signal.Status),
+			strings.TrimSpace(signal.Availability),
+			strings.TrimSpace(signal.RequestedBy),
+			string(providerIDs),
+			signal.EstimatedBytes,
+			formatOptionalTime(signal.RequestedAt),
+			formatOptionalTime(signal.ApprovedAt),
+			formatOptionalTime(signal.AvailableAt),
+			formatOptionalTime(signal.UpdatedAt),
+		); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`UPDATE request_sources SET last_synced_at = ?, updated_at = ? WHERE id = ?`,
+		now.Format(time.RFC3339Nano),
+		now.Format(time.RFC3339Nano),
+		sourceID,
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (store *Store) ListRequestSignals(sourceID string) ([]stewardship.RequestSignal, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	query := `SELECT source_id, external_request_id, media_type, external_media_id, title, status, availability,
+			requested_by, provider_ids, estimated_bytes, requested_at, approved_at, available_at, updated_at
+		FROM media_request_signals`
+	args := []any{}
+	if strings.TrimSpace(sourceID) != "" {
+		query += ` WHERE source_id = ?`
+		args = append(args, strings.TrimSpace(sourceID))
+	}
+	query += ` ORDER BY source_id, requested_at DESC, external_request_id`
+	rows, err := store.DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	signals := []stewardship.RequestSignal{}
+	for rows.Next() {
+		var signal stewardship.RequestSignal
+		var providers string
+		var requestedAt sql.NullString
+		var approvedAt sql.NullString
+		var availableAt sql.NullString
+		var updatedAt sql.NullString
+		if err := rows.Scan(
+			&signal.SourceID,
+			&signal.ExternalRequestID,
+			&signal.MediaType,
+			&signal.ExternalMediaID,
+			&signal.Title,
+			&signal.Status,
+			&signal.Availability,
+			&signal.RequestedBy,
+			&providers,
+			&signal.EstimatedBytes,
+			&requestedAt,
+			&approvedAt,
+			&availableAt,
+			&updatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(providers), &signal.ProviderIDs); err != nil {
+			return nil, err
+		}
+		if signal.ProviderIDs == nil {
+			signal.ProviderIDs = map[string]string{}
+		}
+		signal.RequestedAt = parseSQLTime(requestedAt)
+		signal.ApprovedAt = parseSQLTime(approvedAt)
+		signal.AvailableAt = parseSQLTime(availableAt)
+		signal.UpdatedAt = parseSQLTime(updatedAt)
+		signals = append(signals, signal)
+	}
+	return signals, rows.Err()
+}
+
+func (store *Store) RecordTautulliSyncJob(job stewardship.TautulliSyncJob) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	if strings.TrimSpace(job.ID) == "" {
+		job.ID = randomID("tt")
+	}
+	if strings.TrimSpace(job.Status) == "" {
+		job.Status = "completed"
+	}
+	if job.StartedAt.IsZero() {
+		job.StartedAt = time.Now().UTC()
+	}
+	_, err := store.DB.Exec(`INSERT INTO tautulli_sync_jobs (
+			id, status, items_imported, cursor, error, started_at, completed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		job.ID,
+		job.Status,
+		job.ItemsImported,
+		strings.TrimSpace(job.Cursor),
+		strings.TrimSpace(job.Error),
+		job.StartedAt.UTC().Format(time.RFC3339Nano),
+		formatOptionalTime(job.CompletedAt),
+	)
+	return err
+}
+
+func (store *Store) LatestTautulliSyncJob() (stewardship.TautulliSyncJob, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.TautulliSyncJob{}, errors.New("nil database store")
+	}
+	var job stewardship.TautulliSyncJob
+	var startedAt string
+	var completedAt sql.NullString
+	err := store.DB.QueryRow(`SELECT id, status, items_imported, cursor, error, started_at, completed_at
+		FROM tautulli_sync_jobs ORDER BY started_at DESC LIMIT 1`).Scan(
+		&job.ID,
+		&job.Status,
+		&job.ItemsImported,
+		&job.Cursor,
+		&job.Error,
+		&startedAt,
+		&completedAt,
+	)
+	if err != nil {
+		return stewardship.TautulliSyncJob{}, err
+	}
+	job.StartedAt, _ = time.Parse(time.RFC3339Nano, startedAt)
+	job.CompletedAt = parseSQLTime(completedAt)
+	return job, nil
+}
+
+func (store *Store) RecordCollectionPublication(plan stewardship.PublicationPlan) (stewardship.PublicationPlan, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.PublicationPlan{}, errors.New("nil database store")
+	}
+	if strings.TrimSpace(plan.ID) == "" {
+		plan.ID = randomID("pub")
+	}
+	if strings.TrimSpace(plan.Status) == "" {
+		plan.Status = "preview"
+	}
+	if plan.CreatedAt.IsZero() {
+		plan.CreatedAt = time.Now().UTC()
+	}
+	items, err := json.Marshal(plan.Items)
+	if err != nil {
+		return stewardship.PublicationPlan{}, err
+	}
+	_, err = store.DB.Exec(`INSERT INTO collection_publications (
+			id, campaign_id, server_id, collection_title, dry_run, status, publishable_items, blocked_items,
+			publishable_estimated_bytes, blocked_estimated_bytes, items_json, error, created_at, published_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			status = excluded.status,
+			publishable_items = excluded.publishable_items,
+			blocked_items = excluded.blocked_items,
+			publishable_estimated_bytes = excluded.publishable_estimated_bytes,
+			blocked_estimated_bytes = excluded.blocked_estimated_bytes,
+			items_json = excluded.items_json,
+			error = excluded.error,
+			published_at = excluded.published_at`,
+		plan.ID,
+		strings.TrimSpace(plan.CampaignID),
+		strings.TrimSpace(plan.ServerID),
+		strings.TrimSpace(plan.CollectionTitle),
+		boolInt(plan.DryRun),
+		strings.TrimSpace(plan.Status),
+		plan.PublishableItems,
+		plan.BlockedItems,
+		plan.PublishableEstimatedBytes,
+		plan.BlockedEstimatedBytes,
+		string(items),
+		strings.TrimSpace(plan.Error),
+		plan.CreatedAt.UTC().Format(time.RFC3339Nano),
+		formatOptionalTime(plan.PublishedAt),
+	)
+	if err != nil {
+		return stewardship.PublicationPlan{}, err
+	}
+	return store.GetCollectionPublication(plan.ID)
+}
+
+func (store *Store) MarkCollectionPublicationPublished(id string, status string, errText string) (stewardship.PublicationPlan, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.PublicationPlan{}, errors.New("nil database store")
+	}
+	status = strings.TrimSpace(status)
+	if status == "" {
+		status = "published"
+	}
+	var publishedAt any = nil
+	if status == "published" {
+		publishedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	_, err := store.DB.Exec(`UPDATE collection_publications SET status = ?, error = ?, published_at = ? WHERE id = ?`,
+		status,
+		strings.TrimSpace(errText),
+		publishedAt,
+		strings.TrimSpace(id),
+	)
+	if err != nil {
+		return stewardship.PublicationPlan{}, err
+	}
+	return store.GetCollectionPublication(id)
+}
+
+func (store *Store) GetCollectionPublication(id string) (stewardship.PublicationPlan, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.PublicationPlan{}, errors.New("nil database store")
+	}
+	return scanCollectionPublication(store.DB.QueryRow(`SELECT id, campaign_id, server_id, collection_title, dry_run, status,
+			publishable_items, blocked_items, publishable_estimated_bytes, blocked_estimated_bytes, items_json, error, created_at, published_at
+		FROM collection_publications WHERE id = ?`, strings.TrimSpace(id)))
+}
+
+func (store *Store) ListCollectionPublications(campaignID string) ([]stewardship.PublicationPlan, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	query := `SELECT id, campaign_id, server_id, collection_title, dry_run, status,
+			publishable_items, blocked_items, publishable_estimated_bytes, blocked_estimated_bytes, items_json, error, created_at, published_at
+		FROM collection_publications`
+	args := []any{}
+	if strings.TrimSpace(campaignID) != "" {
+		query += ` WHERE campaign_id = ?`
+		args = append(args, strings.TrimSpace(campaignID))
+	}
+	query += ` ORDER BY created_at DESC`
+	rows, err := store.DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	plans := []stewardship.PublicationPlan{}
+	for rows.Next() {
+		plan, err := scanCollectionPublication(rows)
+		if err != nil {
+			return nil, err
+		}
+		plans = append(plans, plan)
+	}
+	return plans, rows.Err()
+}
+
+func (store *Store) CreateNotification(notification stewardship.Notification) (stewardship.Notification, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.Notification{}, errors.New("nil database store")
+	}
+	notification = notification.WithDefaults()
+	if strings.TrimSpace(notification.Title) == "" {
+		return stewardship.Notification{}, errors.New("notification title is required")
+	}
+	fields, err := json.Marshal(notification.Fields)
+	if err != nil {
+		return stewardship.Notification{}, err
+	}
+	_, err = store.DB.Exec(`INSERT INTO notifications (
+			id, level, title, body, event_type, fields, read, created_at, read_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		notification.ID,
+		notification.Level,
+		strings.TrimSpace(notification.Title),
+		strings.TrimSpace(notification.Body),
+		strings.TrimSpace(notification.EventType),
+		string(fields),
+		boolInt(notification.Read),
+		notification.CreatedAt.UTC().Format(time.RFC3339Nano),
+		formatOptionalTime(notification.ReadAt),
+	)
+	if err != nil {
+		return stewardship.Notification{}, err
+	}
+	return notification, nil
+}
+
+func (store *Store) MarkNotificationRead(id string) (stewardship.Notification, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.Notification{}, errors.New("nil database store")
+	}
+	now := time.Now().UTC()
+	_, err := store.DB.Exec(`UPDATE notifications SET read = 1, read_at = ? WHERE id = ?`, now.Format(time.RFC3339Nano), strings.TrimSpace(id))
+	if err != nil {
+		return stewardship.Notification{}, err
+	}
+	return store.GetNotification(id)
+}
+
+func (store *Store) GetNotification(id string) (stewardship.Notification, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.Notification{}, errors.New("nil database store")
+	}
+	return scanNotification(store.DB.QueryRow(`SELECT id, level, title, body, event_type, fields, read, created_at, read_at
+		FROM notifications WHERE id = ?`, strings.TrimSpace(id)))
+}
+
+func (store *Store) ListNotifications(includeRead bool, limit int) ([]stewardship.Notification, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	query := `SELECT id, level, title, body, event_type, fields, read, created_at, read_at FROM notifications`
+	args := []any{}
+	if !includeRead {
+		query += ` WHERE read = 0`
+	}
+	query += ` ORDER BY created_at DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := store.DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	notifications := []stewardship.Notification{}
+	for rows.Next() {
+		notification, err := scanNotification(rows)
+		if err != nil {
+			return nil, err
+		}
+		notifications = append(notifications, notification)
+	}
+	return notifications, rows.Err()
+}
+
+func (store *Store) CreateProtectionRequest(request stewardship.ProtectionRequest) (stewardship.ProtectionRequest, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.ProtectionRequest{}, errors.New("nil database store")
+	}
+	request = request.WithDefaults()
+	if strings.TrimSpace(request.Title) == "" {
+		return stewardship.ProtectionRequest{}, errors.New("protection request title is required")
+	}
+	if strings.TrimSpace(request.RequestedBy) == "" {
+		return stewardship.ProtectionRequest{}, errors.New("requested by is required")
+	}
+	_, err := store.DB.Exec(`INSERT INTO protection_requests (
+			id, recommendation_id, server_id, external_item_id, title, path, reason, requested_by,
+			status, decision_by, decision_note, created_at, decided_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		request.ID,
+		strings.TrimSpace(request.RecommendationID),
+		strings.TrimSpace(request.ServerID),
+		strings.TrimSpace(request.ExternalItemID),
+		strings.TrimSpace(request.Title),
+		strings.TrimSpace(request.Path),
+		strings.TrimSpace(request.Reason),
+		strings.TrimSpace(request.RequestedBy),
+		request.Status,
+		strings.TrimSpace(request.DecisionBy),
+		strings.TrimSpace(request.DecisionNote),
+		request.CreatedAt.UTC().Format(time.RFC3339Nano),
+		formatOptionalTime(request.DecidedAt),
+	)
+	if err != nil {
+		return stewardship.ProtectionRequest{}, err
+	}
+	return request, nil
+}
+
+func (store *Store) DecideProtectionRequest(id string, approve bool, decisionBy string, note string) (stewardship.ProtectionRequest, error) {
+	request, err := store.GetProtectionRequest(id)
+	if err != nil {
+		return stewardship.ProtectionRequest{}, err
+	}
+	if approve {
+		request, err = request.Approve(decisionBy, note)
+	} else {
+		request, err = request.Decline(decisionBy, note)
+	}
+	if err != nil {
+		return stewardship.ProtectionRequest{}, err
+	}
+	_, err = store.DB.Exec(`UPDATE protection_requests SET status = ?, decision_by = ?, decision_note = ?, decided_at = ? WHERE id = ?`,
+		request.Status,
+		request.DecisionBy,
+		request.DecisionNote,
+		formatOptionalTime(request.DecidedAt),
+		request.ID,
+	)
+	if err != nil {
+		return stewardship.ProtectionRequest{}, err
+	}
+	if approve && request.RecommendationID != "" {
+		_ = store.SetRecommendationState(request.RecommendationID, recommendations.StateProtected)
+	}
+	return request, nil
+}
+
+func (store *Store) GetProtectionRequest(id string) (stewardship.ProtectionRequest, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.ProtectionRequest{}, errors.New("nil database store")
+	}
+	return scanProtectionRequest(store.DB.QueryRow(`SELECT id, recommendation_id, server_id, external_item_id, title, path, reason, requested_by,
+			status, decision_by, decision_note, created_at, decided_at
+		FROM protection_requests WHERE id = ?`, strings.TrimSpace(id)))
+}
+
+func (store *Store) ListProtectionRequests(status string) ([]stewardship.ProtectionRequest, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	query := `SELECT id, recommendation_id, server_id, external_item_id, title, path, reason, requested_by,
+			status, decision_by, decision_note, created_at, decided_at
+		FROM protection_requests`
+	args := []any{}
+	if strings.TrimSpace(status) != "" {
+		query += ` WHERE status = ?`
+		args = append(args, strings.TrimSpace(status))
+	}
+	query += ` ORDER BY created_at DESC`
+	rows, err := store.DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	requests := []stewardship.ProtectionRequest{}
+	for rows.Next() {
+		request, err := scanProtectionRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		requests = append(requests, request)
+	}
+	return requests, rows.Err()
+}
+
+func (store *Store) StorageLedger() (stewardship.StorageLedger, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.StorageLedger{}, errors.New("nil database store")
+	}
+	rows, err := store.DB.Query(`SELECT id, action, state, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive,
+			ai_rationale, ai_tags, ai_confidence, ai_source,
+			server_id, external_item_id, last_played_at, play_count, unique_users, favorite_count, verification, evidence
+		FROM recommendations
+		ORDER BY space_saved_bytes DESC, id`)
+	if err != nil {
+		return stewardship.StorageLedger{}, err
+	}
+	defer rows.Close()
+	ledgerRecs := []stewardship.LedgerRecommendation{}
+	for rows.Next() {
+		rec, err := scanRecommendation(rows)
+		if err != nil {
+			return stewardship.StorageLedger{}, err
+		}
+		evidence := recommendations.BuildEvidence(rec)
+		ledgerRecs = append(ledgerRecs, stewardship.LedgerRecommendation{
+			ID:             rec.ID,
+			State:          string(rec.State),
+			EstimatedBytes: evidence.Storage.EstimatedSavingsBytes,
+			VerifiedBytes:  evidence.Storage.VerifiedSavingsBytes,
+			Verification:   evidence.Storage.Verification,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return stewardship.StorageLedger{}, err
+	}
+	signals, err := store.ListRequestSignals("")
+	if err != nil {
+		return stewardship.StorageLedger{}, err
+	}
+	return stewardship.BuildStorageLedger(stewardship.LedgerInput{Recommendations: ledgerRecs, RequestSignals: signals}), nil
+}
+
 func (store *Store) UpsertCatalogCorrection(mediaFileID string, input CatalogCorrectionInput) (CatalogCorrection, error) {
 	if store == nil || store.DB == nil {
 		return CatalogCorrection{}, errors.New("nil database store")
@@ -906,12 +3578,133 @@ func redactedProviderSetting(provider string, baseURL string, apiKey string, upd
 	}
 }
 
+func redactedIntegrationSetting(integration string, baseURL string, apiKey string, autoSyncEnabled bool, autoSyncIntervalMinutes int, updatedAt time.Time) IntegrationSetting {
+	return IntegrationSetting{
+		Integration:             integration,
+		BaseURL:                 baseURL,
+		APIKeyConfigured:        strings.TrimSpace(apiKey) != "",
+		APIKeyLast4:             last4(apiKey),
+		AutoSyncEnabled:         autoSyncEnabled,
+		AutoSyncIntervalMinutes: normalizeAutoSyncIntervalMinutes(autoSyncIntervalMinutes),
+		UpdatedAt:               updatedAt,
+	}
+}
+
+func redactedRequestSource(source stewardship.RequestSource) stewardship.RequestSource {
+	source.APIKeyConfigured = strings.TrimSpace(source.APIKey) != ""
+	source.APIKeyLast4 = last4(source.APIKey)
+	source.APIKey = ""
+	return source
+}
+
+func defaultAutoSyncIntervalMinutes() int {
+	return 360
+}
+
+func normalizeAutoSyncIntervalMinutes(minutes int) int {
+	if minutes <= 0 {
+		return defaultAutoSyncIntervalMinutes()
+	}
+	if minutes < 15 {
+		return 15
+	}
+	if minutes > 10080 {
+		return 10080
+	}
+	return minutes
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
 func last4(value string) string {
 	value = strings.TrimSpace(value)
 	if len(value) <= 4 {
 		return value
 	}
 	return value[len(value)-4:]
+}
+
+func normalizeIntegrationName(integration string) string {
+	return strings.ToLower(strings.TrimSpace(integration))
+}
+
+func knownIntegration(integration string) bool {
+	switch normalizeIntegrationName(integration) {
+	case "jellyfin", "plex", "emby", "tautulli":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeJobKind(kind string) string {
+	return strings.ToLower(strings.TrimSpace(kind))
+}
+
+func knownJobKind(kind string) bool {
+	switch normalizeJobKind(kind) {
+	case "filesystem_scan", "jellyfin_sync", "plex_sync", "emby_sync", "tautulli_sync":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeJobStatus(status string) string {
+	return strings.ToLower(strings.TrimSpace(status))
+}
+
+func knownJobStatus(status string) bool {
+	switch normalizeJobStatus(status) {
+	case "queued", "running", "completed", "failed", "canceled", "stale":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeRecommendationState(state recommendations.State) recommendations.State {
+	switch recommendations.State(strings.ToLower(strings.TrimSpace(string(state)))) {
+	case recommendations.StateReviewing:
+		return recommendations.StateReviewing
+	case recommendations.StateIgnored:
+		return recommendations.StateIgnored
+	case recommendations.StateProtected:
+		return recommendations.StateProtected
+	case recommendations.StateAcceptedForManualAction:
+		return recommendations.StateAcceptedForManualAction
+	default:
+		return recommendations.StateNew
+	}
+}
+
+func translateMappedPath(path string, serverPrefix string, localPrefix string) string {
+	path = filepath.Clean(strings.TrimSpace(path))
+	serverPrefix = filepath.Clean(strings.TrimSpace(serverPrefix))
+	localPrefix = filepath.Clean(strings.TrimSpace(localPrefix))
+	if path == serverPrefix {
+		return localPrefix
+	}
+	suffix := strings.TrimPrefix(path, serverPrefix)
+	suffix = strings.TrimLeft(suffix, string(os.PathSeparator)+"/")
+	if suffix == "" {
+		return localPrefix
+	}
+	return filepath.Join(localPrefix, filepath.FromSlash(suffix))
+}
+
+func normalizeJobEventLevel(level string) string {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "debug", "warning", "error":
+		return strings.ToLower(strings.TrimSpace(level))
+	default:
+		return "info"
+	}
 }
 
 func normalizeProviderName(provider string) string {
@@ -955,6 +3748,377 @@ func correctedCanonicalKey(current string, kind catalog.Kind, title string, year
 		return base + ":" + strconv.Itoa(year)
 	}
 	return base
+}
+
+func defaultString(value string, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+type jobScanner interface {
+	Scan(dest ...any) error
+}
+
+type recommendationScanner interface {
+	Scan(dest ...any) error
+}
+
+type campaignScanner interface {
+	Scan(dest ...any) error
+}
+
+type campaignRunScanner interface {
+	Scan(dest ...any) error
+}
+
+type collectionPublicationScanner interface {
+	Scan(dest ...any) error
+}
+
+type notificationScanner interface {
+	Scan(dest ...any) error
+}
+
+type protectionRequestScanner interface {
+	Scan(dest ...any) error
+}
+
+func recommendationStates(tx *sql.Tx) (map[string]recommendations.State, error) {
+	rows, err := tx.Query(`SELECT id, state FROM recommendations`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	states := map[string]recommendations.State{}
+	for rows.Next() {
+		var id string
+		var state string
+		if err := rows.Scan(&id, &state); err != nil {
+			return nil, err
+		}
+		states[id] = normalizeRecommendationState(recommendations.State(state))
+	}
+	return states, rows.Err()
+}
+
+func scanCampaign(scanner campaignScanner) (campaigns.Campaign, error) {
+	var campaign campaigns.Campaign
+	var enabled int
+	var requireAllRules int
+	var targetKinds string
+	var targetLibraryNames string
+	var rules string
+	var lastRunAt sql.NullString
+	var createdAt string
+	var updatedAt string
+	if err := scanner.Scan(
+		&campaign.ID,
+		&campaign.Name,
+		&campaign.Description,
+		&enabled,
+		&targetKinds,
+		&targetLibraryNames,
+		&requireAllRules,
+		&campaign.MinimumConfidence,
+		&campaign.MinimumStorageBytes,
+		&rules,
+		&lastRunAt,
+		&createdAt,
+		&updatedAt,
+	); err != nil {
+		return campaigns.Campaign{}, err
+	}
+	campaign.Enabled = enabled == 1
+	campaign.RequireAllRules = requireAllRules == 1
+	if targetKinds == "" {
+		targetKinds = "[]"
+	}
+	if err := json.Unmarshal([]byte(targetKinds), &campaign.TargetKinds); err != nil {
+		return campaigns.Campaign{}, err
+	}
+	if targetLibraryNames == "" {
+		targetLibraryNames = "[]"
+	}
+	if err := json.Unmarshal([]byte(targetLibraryNames), &campaign.TargetLibraryNames); err != nil {
+		return campaigns.Campaign{}, err
+	}
+	if rules == "" {
+		rules = "[]"
+	}
+	if err := json.Unmarshal([]byte(rules), &campaign.Rules); err != nil {
+		return campaigns.Campaign{}, err
+	}
+	campaign.LastRunAt = parseSQLTime(lastRunAt)
+	campaign.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	campaign.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+	campaign.MinimumConfidence = clampConfidence(campaign.MinimumConfidence)
+	return campaign, nil
+}
+
+func scanCampaignRun(scanner campaignRunScanner) (campaigns.Run, error) {
+	var run campaigns.Run
+	var startedAt string
+	var completedAt sql.NullString
+	if err := scanner.Scan(
+		&run.ID,
+		&run.CampaignID,
+		&run.Status,
+		&run.Matched,
+		&run.Suppressed,
+		&run.EstimatedSavingsBytes,
+		&run.VerifiedSavingsBytes,
+		&run.Error,
+		&startedAt,
+		&completedAt,
+	); err != nil {
+		return campaigns.Run{}, err
+	}
+	run.StartedAt, _ = time.Parse(time.RFC3339Nano, startedAt)
+	run.CompletedAt = parseSQLTime(completedAt)
+	return run, nil
+}
+
+func scanCollectionPublication(scanner collectionPublicationScanner) (stewardship.PublicationPlan, error) {
+	var plan stewardship.PublicationPlan
+	var dryRun int
+	var items string
+	var createdAt string
+	var publishedAt sql.NullString
+	if err := scanner.Scan(
+		&plan.ID,
+		&plan.CampaignID,
+		&plan.ServerID,
+		&plan.CollectionTitle,
+		&dryRun,
+		&plan.Status,
+		&plan.PublishableItems,
+		&plan.BlockedItems,
+		&plan.PublishableEstimatedBytes,
+		&plan.BlockedEstimatedBytes,
+		&items,
+		&plan.Error,
+		&createdAt,
+		&publishedAt,
+	); err != nil {
+		return stewardship.PublicationPlan{}, err
+	}
+	plan.DryRun = dryRun == 1
+	if items == "" {
+		items = "[]"
+	}
+	if err := json.Unmarshal([]byte(items), &plan.Items); err != nil {
+		return stewardship.PublicationPlan{}, err
+	}
+	plan.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	plan.PublishedAt = parseSQLTime(publishedAt)
+	return plan, nil
+}
+
+func scanNotification(scanner notificationScanner) (stewardship.Notification, error) {
+	var notification stewardship.Notification
+	var fields string
+	var read int
+	var createdAt string
+	var readAt sql.NullString
+	if err := scanner.Scan(
+		&notification.ID,
+		&notification.Level,
+		&notification.Title,
+		&notification.Body,
+		&notification.EventType,
+		&fields,
+		&read,
+		&createdAt,
+		&readAt,
+	); err != nil {
+		return stewardship.Notification{}, err
+	}
+	notification.Read = read == 1
+	if fields == "" {
+		fields = "{}"
+	}
+	if err := json.Unmarshal([]byte(fields), &notification.Fields); err != nil {
+		return stewardship.Notification{}, err
+	}
+	notification.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	notification.ReadAt = parseSQLTime(readAt)
+	return notification, nil
+}
+
+func scanProtectionRequest(scanner protectionRequestScanner) (stewardship.ProtectionRequest, error) {
+	var request stewardship.ProtectionRequest
+	var createdAt string
+	var decidedAt sql.NullString
+	if err := scanner.Scan(
+		&request.ID,
+		&request.RecommendationID,
+		&request.ServerID,
+		&request.ExternalItemID,
+		&request.Title,
+		&request.Path,
+		&request.Reason,
+		&request.RequestedBy,
+		&request.Status,
+		&request.DecisionBy,
+		&request.DecisionNote,
+		&createdAt,
+		&decidedAt,
+	); err != nil {
+		return stewardship.ProtectionRequest{}, err
+	}
+	request.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	request.DecidedAt = parseSQLTime(decidedAt)
+	return request, nil
+}
+
+func scanRecommendation(scanner recommendationScanner) (recommendations.Recommendation, error) {
+	var rec recommendations.Recommendation
+	var action string
+	var state string
+	var paths string
+	var aiTags string
+	var destructive int
+	var lastPlayed sql.NullString
+	var evidence string
+	if err := scanner.Scan(
+		&rec.ID,
+		&action,
+		&state,
+		&rec.Title,
+		&rec.Explanation,
+		&rec.SpaceSavedBytes,
+		&rec.Confidence,
+		&rec.Source,
+		&paths,
+		&destructive,
+		&rec.AIRationale,
+		&aiTags,
+		&rec.AIConfidence,
+		&rec.AISource,
+		&rec.ServerID,
+		&rec.ExternalItemID,
+		&lastPlayed,
+		&rec.PlayCount,
+		&rec.UniqueUsers,
+		&rec.FavoriteCount,
+		&rec.Verification,
+		&evidence,
+	); err != nil {
+		return recommendations.Recommendation{}, err
+	}
+	rec.Action = recommendations.Action(action)
+	rec.State = normalizeRecommendationState(recommendations.State(state))
+	rec.Destructive = destructive == 1
+	rec.LastPlayedAt = parseSQLTime(lastPlayed)
+	if paths == "" {
+		paths = "[]"
+	}
+	if err := json.Unmarshal([]byte(paths), &rec.AffectedPaths); err != nil {
+		return recommendations.Recommendation{}, err
+	}
+	if aiTags == "" {
+		aiTags = "[]"
+	}
+	if err := json.Unmarshal([]byte(aiTags), &rec.AITags); err != nil {
+		return recommendations.Recommendation{}, err
+	}
+	if evidence == "" {
+		evidence = "{}"
+	}
+	if err := json.Unmarshal([]byte(evidence), &rec.Evidence); err != nil {
+		return recommendations.Recommendation{}, err
+	}
+	return rec.WithDefaults(), nil
+}
+
+func (store *Store) jobFromQuery(query string, args ...any) (Job, error) {
+	row := store.DB.QueryRow(query, args...)
+	return scanJob(row)
+}
+
+func scanJob(scanner jobScanner) (Job, error) {
+	var job Job
+	var startedAt string
+	var updatedAt string
+	var completedAt sql.NullString
+	err := scanner.Scan(
+		&job.ID,
+		&job.Kind,
+		&job.TargetID,
+		&job.Status,
+		&job.Phase,
+		&job.Message,
+		&job.CurrentLabel,
+		&job.Processed,
+		&job.Total,
+		&job.ItemsImported,
+		&job.RollupsImported,
+		&job.UnmappedItems,
+		&job.Error,
+		&startedAt,
+		&updatedAt,
+		&completedAt,
+	)
+	if err != nil {
+		return Job{}, err
+	}
+	job.StartedAt, _ = time.Parse(time.RFC3339Nano, startedAt)
+	job.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+	job.CompletedAt = parseSQLTime(completedAt)
+	return job, nil
+}
+
+func maxInt(value int, floor int) int {
+	if value < floor {
+		return floor
+	}
+	return value
+}
+
+func formatOptionalTime(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
+func parseSQLTime(value sql.NullString) time.Time {
+	if !value.Valid || strings.TrimSpace(value.String) == "" {
+		return time.Time{}
+	}
+	parsed, _ := time.Parse(time.RFC3339Nano, value.String)
+	return parsed
+}
+
+func normalizeStringSlice(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func clampConfidence(value float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
 }
 
 func slugTitle(value string) string {

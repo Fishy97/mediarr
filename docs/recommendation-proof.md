@@ -1,0 +1,81 @@
+# Recommendation Proof Model
+
+Mediarr recommendations are designed for human review. They explain what Mediarr knows, where the evidence came from, and how certain the storage number is. Mediarr does not delete media files.
+
+## What Mediarr Imports
+
+When Jellyfin, Plex, or Emby is connected, Mediarr imports normalized inventory and activity signals:
+
+- media title, kind, server item ID, library name, path, and size when the server reports them
+- parent series identifiers for episodes
+- aggregate play count, last played date, watched user count, and favorite/protection count
+- path mapping and local verification state
+
+Mediarr stores the normalized fields needed for recommendations. It does not store raw provider payloads during normal operation, and API keys or tokens are never returned to the browser.
+
+## Activity Aggregation
+
+Playback data is aggregated before it is used by rules. The review queue should show signals such as total plays, watched users, last played, and favorite/protection count, not a confusing stream of household profile names.
+
+For example, a series can be suggested when all known episodes are older than the configured threshold and no imported user has watched them. A previously watched movie can be suggested when the latest imported play is older than the inactivity threshold.
+
+## Storage Certainty
+
+Storage values are separated into estimated savings and verified savings.
+
+- **Server estimate:** Jellyfin/Plex/Emby reports this path and size. Mediarr has not verified it on disk.
+- **Path mapped estimate:** Mediarr translated the server path to a local mount, but size still needs local confirmation.
+- **Locally verified:** Mediarr found the file on a read-only mount and confirmed the size.
+- **Unmapped:** Mediarr cannot connect the server path to a local file path yet.
+
+Only locally verified storage should be treated as confirmed disk savings. Server estimates can still be useful, but they are not a guarantee that deleting a file manually will reclaim that exact amount on the host.
+
+## Confidence
+
+Confidence is a deterministic rule score. It combines the media-server match confidence, storage evidence level, distance beyond the review threshold, affected file count, and activity history. It is not an AI score, and it is not a promise that the media is safe to remove.
+
+The score is intentionally contextual:
+
+- old never-watched media scores higher than media that only just crossed the threshold
+- locally verified evidence scores higher than server-reported evidence
+- previously popular media with many plays or watched users scores more cautiously
+- series-level recommendations account for the number of affected files instead of treating every episode as an identical suggestion
+
+Low-confidence, favorite/protected, recently watched, active-series, or unmapped items should be suppressed or kept in a blocking review state instead of appearing as normal cleanup candidates.
+
+## Stewardship Campaigns
+
+Campaigns are saved rule sets evaluated against the normalized activity and file-evidence model. They are intended for deliberate review workflows such as cold movies, deep archive series, anime backlog, or locally verified high-storage candidates.
+
+A campaign simulation is read-only. It reports matched items, suppressed items, confidence ranges, estimated savings, and verified savings without changing the review queue. A campaign run records a durable run summary and creates ordinary `review_campaign_match` recommendations. Those recommendations are still advisory, include campaign evidence, and are never destructive.
+
+Campaign output should preserve the same proof boundaries as built-in rules:
+
+- favorite/protected items are suppressed
+- items below the campaign confidence threshold are suppressed
+- items without affected paths or usable storage estimates are suppressed
+- server-reported savings remain estimates until path mapping or local verification improves the evidence
+- re-running a campaign must not erase ignored, protected, or accepted-for-manual decisions
+
+## Path Mapping
+
+Media servers often see NAS paths such as `/volume1/media`, while Mediarr sees Docker paths such as `/media`. Path mappings translate one prefix into the other.
+
+After a mapping is saved, Mediarr can verify whether the translated files exist under the read-only mount. If file sizes match, storage proof can be upgraded to locally verified.
+
+## Suggest-Only Safety
+
+Mediarr will not delete this. Accepting marks it for manual action only.
+
+Recommendation actions record intent and audit history. They do not move, delete, quarantine, or overwrite media files. Future writable workflows must remain opt-in, dry-run first, and auditable.
+
+## Acceptance Checklist
+
+For a real Jellyfin NAS sync, a production operator should be able to confirm:
+
+- job telemetry moves through profile discovery, inventory import, activity import, recommendation generation, and completion
+- no household profile name is presented as a movie or series title
+- a series recommendation is grouped by series, with affected paths collapsed until expanded
+- the card shows confidence, estimated savings, verified savings, activity proof, and storage certainty
+- server-reported savings are labeled as estimates, while locally verified savings are the only confirmed disk values
+- manual acceptance, protection, and ignore actions create audit history without deleting media

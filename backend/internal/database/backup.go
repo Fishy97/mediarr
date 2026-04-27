@@ -8,18 +8,24 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Fishy97/mediarr/backend/internal/archivefiles"
 )
+
+const backupArchivePrefix = "mediarr-"
 
 type RestoreResult struct {
 	PreRestoreBackup string   `json:"preRestoreBackup"`
 	Restored         []string `json:"restored"`
 }
 
+type BackupInfo = archivefiles.Info
+
 func CreateBackup(configDir string, backupDir string) (string, error) {
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		return "", err
 	}
-	backupPath := filepath.Join(backupDir, "mediarr-"+time.Now().UTC().Format("20060102T150405.000000000Z")+".zip")
+	backupPath := filepath.Join(backupDir, archivefiles.Name(backupArchivePrefix, time.Now()))
 	file, err := os.Create(backupPath)
 	if err != nil {
 		return "", err
@@ -64,6 +70,18 @@ func CreateBackup(configDir string, backupDir string) (string, error) {
 		return "", err
 	}
 	return backupPath, nil
+}
+
+func ListBackups(backupDir string) ([]BackupInfo, error) {
+	return archivefiles.List(backupDir, backupArchivePrefix)
+}
+
+func ResolveBackupPath(backupDir string, locator string) (string, error) {
+	return archivefiles.Resolve(backupDir, backupArchivePrefix, locator)
+}
+
+func BackupInfoForPath(path string) (BackupInfo, error) {
+	return archivefiles.InfoForPath(path, backupArchivePrefix)
 }
 
 func InspectBackup(backupPath string) ([]string, error) {

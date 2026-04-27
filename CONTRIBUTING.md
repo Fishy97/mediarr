@@ -13,12 +13,10 @@ Mediarr is intended to be community-run infrastructure for self-hosters.
 ## Commands
 
 ```bash
-npm --prefix frontend ci
-npm --prefix frontend run build
-npm --prefix frontend run test -- --run
-cd backend && go test ./...
-cd backend && go vet ./...
+make ci
 ```
+
+`make ci` installs locked frontend dependencies, runs backend tests, frontend tests/build, `go vet`, the no-delete safety invariant, Docker Compose config checks for both launch modes, and a local `mediarr` image build.
 
 ## Provider Policy
 

@@ -56,12 +56,15 @@ services:
     environment:
       OLLAMA_HOST: http://ollama:11434
       MEDIARR_AI_MODEL: ${MEDIARR_AI_MODEL:-qwen3:0.6b}
-    entrypoint: ["/bin/sh", "-c"]
-    command: |
-      until ollama list >/dev/null 2>&1; do
-        sleep 2
-      done
-      ollama pull "$$MEDIARR_AI_MODEL"
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        until ollama list >/dev/null 2>&1; do
+          sleep 2
+        done
+        ollama pull "$$MEDIARR_AI_MODEL"
+    command: []
     restart: "no"
 
 volumes:

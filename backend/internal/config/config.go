@@ -22,6 +22,8 @@ type Config struct {
 	PlexToken        string
 	EmbyURL          string
 	EmbyAPIKey       string
+	TautulliURL      string
+	TautulliAPIKey   string
 	OversizedBytes   int64
 	DefaultLibraries []LibraryConfig
 }
@@ -50,6 +52,8 @@ func Load() Config {
 		PlexToken:        envAny("", "MEDIARR_PLEX_TOKEN", "MEDIAAR_PLEX_TOKEN", "MEDIA_STEWARD_PLEX_TOKEN"),
 		EmbyURL:          envAny("", "MEDIARR_EMBY_URL", "MEDIAAR_EMBY_URL", "MEDIA_STEWARD_EMBY_URL"),
 		EmbyAPIKey:       envAny("", "MEDIARR_EMBY_API_KEY", "MEDIAAR_EMBY_API_KEY", "MEDIA_STEWARD_EMBY_API_KEY"),
+		TautulliURL:      envAny("", "MEDIARR_TAUTULLI_URL", "MEDIAAR_TAUTULLI_URL", "MEDIA_STEWARD_TAUTULLI_URL"),
+		TautulliAPIKey:   envAny("", "MEDIARR_TAUTULLI_API_KEY", "MEDIAAR_TAUTULLI_API_KEY", "MEDIA_STEWARD_TAUTULLI_API_KEY"),
 		OversizedBytes:   envInt64Any(60_000_000_000, "MEDIARR_OVERSIZED_BYTES", "MEDIAAR_OVERSIZED_BYTES", "MEDIA_STEWARD_OVERSIZED_BYTES"),
 	}
 	cfg.DefaultLibraries = []LibraryConfig{
