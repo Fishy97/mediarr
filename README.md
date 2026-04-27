@@ -59,7 +59,7 @@ Mediarr remains deliberately conservative: it does not delete media, does not do
 - Stewardship campaign templates, what-if simulation, and verified Leaving Soon collection previews
 - Seerr request-source ingestion, Tautulli activity enrichment, storage ledger, notifications, and protection request workflow
 - Catalog correction workflow with user overrides taking precedence over scan guesses
-- Persisted Appearance settings with system, dark, light, and admin-controlled custom CSS stored in `/config`
+- Persisted Appearance settings with a top-left dark/light toggle and admin-controlled custom CSS stored in `/config`
 
 ## Quick Start
 
@@ -161,7 +161,7 @@ Campaign templates provide safe starting points for common stewardship reviews. 
 
 ### Appearance
 
-Use **Settings > Appearance** to choose `system`, `dark`, or `light` mode and optionally add custom CSS. Custom CSS is saved in `/config`, capped at 20 KB, and rejects imports, `url(...)`, and legacy scriptable CSS tokens.
+Use the quick toggle in the top-left Mediarr brand rail to switch between dark and light mode from anywhere in the app. Use **Settings > Custom CSS** for optional advanced styling. Appearance preferences are saved in `/config`; custom CSS is capped at 20 KB and rejects imports, `url(...)`, and legacy scriptable CSS tokens.
 
 ### Live Jellyfin Acceptance Suite
 

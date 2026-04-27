@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { applyAppearanceSettings, resolveTheme } from './appearance';
+import { applyAppearanceSettings, nextThemePreference, resolveTheme } from './appearance';
 
 describe('appearance helpers', () => {
   test('resolves system theme against the current browser preference', () => {
@@ -23,5 +23,12 @@ describe('appearance helpers', () => {
     expect(doc.documentElement.dataset.theme).toBe('light');
     expect(doc.documentElement.dataset.themePreference).toBe('system');
     expect(doc.getElementById('mediarr-custom-css')?.textContent).toBe('');
+  });
+
+  test('quick toggle persists the opposite explicit theme', () => {
+    expect(nextThemePreference('dark', false)).toBe('light');
+    expect(nextThemePreference('light', true)).toBe('dark');
+    expect(nextThemePreference('system', false)).toBe('light');
+    expect(nextThemePreference('system', true)).toBe('dark');
   });
 });

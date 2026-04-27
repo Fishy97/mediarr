@@ -9,6 +9,10 @@ export function resolveTheme(theme: AppearanceSettings['theme'], prefersLight: b
   return prefersLight ? 'light' : 'dark';
 }
 
+export function nextThemePreference(theme: AppearanceSettings['theme'], prefersLight: boolean): ResolvedTheme {
+  return resolveTheme(theme, prefersLight) === 'dark' ? 'light' : 'dark';
+}
+
 export function applyAppearanceSettings(documentRef: Document, appearance: AppearanceSettings, prefersLight: boolean): void {
   const resolved = resolveTheme(appearance.theme, prefersLight);
   documentRef.documentElement.dataset.theme = resolved;

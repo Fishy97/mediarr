@@ -15,6 +15,7 @@ import {
   Library,
   LogOut,
   Map as MapIcon,
+  Moon,
   Pencil,
   PlayCircle,
   RefreshCw,
@@ -25,11 +26,12 @@ import {
   Settings,
   ShieldCheck,
   SlidersHorizontal,
+  Sun,
   Trash2,
   UserRound,
 } from 'lucide-react';
 import { api, getAuthToken } from './lib/api';
-import { applyAppearanceSettings } from './lib/appearance';
+import { applyAppearanceSettings, nextThemePreference, resolveTheme } from './lib/appearance';
 import { formatBytes, formatConfidence, formatVerification, storageCertaintyDefinition, storageCertaintyDescription, storageCertaintyForVerification } from './lib/format';
 import { groupAffectedPaths } from './lib/pathGroups';
 import type {
@@ -120,6 +122,7 @@ export function App() {
   const [backups, setBackups] = useState<Backup[]>([]);
   const [supportBundles, setSupportBundles] = useState<SupportBundle[]>([]);
   const [appearance, setAppearance] = useState<AppearanceSettings>(defaultAppearance);
+  const [appearanceSaving, setAppearanceSaving] = useState(false);
   const [busy, setBusy] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [setupRequired, setSetupRequired] = useState(false);
@@ -369,6 +372,21 @@ export function App() {
       setError(caught instanceof Error ? caught.message : 'Unable to update appearance settings');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function toggleAppearanceTheme() {
+    const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+    const nextTheme = nextThemePreference(appearance.theme, prefersLight);
+    setAppearanceSaving(true);
+    try {
+      const updated = await api.updateAppearance({ ...appearance, theme: nextTheme });
+      setAppearance(updated);
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to update theme');
+    } finally {
+      setAppearanceSaving(false);
     }
   }
 
@@ -788,6 +806,7 @@ export function App() {
   const totalSize = catalogItems.reduce((sum, item) => sum + item.sizeBytes, 0);
   const recoverable = recommendations.reduce((sum, rec) => sum + rec.spaceSavedBytes, 0);
   const scanning = jobs.some((job) => isActiveJob(job) && job.kind === 'filesystem_scan');
+  const resolvedTheme = resolveTheme(appearance.theme, window.matchMedia('(prefers-color-scheme: light)').matches);
 
   if (!authChecked) {
     return <LoadingScreen />;
@@ -817,11 +836,14 @@ export function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark"><SearchCheck size={20} /></div>
-          <div>
-            <strong>Mediarr</strong>
-            <span>Library control plane</span>
+          <div className="brand-identity">
+            <div className="brand-mark"><SearchCheck size={20} /></div>
+            <div>
+              <strong>Mediarr</strong>
+              <span>Library control plane</span>
+            </div>
           </div>
+          <ThemeToggle resolvedTheme={resolvedTheme} busy={appearanceSaving} onToggle={() => void toggleAppearanceTheme()} />
         </div>
         <nav className="nav">
           <NavButton icon={<Gauge />} label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
@@ -2869,7 +2891,6 @@ function SettingsView({
   busy: boolean;
 }) {
   const [selectedBackup, setSelectedBackup] = useState('');
-  const [theme, setTheme] = useState<AppearanceSettings['theme']>(appearance.theme);
   const [customCss, setCustomCss] = useState(appearance.customCss);
   useEffect(() => {
     if (backups.length === 0) {
@@ -2881,7 +2902,6 @@ function SettingsView({
     }
   }, [backups, selectedBackup]);
   useEffect(() => {
-    setTheme(appearance.theme);
     setCustomCss(appearance.customCss);
   }, [appearance]);
   const activeBackup = backups.find((backup) => backup.name === selectedBackup) ?? backups[0];
@@ -2890,17 +2910,9 @@ function SettingsView({
       {notice && <div className="notice success settings-notice">{notice}</div>}
       <div className="panel form-panel appearance-panel">
         <div className="panel-heading">
-          <h2>Appearance</h2>
-          <span>{theme}</span>
+          <h2>Custom CSS</h2>
+          <span>Advanced</span>
         </div>
-        <label>
-          Theme
-          <select value={theme} onChange={(event) => setTheme(event.target.value as AppearanceSettings['theme'])}>
-            <option value="system">System</option>
-            <option value="dark">Dark</option>
-            <option value="light">Light</option>
-          </select>
-        </label>
         <label>
           Custom CSS
           <textarea
@@ -2915,24 +2927,23 @@ function SettingsView({
           <button
             className="primary-button"
             type="button"
-            onClick={() => onAppearanceSave({ theme, customCss })}
+            onClick={() => onAppearanceSave({ ...appearance, customCss })}
             disabled={busy}
           >
             <Save size={18} />
-            Save appearance
+            Save CSS
           </button>
           <button
             className="secondary-button"
             type="button"
             onClick={() => {
-              setTheme('system');
               setCustomCss('');
-              onAppearanceSave(defaultAppearance);
+              onAppearanceSave({ ...appearance, customCss: '' });
             }}
             disabled={busy}
           >
             <RotateCcw size={16} />
-            Reset
+            Clear CSS
           </button>
         </div>
       </div>
@@ -3056,6 +3067,23 @@ function NavButton({ icon, label, active, onClick }: { icon: React.ReactElement;
     <button className={active ? 'nav-button active' : 'nav-button'} onClick={onClick}>
       {icon}
       <span>{label}</span>
+    </button>
+  );
+}
+
+function ThemeToggle({ resolvedTheme, busy, onToggle }: { resolvedTheme: 'dark' | 'light'; busy: boolean; onToggle: () => void }) {
+  const isLight = resolvedTheme === 'light';
+  return (
+    <button
+      className={isLight ? 'theme-toggle light' : 'theme-toggle dark'}
+      type="button"
+      onClick={onToggle}
+      disabled={busy}
+      aria-label={`Switch to ${isLight ? 'dark' : 'light'} theme`}
+      title={`Switch to ${isLight ? 'dark' : 'light'} theme`}
+    >
+      <Moon size={15} />
+      <Sun size={15} />
     </button>
   );
 }
