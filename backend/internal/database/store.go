@@ -1517,6 +1517,54 @@ func (store *Store) ListMediaActivityRollups(filter MediaActivityRollupFilter) (
 	return rollups, rows.Err()
 }
 
+func (store *Store) ReplaceMediaActivityRollups(serverID string, rollups []MediaActivityRollup) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	serverID = strings.TrimSpace(serverID)
+	if serverID == "" {
+		return errors.New("server id is required")
+	}
+	tx, err := store.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM media_activity_rollups WHERE server_id = ?`, serverID); err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(`INSERT INTO media_activity_rollups (
+		server_id, item_external_id, play_count, unique_users, watched_users, favorite_count, last_played_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	now := time.Now().UTC()
+	for _, rollup := range rollups {
+		rollup.ServerID = defaultString(rollup.ServerID, serverID)
+		if rollup.ServerID != serverID || strings.TrimSpace(rollup.ItemExternalID) == "" {
+			continue
+		}
+		if rollup.UpdatedAt.IsZero() {
+			rollup.UpdatedAt = now
+		}
+		if _, err := stmt.Exec(
+			rollup.ServerID,
+			strings.TrimSpace(rollup.ItemExternalID),
+			rollup.PlayCount,
+			rollup.UniqueUsers,
+			rollup.WatchedUsers,
+			rollup.FavoriteCount,
+			formatOptionalTime(rollup.LastPlayedAt),
+			rollup.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (store *Store) ListActivityRecommendationMedia() ([]recommendations.ActivityMedia, error) {
 	if store == nil || store.DB == nil {
 		return nil, errors.New("nil database store")
@@ -3587,7 +3635,7 @@ func normalizeIntegrationName(integration string) string {
 
 func knownIntegration(integration string) bool {
 	switch normalizeIntegrationName(integration) {
-	case "jellyfin", "plex", "emby":
+	case "jellyfin", "plex", "emby", "tautulli":
 		return true
 	default:
 		return false
@@ -3600,7 +3648,7 @@ func normalizeJobKind(kind string) string {
 
 func knownJobKind(kind string) bool {
 	switch normalizeJobKind(kind) {
-	case "filesystem_scan", "jellyfin_sync", "plex_sync", "emby_sync":
+	case "filesystem_scan", "jellyfin_sync", "plex_sync", "emby_sync", "tautulli_sync":
 		return true
 	default:
 		return false

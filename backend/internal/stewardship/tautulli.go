@@ -1,7 +1,12 @@
 package stewardship
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +28,40 @@ type tautulliHistoryRow struct {
 	User            string `json:"user"`
 	Date            any    `json:"date"`
 	PercentComplete int    `json:"percent_complete"`
+}
+
+func FetchTautulliHistory(ctx context.Context, baseURL string, apiKey string) ([]TautulliPlay, error) {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	apiKey = strings.TrimSpace(apiKey)
+	if baseURL == "" || apiKey == "" {
+		return nil, errors.New("tautulli is not configured")
+	}
+	values := url.Values{}
+	values.Set("apikey", apiKey)
+	values.Set("cmd", "get_history")
+	values.Set("length", "1000")
+	values.Set("order_column", "date")
+	values.Set("order_dir", "desc")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/v2?"+values.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	res, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	body, readErr := io.ReadAll(io.LimitReader(res.Body, 16<<20))
+	closeErr := res.Body.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	if res.StatusCode < 200 || res.StatusCode > 299 {
+		return nil, errors.New("tautulli history sync failed with status " + res.Status)
+	}
+	return NormalizeTautulliHistory(body)
 }
 
 func NormalizeTautulliHistory(payload []byte) ([]TautulliPlay, error) {

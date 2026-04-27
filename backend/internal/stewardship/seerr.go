@@ -1,7 +1,12 @@
 package stewardship
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -9,6 +14,53 @@ import (
 
 type seerrRequestsEnvelope struct {
 	Results []seerrRequest `json:"results"`
+}
+
+func FetchSeerrRequests(ctx context.Context, baseURL string, apiKey string) ([]RequestSignal, error) {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	apiKey = strings.TrimSpace(apiKey)
+	if baseURL == "" || apiKey == "" {
+		return nil, errors.New("seerr request source is not configured")
+	}
+	const pageSize = 100
+	const maxPages = 100
+	signals := []RequestSignal{}
+	for page := 0; page < maxPages; page++ {
+		values := url.Values{}
+		values.Set("take", strconv.Itoa(pageSize))
+		values.Set("skip", strconv.Itoa(page*pageSize))
+		values.Set("sort", "added")
+		values.Set("sortDirection", "desc")
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/v1/request?"+values.Encode(), nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("X-Api-Key", apiKey)
+		res, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, readErr := io.ReadAll(io.LimitReader(res.Body, 8<<20))
+		closeErr := res.Body.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if closeErr != nil {
+			return nil, closeErr
+		}
+		if res.StatusCode < 200 || res.StatusCode > 299 {
+			return nil, errors.New("seerr request sync failed with status " + res.Status)
+		}
+		pageSignals, err := NormalizeSeerrRequests("seerr", body)
+		if err != nil {
+			return nil, err
+		}
+		signals = append(signals, pageSignals...)
+		if len(pageSignals) < pageSize {
+			break
+		}
+	}
+	return signals, nil
 }
 
 type seerrRequest struct {

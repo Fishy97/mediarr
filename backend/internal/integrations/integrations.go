@@ -32,6 +32,8 @@ type Options struct {
 	PlexToken         string
 	EmbyURL           string
 	EmbyKey           string
+	TautulliURL       string
+	TautulliKey       string
 	PlexHistoryCursor string
 	PriorRollups      []database.MediaActivityRollup
 	Progress          func(Progress)
@@ -164,6 +166,7 @@ func DefaultsWithOptions(options Options) []Target {
 		{ID: "jellyfin", Name: "Jellyfin", Kind: "media_server", Status: checkServer(options.JellyfinURL, options.JellyfinKey, "jellyfin"), Description: "Sync metadata, artwork, collections, and library refresh events.", RetryPolicy: retryPolicy, CheckedAt: now},
 		{ID: "plex", Name: "Plex", Kind: "media_server", Status: checkServer(options.PlexURL, options.PlexToken, "plex"), Description: "Sync metadata, artwork, collections, and library refresh events.", RetryPolicy: retryPolicy, CheckedAt: now},
 		{ID: "emby", Name: "Emby", Kind: "media_server", Status: checkServer(options.EmbyURL, options.EmbyKey, "emby"), Description: "Sync metadata, artwork, collections, and library refresh events.", RetryPolicy: retryPolicy, CheckedAt: now},
+		{ID: "tautulli", Name: "Tautulli", Kind: "activity_analytics", Status: checkServer(options.TautulliURL, options.TautulliKey, "tautulli"), Description: "Enrich Plex activity with watched history and household usage signals.", RetryPolicy: retryPolicy, CheckedAt: now},
 		{ID: "ollama", Name: "Ollama", Kind: "local_ai", Status: "optional", Description: "Local-only advisory AI for matching, tags, and cleanup rationales.", CheckedAt: now},
 	}
 }
@@ -684,12 +687,17 @@ func checkServer(baseURL string, token string, kind string) string {
 	path := "/System/Info"
 	if kind == "plex" {
 		path = "/identity?X-Plex-Token=" + token
+	} else if kind == "tautulli" {
+		values := url.Values{}
+		values.Set("apikey", token)
+		values.Set("cmd", "status")
+		path = "/api/v2?" + values.Encode()
 	}
 	req, err := http.NewRequest(http.MethodGet, baseURL+path, nil)
 	if err != nil {
 		return "invalid_config"
 	}
-	if kind != "plex" {
+	if kind != "plex" && kind != "tautulli" {
 		req.Header.Set("X-Emby-Token", token)
 	}
 	client := &http.Client{Timeout: 4 * time.Second}

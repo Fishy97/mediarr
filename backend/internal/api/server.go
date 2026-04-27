@@ -26,6 +26,7 @@ import (
 	"github.com/Fishy97/mediarr/backend/internal/integrations"
 	"github.com/Fishy97/mediarr/backend/internal/metadata"
 	"github.com/Fishy97/mediarr/backend/internal/recommendations"
+	"github.com/Fishy97/mediarr/backend/internal/stewardship"
 	"github.com/Fishy97/mediarr/backend/internal/support"
 )
 
@@ -138,8 +139,18 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("/api/v1/integrations", server.integrationsHandler)
 	server.mux.HandleFunc("/api/v1/integrations/", server.integrationActionHandler)
 	server.mux.HandleFunc("/api/v1/activity/rollups", server.activityRollupsHandler)
+	server.mux.HandleFunc("/api/v1/request-sources", server.requestSourcesHandler)
+	server.mux.HandleFunc("/api/v1/request-sources/", server.requestSourceHandler)
+	server.mux.HandleFunc("/api/v1/request-signals", server.requestSignalsHandler)
+	server.mux.HandleFunc("/api/v1/campaign-templates", server.campaignTemplatesHandler)
+	server.mux.HandleFunc("/api/v1/campaign-templates/", server.campaignTemplateHandler)
 	server.mux.HandleFunc("/api/v1/campaigns", server.campaignsHandler)
 	server.mux.HandleFunc("/api/v1/campaigns/", server.campaignHandler)
+	server.mux.HandleFunc("/api/v1/storage-ledger", server.storageLedgerHandler)
+	server.mux.HandleFunc("/api/v1/notifications", server.notificationsHandler)
+	server.mux.HandleFunc("/api/v1/notifications/", server.notificationHandler)
+	server.mux.HandleFunc("/api/v1/protection-requests", server.protectionRequestsHandler)
+	server.mux.HandleFunc("/api/v1/protection-requests/", server.protectionRequestHandler)
 	server.mux.HandleFunc("/api/v1/path-mappings", server.pathMappingsHandler)
 	server.mux.HandleFunc("/api/v1/path-mappings/", server.pathMappingHandler)
 	server.mux.HandleFunc("/api/v1/ai/status", server.aiStatusHandler)
@@ -551,6 +562,8 @@ func (server *Server) startJob(job database.Job) error {
 		go server.runScanJob(job.ID)
 	case "jellyfin_sync", "plex_sync", "emby_sync":
 		go server.runIntegrationSyncJob(job.ID, job.TargetID)
+	case "tautulli_sync":
+		go server.runTautulliSyncJob(job.ID)
 	default:
 		return errors.New("job kind cannot be started")
 	}
@@ -954,6 +967,15 @@ func (server *Server) integrationSyncHandler(w http.ResponseWriter, r *http.Requ
 	}
 	switch r.Method {
 	case http.MethodGet:
+		if targetID == "tautulli" {
+			job, err := server.store.LatestTautulliSyncJob()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			writeJSON(w, http.StatusOK, envelope{Data: job})
+			return
+		}
 		if jobs, err := server.store.ListJobs(database.JobFilter{Kind: integrationJobKind(targetID), TargetID: targetID, Active: true, Limit: 1}); err == nil && len(jobs) > 0 {
 			writeJSON(w, http.StatusOK, envelope{Data: mediaSyncJobFromJob(jobs[0])})
 			return
@@ -1170,6 +1192,81 @@ func (server *Server) runIntegrationSyncJob(jobID string, targetID string) {
 	server.record("integration.sync_completed", "Media-server inventory and activity sync completed", map[string]any{"targetId": targetID, "items": snapshot.Job.ItemsImported, "rollups": snapshot.Job.RollupsImported})
 }
 
+func (server *Server) runTautulliSyncJob(jobID string) {
+	reporter := jobReporter{store: server.store, jobID: jobID}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	server.registerJobCancel(jobID, cancel)
+	defer server.unregisterJobCancel(jobID)
+	started := time.Now().UTC()
+	reporter.update(database.JobUpdate{Status: "running", Phase: "history", Message: "Reading Tautulli watch history"}, true)
+
+	if err := server.refreshIntegrationOptionsFromStore(); err != nil {
+		reporter.update(database.JobUpdate{Status: "failed", Phase: "failed", Message: "Unable to load Tautulli settings", Error: err.Error(), Completed: true}, true)
+		_ = server.store.RecordTautulliSyncJob(stewardship.TautulliSyncJob{ID: jobID, Status: "failed", Error: err.Error(), StartedAt: started, CompletedAt: time.Now().UTC()})
+		return
+	}
+	plays, err := stewardship.FetchTautulliHistory(ctx, server.integrationOptions.TautulliURL, server.integrationOptions.TautulliKey)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			reporter.update(database.JobUpdate{Status: "canceled", Phase: "canceled", Message: "Tautulli sync canceled", Error: "job canceled by admin", Completed: true}, true)
+			_ = server.store.RecordTautulliSyncJob(stewardship.TautulliSyncJob{ID: jobID, Status: "canceled", Error: "job canceled by admin", StartedAt: started, CompletedAt: time.Now().UTC()})
+			return
+		}
+		reporter.update(database.JobUpdate{Status: "failed", Phase: "failed", Message: "Tautulli sync failed", Error: err.Error(), Completed: true}, true)
+		_ = server.store.RecordTautulliSyncJob(stewardship.TautulliSyncJob{ID: jobID, Status: "failed", Error: err.Error(), StartedAt: started, CompletedAt: time.Now().UTC()})
+		return
+	}
+	reporter.update(database.JobUpdate{Phase: "enrichment", Message: "Applying Tautulli activity to Plex inventory", ItemsImported: intPtr(len(plays))}, true)
+	rollups, err := server.store.ListMediaActivityRollups(database.MediaActivityRollupFilter{ServerID: "plex"})
+	if err != nil {
+		reporter.update(database.JobUpdate{Status: "failed", Phase: "failed", Message: "Unable to load Plex activity", Error: err.Error(), Completed: true}, true)
+		_ = server.store.RecordTautulliSyncJob(stewardship.TautulliSyncJob{ID: jobID, Status: "failed", Error: err.Error(), StartedAt: started, CompletedAt: time.Now().UTC()})
+		return
+	}
+	items, err := server.store.ListMediaServerItems(database.MediaServerItemFilter{ServerID: "plex"})
+	if err != nil {
+		reporter.update(database.JobUpdate{Status: "failed", Phase: "failed", Message: "Unable to load Plex inventory", Error: err.Error(), Completed: true}, true)
+		_ = server.store.RecordTautulliSyncJob(stewardship.TautulliSyncJob{ID: jobID, Status: "failed", Error: err.Error(), StartedAt: started, CompletedAt: time.Now().UTC()})
+		return
+	}
+	if len(items) == 0 {
+		err := errors.New("plex inventory must be synced before Tautulli enrichment")
+		reporter.update(database.JobUpdate{Status: "failed", Phase: "failed", Message: "Plex inventory is missing", Error: err.Error(), Completed: true}, true)
+		_ = server.store.RecordTautulliSyncJob(stewardship.TautulliSyncJob{ID: jobID, Status: "failed", Error: err.Error(), StartedAt: started, CompletedAt: time.Now().UTC()})
+		return
+	}
+	enriched := stewardship.ApplyTautulliHistory(stewardshipRollupsFromDatabase(rollups, items), plays, 80)
+	if err := server.store.ReplaceMediaActivityRollups("plex", databaseRollupsFromStewardship(enriched)); err != nil {
+		reporter.update(database.JobUpdate{Status: "failed", Phase: "failed", Message: "Unable to persist Tautulli activity", Error: err.Error(), Completed: true}, true)
+		_ = server.store.RecordTautulliSyncJob(stewardship.TautulliSyncJob{ID: jobID, Status: "failed", Error: err.Error(), StartedAt: started, CompletedAt: time.Now().UTC()})
+		return
+	}
+	if err := server.regenerateRecommendationsFromCatalog(ctx); err != nil {
+		reporter.update(database.JobUpdate{Status: "failed", Phase: "failed", Message: "Unable to regenerate recommendations", Error: err.Error(), Completed: true}, true)
+		_ = server.store.RecordTautulliSyncJob(stewardship.TautulliSyncJob{ID: jobID, Status: "failed", Error: err.Error(), StartedAt: started, CompletedAt: time.Now().UTC()})
+		return
+	}
+	cursor := tautulliCursor(plays)
+	completed := time.Now().UTC()
+	_ = server.store.RecordTautulliSyncJob(stewardship.TautulliSyncJob{ID: jobID, Status: "completed", ItemsImported: len(plays), Cursor: cursor, StartedAt: started, CompletedAt: completed})
+	_, _ = server.store.CreateNotification(stewardship.Notification{
+		Level:     "success",
+		Title:     "Tautulli activity imported",
+		Body:      strconv.Itoa(len(plays)) + " watch-history rows were applied to Plex activity.",
+		EventType: "tautulli.sync",
+		Fields:    map[string]string{"itemsImported": strconv.Itoa(len(plays)), "cursor": cursor},
+	})
+	reporter.update(database.JobUpdate{
+		Status:        "completed",
+		Phase:         "complete",
+		Message:       "Tautulli activity sync completed",
+		ItemsImported: intPtr(len(plays)),
+		Completed:     true,
+	}, true)
+	server.record("tautulli.sync_completed", "Tautulli activity sync completed", map[string]any{"items": len(plays)})
+}
+
 func integrationJobKind(targetID string) string {
 	switch strings.ToLower(strings.TrimSpace(targetID)) {
 	case "jellyfin":
@@ -1178,6 +1275,8 @@ func integrationJobKind(targetID string) string {
 		return "plex_sync"
 	case "emby":
 		return "emby_sync"
+	case "tautulli":
+		return "tautulli_sync"
 	default:
 		return ""
 	}
@@ -1200,6 +1299,65 @@ func mediaSyncJobFromJob(job database.Job) database.MediaSyncJob {
 		StartedAt:       job.StartedAt,
 		CompletedAt:     job.CompletedAt,
 	}
+}
+
+func stewardshipRollupsFromDatabase(rollups []database.MediaActivityRollup, items []database.MediaServerItem) []stewardship.ActivityRollup {
+	byItemID := map[string]database.MediaActivityRollup{}
+	for _, rollup := range rollups {
+		if strings.TrimSpace(rollup.ItemExternalID) != "" {
+			byItemID[rollup.ItemExternalID] = rollup
+		}
+	}
+	output := make([]stewardship.ActivityRollup, 0, len(items))
+	for _, item := range items {
+		externalID := strings.TrimSpace(item.ExternalID)
+		if externalID == "" {
+			continue
+		}
+		rollup := byItemID[externalID]
+		output = append(output, stewardship.ActivityRollup{
+			ServerID:       firstNonEmpty(rollup.ServerID, item.ServerID, "plex"),
+			ItemExternalID: externalID,
+			PlayCount:      rollup.PlayCount,
+			UniqueUsers:    rollup.UniqueUsers,
+			WatchedUsers:   rollup.WatchedUsers,
+			FavoriteCount:  rollup.FavoriteCount,
+			LastPlayedAt:   rollup.LastPlayedAt,
+			UpdatedAt:      rollup.UpdatedAt,
+			EvidenceSource: "plex",
+		})
+	}
+	return output
+}
+
+func databaseRollupsFromStewardship(rollups []stewardship.ActivityRollup) []database.MediaActivityRollup {
+	output := make([]database.MediaActivityRollup, 0, len(rollups))
+	for _, rollup := range rollups {
+		output = append(output, database.MediaActivityRollup{
+			ServerID:       firstNonEmpty(rollup.ServerID, "plex"),
+			ItemExternalID: rollup.ItemExternalID,
+			PlayCount:      rollup.PlayCount,
+			UniqueUsers:    rollup.UniqueUsers,
+			WatchedUsers:   rollup.WatchedUsers,
+			FavoriteCount:  rollup.FavoriteCount,
+			LastPlayedAt:   rollup.LastPlayedAt,
+			UpdatedAt:      rollup.UpdatedAt,
+		})
+	}
+	return output
+}
+
+func tautulliCursor(plays []stewardship.TautulliPlay) string {
+	var latest int64
+	for _, play := range plays {
+		if unix := play.PlayedAt.Unix(); unix > latest {
+			latest = unix
+		}
+	}
+	if latest <= 0 {
+		return ""
+	}
+	return strconv.FormatInt(latest, 10)
 }
 
 func (server *Server) integrationItemsHandler(w http.ResponseWriter, r *http.Request, targetID string) {
@@ -1294,6 +1452,167 @@ func (server *Server) activityRollupsHandler(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, envelope{Data: rollups})
 }
 
+func (server *Server) requestSourcesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.store == nil {
+		http.Error(w, "request source store is not configured", http.StatusBadRequest)
+		return
+	}
+	sources, err := server.store.ListRequestSources()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: emptyIfNil(sources)})
+}
+
+func (server *Server) requestSourceHandler(w http.ResponseWriter, r *http.Request) {
+	if server.store == nil {
+		http.Error(w, "request source store is not configured", http.StatusBadRequest)
+		return
+	}
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/request-sources/"), "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		http.NotFound(w, r)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "sync" {
+		server.requestSourceSyncHandler(w, r, parts[0])
+		return
+	}
+	if len(parts) != 1 {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodPut {
+		methodNotAllowed(w, r)
+		return
+	}
+	var request stewardship.RequestSourceInput
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	request.Kind = firstNonEmpty(request.Kind, parts[0])
+	if request.Kind != parts[0] {
+		http.Error(w, "request source kind does not match route", http.StatusBadRequest)
+		return
+	}
+	source, err := server.store.UpsertRequestSource(request)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	server.record("request_source.updated", "Request source settings updated", map[string]any{"sourceId": source.ID, "apiKeyConfigured": source.APIKeyConfigured})
+	writeJSON(w, http.StatusOK, envelope{Data: source})
+}
+
+func (server *Server) requestSourceSyncHandler(w http.ResponseWriter, r *http.Request, sourceID string) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, r)
+		return
+	}
+	source, err := server.requestSourceSecret(sourceID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	if !source.Enabled {
+		http.Error(w, "request source is disabled", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+	var signals []stewardship.RequestSignal
+	switch source.Kind {
+	case "seerr":
+		signals, err = stewardship.FetchSeerrRequests(ctx, source.BaseURL, source.APIKey)
+	default:
+		err = errors.New("request source sync is not supported")
+	}
+	if err != nil {
+		_, _ = server.store.CreateNotification(stewardship.Notification{Level: "error", Title: "Request-source sync failed", Body: err.Error(), EventType: "request_source.sync", Fields: map[string]string{"sourceId": source.ID}})
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := server.store.ReplaceRequestSignals(source.ID, signals); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_, _ = server.store.CreateNotification(stewardship.Notification{Level: "success", Title: "Request-source sync completed", Body: strconv.Itoa(len(signals)) + " request signals imported.", EventType: "request_source.sync", Fields: map[string]string{"sourceId": source.ID, "imported": strconv.Itoa(len(signals))}})
+	server.record("request_source.sync_completed", "Request source sync completed", map[string]any{"sourceId": source.ID, "imported": len(signals)})
+	writeJSON(w, http.StatusOK, envelope{Data: map[string]any{"sourceId": source.ID, "imported": len(signals)}})
+}
+
+func (server *Server) requestSourceSecret(sourceID string) (stewardship.RequestSource, error) {
+	sources, err := server.store.ListRequestSourceSecrets()
+	if err != nil {
+		return stewardship.RequestSource{}, err
+	}
+	for _, source := range sources {
+		if source.ID == strings.TrimSpace(sourceID) {
+			return source, nil
+		}
+	}
+	return stewardship.RequestSource{}, sql.ErrNoRows
+}
+
+func (server *Server) requestSignalsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.store == nil {
+		http.Error(w, "request signal store is not configured", http.StatusBadRequest)
+		return
+	}
+	signals, err := server.store.ListRequestSignals(r.URL.Query().Get("sourceId"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: emptyIfNil(signals)})
+}
+
+func (server *Server) campaignTemplatesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: stewardship.BuiltInCampaignTemplates()})
+}
+
+func (server *Server) campaignTemplateHandler(w http.ResponseWriter, r *http.Request) {
+	if server.store == nil {
+		http.Error(w, "campaign store is not configured", http.StatusBadRequest)
+		return
+	}
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/campaign-templates/"), "/"), "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] != "create" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, r)
+		return
+	}
+	ref, err := stewardship.CampaignFromTemplate(parts[0])
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	campaign, err := server.store.UpsertCampaign(campaignFromTemplate(parts[0], ref))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	server.record("campaign.template_created", "Stewardship campaign created from template", map[string]any{"templateId": parts[0], "campaignId": campaign.ID})
+	writeJSON(w, http.StatusCreated, envelope{Data: campaign})
+}
+
 func (server *Server) campaignsHandler(w http.ResponseWriter, r *http.Request) {
 	if server.store == nil {
 		http.Error(w, "campaign store is not configured", http.StatusBadRequest)
@@ -1340,10 +1659,16 @@ func (server *Server) campaignHandler(w http.ResponseWriter, r *http.Request) {
 		switch parts[1] {
 		case "simulate":
 			server.simulateCampaignHandler(w, r, id)
+		case "what-if":
+			server.campaignWhatIfHandler(w, r, id)
 		case "run":
 			server.runCampaignHandler(w, r, id)
 		case "runs":
 			server.campaignRunsHandler(w, r, id)
+		case "publish-preview":
+			server.campaignPublicationHandler(w, r, id, true)
+		case "publish":
+			server.campaignPublicationHandler(w, r, id, false)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1402,6 +1727,76 @@ func (server *Server) simulateCampaignHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{Data: result})
+}
+
+func (server *Server) campaignWhatIfHandler(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, r)
+		return
+	}
+	_, result, err := server.simulateCampaign(id, time.Now().UTC())
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, sql.ErrNoRows) {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	whatIf, err := server.whatIfFromCampaignResult(id, result)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: whatIf})
+}
+
+func (server *Server) campaignPublicationHandler(w http.ResponseWriter, r *http.Request, id string, dryRun bool) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, r)
+		return
+	}
+	var request stewardship.PublicationInput
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if !dryRun && !request.ConfirmPublish {
+		http.Error(w, "collection publish requires confirmPublish=true", http.StatusBadRequest)
+		return
+	}
+	request.CampaignID = id
+	_, result, err := server.simulateCampaign(id, time.Now().UTC())
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, sql.ErrNoRows) {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	request.Items = publicationCandidatesFromCampaign(result)
+	plan := stewardship.PlanLeavingSoonPublication(request)
+	if !dryRun {
+		plan.DryRun = false
+		plan.Status = "ready"
+	}
+	saved, err := server.store.RecordCollectionPublication(plan)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if dryRun {
+		writeJSON(w, http.StatusOK, envelope{Data: saved})
+		return
+	}
+	published, err := server.publishCollection(saved)
+	if err != nil {
+		failed, _ := server.store.MarkCollectionPublicationPublished(saved.ID, "failed", err.Error())
+		http.Error(w, failed.Error, http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, envelope{Data: published})
 }
 
 func (server *Server) runCampaignHandler(w http.ResponseWriter, r *http.Request, id string) {
@@ -1487,6 +1882,276 @@ func campaignRecommendations(campaign campaigns.Campaign, runID string, result c
 		return recs[i].SpaceSavedBytes > recs[j].SpaceSavedBytes
 	})
 	return recs
+}
+
+func campaignFromTemplate(templateID string, ref stewardship.TemplateCampaignRef) campaigns.Campaign {
+	rules := make([]campaigns.Rule, 0, len(ref.Rules))
+	for _, rule := range ref.Rules {
+		rules = append(rules, campaigns.Rule{
+			Field:    campaigns.Field(rule.Field),
+			Operator: campaigns.Operator(rule.Operator),
+			Value:    rule.Value,
+			Values:   append([]string(nil), rule.Values...),
+		})
+	}
+	id := strings.TrimSpace(ref.ID)
+	if id == "" {
+		id = "campaign_template_" + strings.ReplaceAll(strings.ToLower(strings.TrimSpace(templateID)), "-", "_")
+	}
+	return campaigns.Campaign{
+		ID:                  id,
+		Name:                ref.Name,
+		Description:         ref.Description,
+		Enabled:             ref.Enabled,
+		TargetKinds:         append([]string(nil), ref.TargetKinds...),
+		TargetLibraryNames:  append([]string(nil), ref.TargetLibraryNames...),
+		Rules:               rules,
+		RequireAllRules:     ref.RequireAllRules,
+		MinimumConfidence:   ref.MinimumConfidence,
+		MinimumStorageBytes: ref.MinimumStorageBytes,
+	}
+}
+
+func (server *Server) whatIfFromCampaignResult(campaignID string, result campaigns.Result) (stewardship.WhatIfSimulation, error) {
+	signals, err := server.store.ListRequestSignals("")
+	if err != nil {
+		return stewardship.WhatIfSimulation{}, err
+	}
+	protectionRequests, err := server.store.ListProtectionRequests("")
+	if err != nil {
+		return stewardship.WhatIfSimulation{}, err
+	}
+	requestTitles := map[string]bool{}
+	for _, signal := range signals {
+		if signal.Status == "declined" {
+			continue
+		}
+		requestTitles[strings.ToLower(strings.TrimSpace(signal.Title))] = true
+	}
+	protectedTitles := map[string]bool{}
+	for _, request := range protectionRequests {
+		if request.Status != "pending" && request.Status != "approved" {
+			continue
+		}
+		protectedTitles[strings.ToLower(strings.TrimSpace(request.Title))] = true
+	}
+	simulation := stewardship.CampaignSimulation{
+		CampaignID:      campaignID,
+		Matched:         result.Matched,
+		Suppressed:      result.Suppressed,
+		EstimatedBytes:  result.TotalEstimatedSavingsBytes,
+		VerifiedBytes:   result.TotalVerifiedSavingsBytes,
+		BlockedUnmapped: 0,
+	}
+	for _, item := range result.Items {
+		if item.Suppressed {
+			continue
+		}
+		title := strings.ToLower(strings.TrimSpace(item.Candidate.Title))
+		if title != "" && requestTitles[title] {
+			simulation.RequestConflicts++
+		}
+		if title != "" && protectedTitles[title] {
+			simulation.ProtectionConflicts++
+		}
+		if item.Candidate.Verification == "" || item.Candidate.Verification == "unmapped" {
+			simulation.BlockedUnmapped++
+		}
+	}
+	return stewardship.BuildWhatIfSimulation([]stewardship.CampaignSimulation{simulation}), nil
+}
+
+func publicationCandidatesFromCampaign(result campaigns.Result) []stewardship.PublicationCandidate {
+	candidates := make([]stewardship.PublicationCandidate, 0, result.Matched)
+	for _, item := range result.Items {
+		if item.Suppressed {
+			continue
+		}
+		candidate := item.Candidate
+		candidates = append(candidates, stewardship.PublicationCandidate{
+			ExternalItemID: candidate.ExternalItemID,
+			Title:          candidate.Title,
+			Verification:   candidate.Verification,
+			EstimatedBytes: candidate.EstimatedSavingsBytes,
+		})
+	}
+	return candidates
+}
+
+func (server *Server) publishCollection(plan stewardship.PublicationPlan) (stewardship.PublicationPlan, error) {
+	if plan.PublishableItems == 0 {
+		return stewardship.PublicationPlan{}, errors.New("publication has no verified items to publish")
+	}
+	if err := server.refreshIntegrationOptionsFromStore(); err != nil {
+		return stewardship.PublicationPlan{}, err
+	}
+	itemIDs := make([]string, 0, plan.PublishableItems)
+	for _, item := range plan.Items {
+		if item.Publishable && strings.TrimSpace(item.ExternalItemID) != "" {
+			itemIDs = append(itemIDs, strings.TrimSpace(item.ExternalItemID))
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(plan.ServerID)) {
+	case "jellyfin":
+		if err := server.publishJellyfinCollection(plan.CollectionTitle, itemIDs); err != nil {
+			return stewardship.PublicationPlan{}, err
+		}
+	default:
+		return stewardship.PublicationPlan{}, errors.New("collection publishing is currently supported for Jellyfin only")
+	}
+	return server.store.MarkCollectionPublicationPublished(plan.ID, "published", "")
+}
+
+func (server *Server) publishJellyfinCollection(title string, itemIDs []string) error {
+	baseURL := strings.TrimRight(strings.TrimSpace(server.integrationOptions.JellyfinURL), "/")
+	token := strings.TrimSpace(server.integrationOptions.JellyfinKey)
+	if baseURL == "" || token == "" {
+		return errors.New("jellyfin is not configured")
+	}
+	values := url.Values{}
+	values.Set("Name", strings.TrimSpace(title))
+	values.Set("Ids", strings.Join(itemIDs, ","))
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/Collections?"+values.Encode(), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Emby-Token", token)
+	res, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode > 299 {
+		return errors.New("jellyfin collection publish failed with status " + res.Status)
+	}
+	return nil
+}
+
+func (server *Server) storageLedgerHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.store == nil {
+		http.Error(w, "storage ledger store is not configured", http.StatusBadRequest)
+		return
+	}
+	ledger, err := server.store.StorageLedger()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: ledger})
+}
+
+func (server *Server) notificationsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r)
+		return
+	}
+	if server.store == nil {
+		http.Error(w, "notification store is not configured", http.StatusBadRequest)
+		return
+	}
+	notifications, err := server.store.ListNotifications(r.URL.Query().Get("includeRead") == "true", parsePositiveInt(r.URL.Query().Get("limit")))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: emptyIfNil(notifications)})
+}
+
+func (server *Server) notificationHandler(w http.ResponseWriter, r *http.Request) {
+	if server.store == nil {
+		http.Error(w, "notification store is not configured", http.StatusBadRequest)
+		return
+	}
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/notifications/"), "/"), "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] != "read" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, r)
+		return
+	}
+	notification, err := server.store.MarkNotificationRead(parts[0])
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: notification})
+}
+
+func (server *Server) protectionRequestsHandler(w http.ResponseWriter, r *http.Request) {
+	if server.store == nil {
+		http.Error(w, "protection request store is not configured", http.StatusBadRequest)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		requests, err := server.store.ListProtectionRequests(r.URL.Query().Get("status"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, envelope{Data: emptyIfNil(requests)})
+	case http.MethodPost:
+		var request stewardship.ProtectionRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		created, err := server.store.CreateProtectionRequest(request)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		server.record("protection.requested", "Protection request created", map[string]any{"id": created.ID, "title": created.Title})
+		writeJSON(w, http.StatusCreated, envelope{Data: created})
+	default:
+		methodNotAllowed(w, r)
+	}
+}
+
+func (server *Server) protectionRequestHandler(w http.ResponseWriter, r *http.Request) {
+	if server.store == nil {
+		http.Error(w, "protection request store is not configured", http.StatusBadRequest)
+		return
+	}
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/protection-requests/"), "/"), "/")
+	if len(parts) != 2 || parts[0] == "" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, r)
+		return
+	}
+	var decision struct {
+		DecisionBy string `json:"decisionBy"`
+		Note       string `json:"note"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&decision)
+	}
+	approve := false
+	switch parts[1] {
+	case "approve":
+		approve = true
+	case "decline":
+		approve = false
+	default:
+		http.NotFound(w, r)
+		return
+	}
+	request, err := server.store.DecideProtectionRequest(parts[0], approve, decision.DecisionBy, decision.Note)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	server.record("protection.decided", "Protection request decided", map[string]any{"id": request.ID, "status": request.Status})
+	writeJSON(w, http.StatusOK, envelope{Data: request})
 }
 
 func (server *Server) pathMappingsHandler(w http.ResponseWriter, r *http.Request) {
@@ -1915,6 +2580,13 @@ func mergeIntegrationSettings(options integrations.Options, settings []database.
 			}
 			if setting.APIKey != "" {
 				options.EmbyKey = setting.APIKey
+			}
+		case "tautulli":
+			if setting.BaseURL != "" {
+				options.TautulliURL = setting.BaseURL
+			}
+			if setting.APIKey != "" {
+				options.TautulliKey = setting.APIKey
 			}
 		}
 	}

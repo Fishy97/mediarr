@@ -56,6 +56,8 @@ func main() {
 		PlexToken:   cfg.PlexToken,
 		EmbyURL:     cfg.EmbyURL,
 		EmbyKey:     cfg.EmbyAPIKey,
+		TautulliURL: cfg.TautulliURL,
+		TautulliKey: cfg.TautulliAPIKey,
 	}
 
 	server := api.NewServer(api.Deps{
