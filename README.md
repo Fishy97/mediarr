@@ -210,8 +210,10 @@ PGID=1000
 MOVIES_DIR=/srv/media/movies
 SERIES_DIR=/srv/media/series
 ANIME_DIR=/srv/media/anime
-MEDIARR_ADMIN_TOKEN=change-this-long-random-token
+MEDIARR_ADMIN_TOKEN=
 ```
+
+`MEDIARR_ADMIN_TOKEN` is an optional bearer token for scripted API automation. It is not a web login and it does not create an admin user. Leave it blank unless you explicitly need headless automation; the first browser launch will still require you to create your own admin account.
 
 Create the config directory and make it writable by the configured user:
 

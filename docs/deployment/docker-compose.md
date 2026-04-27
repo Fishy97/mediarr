@@ -71,7 +71,7 @@ nano .env
 Recommended Ubuntu server values:
 
 ```env
-MEDIARR_ADMIN_TOKEN=change-this-to-a-long-random-token
+MEDIARR_ADMIN_TOKEN=
 MEDIARR_OVERSIZED_BYTES=60000000000
 MEDIARR_OLLAMA_URL=http://ollama:11434
 MEDIARR_AI_MODEL=qwen3:0.6b
@@ -90,6 +90,8 @@ MOVIES_DIR=/srv/media/movies
 SERIES_DIR=/srv/media/series
 ANIME_DIR=/srv/media/anime
 ```
+
+`MEDIARR_ADMIN_TOKEN` is optional and only enables bearer-token API automation. It is not a default admin login, and it does not bypass first-run account creation in the web UI. Leave it blank for normal installs.
 
 Find your `PUID` and `PGID` with:
 
@@ -422,7 +424,7 @@ Minimum reverse proxy expectations:
 - terminate HTTPS
 - restrict access to trusted users or networks
 - forward to `http://127.0.0.1:8080` or `http://<server-ip>:8080`
-- keep `MEDIARR_ADMIN_TOKEN` set
+- use a long random `MEDIARR_ADMIN_TOKEN` only if scripted API automation is required
 
 ## 13. Troubleshooting
 
