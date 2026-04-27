@@ -193,6 +193,144 @@ export type CampaignRunResponse = {
   result: CampaignResult;
 };
 
+export type CampaignTemplate = {
+  id: string;
+  name: string;
+  description: string;
+  campaign: {
+    id?: string;
+    name: string;
+    description?: string;
+    enabled: boolean;
+    targetKinds: string[];
+    targetLibraryNames?: string[];
+    rules: CampaignRule[];
+    requireAllRules: boolean;
+    minimumConfidence: number;
+    minimumStorageBytes: number;
+  };
+};
+
+export type WhatIfSimulation = {
+  campaigns: number;
+  matched: number;
+  suppressed: number;
+  estimatedBytes: number;
+  verifiedBytes: number;
+  blockedUnmapped: number;
+  protectionConflicts: number;
+  requestConflicts: number;
+};
+
+export type PublicationPlan = {
+  id: string;
+  campaignId: string;
+  serverId: string;
+  collectionTitle: string;
+  dryRun: boolean;
+  status: string;
+  publishableItems: number;
+  blockedItems: number;
+  publishableEstimatedBytes: number;
+  blockedEstimatedBytes: number;
+  items: Array<{
+    externalItemId?: string;
+    title: string;
+    verification: string;
+    estimatedBytes: number;
+    publishable: boolean;
+    blockedReason?: string;
+  }>;
+  createdAt?: string;
+  publishedAt?: string;
+  error?: string;
+};
+
+export type PublicationInput = {
+  serverId: string;
+  collectionTitle: string;
+  minimumVerification?: string;
+  confirmPublish?: boolean;
+};
+
+export type RequestSource = {
+  id: string;
+  kind: string;
+  name: string;
+  baseUrl?: string;
+  apiKeyConfigured: boolean;
+  apiKeyLast4?: string;
+  enabled: boolean;
+  lastSyncedAt?: string;
+  updatedAt?: string;
+};
+
+export type RequestSourceInput = {
+  kind?: string;
+  name?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  clearApiKey?: boolean;
+  enabled?: boolean;
+};
+
+export type RequestSignal = {
+  sourceId: string;
+  externalRequestId: string;
+  mediaType: string;
+  externalMediaId?: string;
+  title?: string;
+  status: string;
+  availability: string;
+  requestedBy?: string;
+  providerIds: Record<string, string>;
+  estimatedBytes?: number;
+  requestedAt?: string;
+  approvedAt?: string;
+  availableAt?: string;
+  updatedAt?: string;
+};
+
+export type StorageLedger = {
+  locallyVerifiedBytes: number;
+  mappedEstimateBytes: number;
+  serverReportedBytes: number;
+  blockedUnmappedBytes: number;
+  protectedBytes: number;
+  acceptedManualBytes: number;
+  requestedMediaBytes: number;
+  totalEstimatedBytes: number;
+  totalVerifiedBytes: number;
+};
+
+export type StewardshipNotification = {
+  id: string;
+  level: string;
+  title: string;
+  body?: string;
+  eventType?: string;
+  fields?: Record<string, string>;
+  read: boolean;
+  createdAt?: string;
+  readAt?: string;
+};
+
+export type ProtectionRequest = {
+  id?: string;
+  recommendationId?: string;
+  serverId?: string;
+  externalItemId?: string;
+  title: string;
+  path?: string;
+  reason?: string;
+  requestedBy: string;
+  status?: string;
+  decisionBy?: string;
+  decisionNote?: string;
+  createdAt?: string;
+  decidedAt?: string;
+};
+
 export type ProviderHealth = {
   name: string;
   status: string;

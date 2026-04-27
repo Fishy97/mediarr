@@ -39,6 +39,7 @@ import type {
   Campaign,
   CampaignResult,
   CampaignRun,
+  CampaignTemplate,
   CampaignRule,
   CampaignRuleField,
   CampaignRuleOperator,
@@ -58,10 +59,19 @@ import type {
   ProviderHealth,
   ProviderSetting,
   ProviderSettingInput,
+  ProtectionRequest,
+  PublicationInput,
+  PublicationPlan,
   Recommendation,
   RecommendationEvidence,
+  RequestSignal,
+  RequestSource,
+  RequestSourceInput,
   ScanResult,
+  StorageLedger,
+  StewardshipNotification,
   SupportBundle,
+  WhatIfSimulation,
 } from './types';
 
 type View = 'dashboard' | 'libraries' | 'catalog' | 'recommendations' | 'campaigns' | 'integrations' | 'settings';
@@ -77,7 +87,10 @@ export function App() {
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [campaignTemplates, setCampaignTemplates] = useState<CampaignTemplate[]>([]);
   const [campaignResults, setCampaignResults] = useState<Record<string, CampaignResult>>({});
+  const [campaignWhatIf, setCampaignWhatIf] = useState<Record<string, WhatIfSimulation>>({});
+  const [publicationPreviews, setPublicationPreviews] = useState<Record<string, PublicationPlan>>({});
   const [campaignRuns, setCampaignRuns] = useState<Record<string, CampaignRun[]>>({});
   const [providers, setProviders] = useState<ProviderHealth[]>([]);
   const [providerSettings, setProviderSettings] = useState<ProviderSetting[]>([]);
@@ -87,6 +100,11 @@ export function App() {
   const [integrationDiagnostics, setIntegrationDiagnostics] = useState<Record<string, IntegrationDiagnostics | null>>({});
   const [integrationItems, setIntegrationItems] = useState<MediaServerItem[]>([]);
   const [activityRollups, setActivityRollups] = useState<ActivityRollup[]>([]);
+  const [requestSources, setRequestSources] = useState<RequestSource[]>([]);
+  const [requestSignals, setRequestSignals] = useState<RequestSignal[]>([]);
+  const [storageLedger, setStorageLedger] = useState<StorageLedger | null>(null);
+  const [notifications, setNotifications] = useState<StewardshipNotification[]>([]);
+  const [protectionRequests, setProtectionRequests] = useState<ProtectionRequest[]>([]);
   const [pathMappings, setPathMappings] = useState<PathMapping[]>([]);
   const [unmappedItems, setUnmappedItems] = useState<MediaServerItem[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -106,13 +124,14 @@ export function App() {
 
   async function refresh() {
     try {
-      const [health, libs, catalogRows, scanRows, recs, campaignRows, providerRows, providerSettingRows, integrationSettingRows, integrationRows, ai, backupRows, bundleRows] = await Promise.all([
+      const [health, libs, catalogRows, scanRows, recs, campaignRows, templateRows, providerRows, providerSettingRows, integrationSettingRows, integrationRows, ai, backupRows, bundleRows, ledger, sourceRows, signalRows, notificationRows, protectionRows] = await Promise.all([
         api.health(),
         api.libraries(),
         api.catalog(),
         api.scans(),
         api.recommendations(),
         api.campaigns(),
+        api.campaignTemplates(),
         api.providers(),
         api.providerSettings(),
         api.integrationSettings(),
@@ -120,6 +139,11 @@ export function App() {
         api.aiStatus(),
         api.backups(),
         api.supportBundles(),
+        api.storageLedger(),
+        api.requestSources(),
+        api.requestSignals(),
+        api.notifications(),
+        api.protectionRequests('pending'),
       ]);
       setStatus(health.status);
       setLibraries(libs);
@@ -127,6 +151,7 @@ export function App() {
       setScans(scanRows);
       setRecommendations(recs);
       setCampaigns(campaignRows);
+      setCampaignTemplates(templateRows);
       setProviders(providerRows);
       setProviderSettings(providerSettingRows);
       setIntegrationSettings(integrationSettingRows);
@@ -134,6 +159,11 @@ export function App() {
       setAIStatus(ai);
       setBackups(backupRows);
       setSupportBundles(bundleRows);
+      setStorageLedger(ledger);
+      setRequestSources(sourceRows);
+      setRequestSignals(signalRows);
+      setNotifications(notificationRows);
+      setProtectionRequests(protectionRows);
       await refreshIntegrationActivity(integrationRows);
       await refreshCampaignRuns(campaignRows);
       setError(null);
@@ -453,6 +483,50 @@ export function App() {
     }
   }
 
+  async function updateRequestSource(id: string, source: RequestSourceInput) {
+    setBusy(true);
+    try {
+      await api.updateRequestSource(id, source);
+      setRequestSources(await api.requestSources());
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to update request source');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function syncRequestSource(id: string) {
+    setBusy(true);
+    try {
+      await api.syncRequestSource(id);
+      const [sources, signals, ledger, noticeRows] = await Promise.all([api.requestSources(), api.requestSignals(), api.storageLedger(), api.notifications()]);
+      setRequestSources(sources);
+      setRequestSignals(signals);
+      setStorageLedger(ledger);
+      setNotifications(noticeRows);
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to sync request source');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function syncTautulli() {
+    setBusy(true);
+    try {
+      const job = await api.syncTautulli();
+      setJobs((current) => [job, ...current.filter((row) => row.id !== job.id)]);
+      await refreshJobs();
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to sync Tautulli');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function savePathMapping(mapping: Partial<PathMapping> & Pick<PathMapping, 'serverPathPrefix' | 'localPathPrefix'>) {
     setBusy(true);
     try {
@@ -494,6 +568,22 @@ export function App() {
     }
   }
 
+  async function createCampaignFromTemplate(id: string) {
+    setBusy(true);
+    try {
+      const created = await api.createCampaignFromTemplate(id);
+      const rows = await api.campaigns();
+      setCampaigns(rows);
+      setCampaignResults((current) => ({ ...current, [created.id]: current[created.id] ?? emptyCampaignResult(created.id) }));
+      await refreshCampaignRuns(rows);
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to create campaign template');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveCampaign(campaign: Campaign) {
     setBusy(true);
     try {
@@ -525,6 +615,32 @@ export function App() {
     }
   }
 
+  async function whatIfCampaign(id: string) {
+    setBusy(true);
+    try {
+      const result = await api.whatIfCampaign(id);
+      setCampaignWhatIf((current) => ({ ...current, [id]: result }));
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to run what-if simulation');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function previewCampaignPublication(id: string, input: PublicationInput) {
+    setBusy(true);
+    try {
+      const preview = await api.publishCampaignPreview(id, input);
+      setPublicationPreviews((current) => ({ ...current, [id]: preview }));
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to preview collection publication');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runCampaign(id: string) {
     setBusy(true);
     try {
@@ -537,6 +653,50 @@ export function App() {
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to run campaign');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function markNotificationRead(id: string) {
+    try {
+      const read = await api.markNotificationRead(id);
+      setNotifications((current) => current.filter((notification) => notification.id !== read.id));
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to mark notification read');
+    }
+  }
+
+  async function createProtectionRequest(request: Omit<ProtectionRequest, 'id' | 'status' | 'createdAt' | 'decidedAt'>) {
+    setBusy(true);
+    try {
+      await api.createProtectionRequest(request);
+      setProtectionRequests(await api.protectionRequests('pending'));
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to create protection request');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function decideProtectionRequest(id: string, approve: boolean) {
+    setBusy(true);
+    try {
+      const decisionBy = user?.email || 'admin';
+      if (approve) {
+        await api.approveProtectionRequest(id, decisionBy, 'Protected from stewardship review');
+      } else {
+        await api.declineProtectionRequest(id, decisionBy, 'Protection request declined');
+      }
+      const [requests, recs, ledger] = await Promise.all([api.protectionRequests('pending'), api.recommendations(), api.storageLedger()]);
+      setProtectionRequests(requests);
+      setRecommendations(recs);
+      setStorageLedger(ledger);
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to decide protection request');
     } finally {
       setBusy(false);
     }
@@ -672,8 +832,13 @@ export function App() {
             recommendations={recommendations}
             scans={scans}
             activityRollupTotal={diagnosticActivityTotal(integrationDiagnostics, activityRollups.length)}
+            storageLedger={storageLedger}
+            notifications={notifications}
+            protectionRequests={protectionRequests}
             jobs={jobs}
             jobDetails={jobDetails}
+            onReadNotification={(id) => void markNotificationRead(id)}
+            onDecideProtection={(id, approve) => void decideProtectionRequest(id, approve)}
             onCancelJob={(id) => void cancelJob(id)}
             onRetryJob={(id) => void retryJob(id)}
           />
@@ -694,11 +859,17 @@ export function App() {
         {view === 'campaigns' && (
           <CampaignsView
             campaigns={campaigns}
+            templates={campaignTemplates}
             results={campaignResults}
+            whatIf={campaignWhatIf}
+            publicationPreviews={publicationPreviews}
             runs={campaignRuns}
             busy={busy}
+            onTemplateCreate={(id) => void createCampaignFromTemplate(id)}
             onSave={(campaign) => void saveCampaign(campaign)}
             onSimulate={(id) => void simulateCampaign(id)}
+            onWhatIf={(id) => void whatIfCampaign(id)}
+            onPublishPreview={(id, input) => void previewCampaignPublication(id, input)}
             onRun={(id) => void runCampaign(id)}
             onDelete={(id) => void deleteCampaign(id)}
           />
@@ -714,6 +885,8 @@ export function App() {
             integrationDiagnostics={integrationDiagnostics}
             integrationItems={integrationItems}
             activityRollups={activityRollups}
+            requestSources={requestSources}
+            requestSignals={requestSignals}
             pathMappings={pathMappings}
             unmappedItems={unmappedItems}
             jobs={jobs}
@@ -722,6 +895,9 @@ export function App() {
             onIntegrationUpdate={(integration, setting) => void updateIntegrationSetting(integration, setting)}
             onIntegrationRefresh={(id) => void refreshIntegration(id)}
             onIntegrationSync={(id) => void syncIntegration(id)}
+            onRequestSourceUpdate={(id, source) => void updateRequestSource(id, source)}
+            onRequestSourceSync={(id) => void syncRequestSource(id)}
+            onTautulliSync={() => void syncTautulli()}
             onPathMappingSave={(mapping) => void savePathMapping(mapping)}
             onPathMappingVerify={(id) => void verifyPathMapping(id)}
             onPathMappingDelete={(id) => void deletePathMapping(id)}
@@ -813,8 +989,13 @@ function Dashboard({
   recommendations,
   scans,
   activityRollupTotal,
+  storageLedger,
+  notifications,
+  protectionRequests,
   jobs,
   jobDetails,
+  onReadNotification,
+  onDecideProtection,
   onCancelJob,
   onRetryJob,
 }: {
@@ -826,8 +1007,13 @@ function Dashboard({
   recommendations: Recommendation[];
   scans: ScanResult[];
   activityRollupTotal: number;
+  storageLedger: StorageLedger | null;
+  notifications: StewardshipNotification[];
+  protectionRequests: ProtectionRequest[];
   jobs: Job[];
   jobDetails: Record<string, JobDetail>;
+  onReadNotification: (id: string) => void;
+  onDecideProtection: (id: string, approve: boolean) => void;
   onCancelJob: (id: string) => void;
   onRetryJob: (id: string) => void;
 }) {
@@ -854,6 +1040,7 @@ function Dashboard({
         <Stat icon={<ShieldCheck />} label="Verified Savings" value={formatBytes(verifiedSavings)} />
         <Stat icon={<Bot />} label="AI Mode" value="Advisory" />
       </div>
+      {storageLedger && <StorageLedgerPanel ledger={storageLedger} />}
       <div className="split">
         <section className="panel">
           <div className="panel-heading">
@@ -872,6 +1059,93 @@ function Dashboard({
           </div>
           <CompactRecommendations recommendations={recommendations.slice(0, 4)} />
         </section>
+      </div>
+      <div className="split">
+        <NotificationsPanel notifications={notifications} onRead={onReadNotification} />
+        <ProtectionQueuePanel requests={protectionRequests} onDecide={onDecideProtection} />
+      </div>
+    </section>
+  );
+}
+
+function StorageLedgerPanel({ ledger }: { ledger: StorageLedger }) {
+  return (
+    <section className="panel ledger-panel">
+      <div className="panel-heading">
+        <div>
+          <h2>Storage Ledger</h2>
+          <span>verified savings are separated from estimates</span>
+        </div>
+        <span className="status-pill">suggest-only</span>
+      </div>
+      <div className="ledger-grid">
+        <Signal label="Local proof" value={formatBytes(ledger.locallyVerifiedBytes)} />
+        <Signal label="Mapped estimate" value={formatBytes(ledger.mappedEstimateBytes)} />
+        <Signal label="Server reported" value={formatBytes(ledger.serverReportedBytes)} />
+        <Signal label="Blocked unmapped" value={formatBytes(ledger.blockedUnmappedBytes)} />
+        <Signal label="Protected" value={formatBytes(ledger.protectedBytes)} />
+        <Signal label="Accepted manual" value={formatBytes(ledger.acceptedManualBytes)} />
+        <Signal label="Requested media" value={formatBytes(ledger.requestedMediaBytes)} />
+        <Signal label="Total verified" value={formatBytes(ledger.totalVerifiedBytes)} />
+      </div>
+    </section>
+  );
+}
+
+function NotificationsPanel({ notifications, onRead }: { notifications: StewardshipNotification[]; onRead: (id: string) => void }) {
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <h2>Notifications</h2>
+        <span>{notifications.length} unread</span>
+      </div>
+      <div className="compact-list">
+        {notifications.slice(0, 6).map((notification) => (
+          <div className="compact-row" key={notification.id}>
+            <div>
+              <strong>{notification.title}</strong>
+              <span>{notification.body || notification.eventType || notification.level}</span>
+            </div>
+            <button className="secondary-button compact-action" type="button" onClick={() => onRead(notification.id)}>
+              <Check size={16} />
+              Read
+            </button>
+          </div>
+        ))}
+        {notifications.length === 0 && <EmptyState icon={<Check />} text="No unread stewardship notifications." />}
+      </div>
+    </section>
+  );
+}
+
+function ProtectionQueuePanel({ requests, onDecide }: { requests: ProtectionRequest[]; onDecide: (id: string, approve: boolean) => void }) {
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <h2>Protection Requests</h2>
+        <span>{requests.length} pending</span>
+      </div>
+      <div className="compact-list">
+        {requests.slice(0, 6).map((request) => (
+          <div className="compact-row" key={request.id || `${request.title}-${request.requestedBy}`}>
+            <div>
+              <strong>{request.title}</strong>
+              <span>{request.reason || `Requested by ${request.requestedBy}`}</span>
+            </div>
+            {request.id && (
+              <div className="button-row">
+                <button className="secondary-button compact-action" type="button" onClick={() => onDecide(request.id!, false)}>
+                  Decline
+                </button>
+                <button className="secondary-button compact-action" type="button" onClick={() => onDecide(request.id!, true)}>
+                  <ShieldCheck size={16} />
+                  Protect
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+        {requests.length === 0 && <EmptyState icon={<ShieldCheck />} text="No pending protection requests." />}
       </div>
     </section>
   );
@@ -1257,20 +1531,32 @@ function RecommendationEvidencePanel({ evidence }: { evidence: RecommendationEvi
 
 function CampaignsView({
   campaigns,
+  templates,
   results,
+  whatIf,
+  publicationPreviews,
   runs,
   busy,
+  onTemplateCreate,
   onSave,
   onSimulate,
+  onWhatIf,
+  onPublishPreview,
   onRun,
   onDelete,
 }: {
   campaigns: Campaign[];
+  templates: CampaignTemplate[];
   results: Record<string, CampaignResult>;
+  whatIf: Record<string, WhatIfSimulation>;
+  publicationPreviews: Record<string, PublicationPlan>;
   runs: Record<string, CampaignRun[]>;
   busy: boolean;
+  onTemplateCreate: (id: string) => void;
   onSave: (campaign: Campaign) => void;
   onSimulate: (id: string) => void;
+  onWhatIf: (id: string) => void;
+  onPublishPreview: (id: string, input: PublicationInput) => void;
   onRun: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
@@ -1280,7 +1566,12 @@ function CampaignsView({
   const selectedCampaign = safeCampaigns.find((campaign) => campaign.id === selectedID);
   const activeID = selectedCampaign?.id ?? draft.id;
   const result = results[activeID];
+  const simulation = whatIf[activeID];
+  const publicationPreview = publicationPreviews[activeID];
   const campaignRuns = runs[activeID] || [];
+  const [publicationServer, setPublicationServer] = useState('jellyfin');
+  const [collectionTitle, setCollectionTitle] = useState('Leaving Soon');
+  const [minimumVerification, setMinimumVerification] = useState('local_verified');
 
   useEffect(() => {
     if (selectedCampaign) {
@@ -1355,6 +1646,7 @@ function CampaignsView({
           ))}
           {safeCampaigns.length === 0 && <EmptyState icon={<SlidersHorizontal />} text="No campaigns saved." />}
         </div>
+        <TemplateGallery templates={templates} busy={busy} onCreate={onTemplateCreate} />
       </div>
       <form className="campaign-editor" onSubmit={(event) => void save(event)}>
         <div className="panel-heading">
@@ -1445,14 +1737,129 @@ function CampaignsView({
             <SearchCheck size={16} />
             Simulate
           </button>
+          <button className="secondary-button" type="button" disabled={busy || !selectedCampaign} onClick={() => selectedCampaign && onWhatIf(selectedCampaign.id)}>
+            <Database size={16} />
+            What-if
+          </button>
           <button className="primary-button" type="button" disabled={busy || !selectedCampaign} onClick={() => selectedCampaign && onRun(selectedCampaign.id)}>
             <PlayCircle size={16} />
             Run campaign
           </button>
         </div>
+        <div className="publication-controls">
+          <label>
+            Collection
+            <input value={collectionTitle} onChange={(event) => setCollectionTitle(event.target.value)} />
+          </label>
+          <label>
+            Server
+            <select value={publicationServer} onChange={(event) => setPublicationServer(event.target.value)}>
+              <option value="jellyfin">Jellyfin</option>
+              <option value="plex">Plex</option>
+            </select>
+          </label>
+          <label>
+            Minimum proof
+            <select value={minimumVerification} onChange={(event) => setMinimumVerification(event.target.value)}>
+              <option value="local_verified">Local verified</option>
+              <option value="path_mapped">Path mapped</option>
+              <option value="server_reported">Server reported</option>
+            </select>
+          </label>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={busy || !selectedCampaign}
+            onClick={() => selectedCampaign && onPublishPreview(selectedCampaign.id, { serverId: publicationServer, collectionTitle, minimumVerification })}
+          >
+            <Archive size={16} />
+            Preview collection
+          </button>
+        </div>
       </form>
+      <WhatIfPanel simulation={simulation} />
       <CampaignResultPanel result={result} />
+      <PublicationPreviewPanel preview={publicationPreview} />
       <CampaignRunsPanel runs={campaignRuns} />
+    </section>
+  );
+}
+
+function TemplateGallery({ templates, busy, onCreate }: { templates: CampaignTemplate[]; busy: boolean; onCreate: (id: string) => void }) {
+  return (
+    <section className="template-gallery">
+      <div className="panel-heading">
+        <h2>Templates</h2>
+        <span>{templates.length} built in</span>
+      </div>
+      {templates.slice(0, 6).map((template) => (
+        <button className="template-card" type="button" key={template.id} disabled={busy} onClick={() => onCreate(template.id)}>
+          <strong>{template.name}</strong>
+          <span>{template.description}</span>
+          <small>{template.campaign.targetKinds.join(', ') || 'all'} • {template.campaign.rules.length} rules</small>
+        </button>
+      ))}
+      {templates.length === 0 && <EmptyState icon={<Archive />} text="No campaign templates loaded." />}
+    </section>
+  );
+}
+
+function WhatIfPanel({ simulation }: { simulation?: WhatIfSimulation }) {
+  return (
+    <section className="panel campaign-results">
+      <div className="panel-heading">
+        <h2>What-if</h2>
+        <span>{simulation ? `${simulation.matched} matched` : 'Pending'}</span>
+      </div>
+      {simulation ? (
+        <div className="signal-grid">
+          <Signal label="Estimated" value={formatBytes(simulation.estimatedBytes)} />
+          <Signal label="Verified" value={formatBytes(simulation.verifiedBytes)} />
+          <Signal label="Suppressed" value={String(simulation.suppressed)} />
+          <Signal label="Unmapped" value={String(simulation.blockedUnmapped)} />
+          <Signal label="Requests" value={String(simulation.requestConflicts)} />
+          <Signal label="Protections" value={String(simulation.protectionConflicts)} />
+        </div>
+      ) : (
+        <EmptyState icon={<Database />} text="No what-if simulation loaded." />
+      )}
+    </section>
+  );
+}
+
+function PublicationPreviewPanel({ preview }: { preview?: PublicationPlan }) {
+  return (
+    <section className="panel campaign-results">
+      <div className="panel-heading">
+        <h2>Leaving Soon Preview</h2>
+        <span>{preview ? preview.status : 'Pending'}</span>
+      </div>
+      {preview ? (
+        <>
+          <div className="signal-grid">
+            <Signal label="Publishable" value={String(preview.publishableItems)} />
+            <Signal label="Blocked" value={String(preview.blockedItems)} />
+            <Signal label="Publishable bytes" value={formatBytes(preview.publishableEstimatedBytes)} />
+            <Signal label="Blocked bytes" value={formatBytes(preview.blockedEstimatedBytes)} />
+          </div>
+          <div className="campaign-result-list">
+            {preview.items.slice(0, 8).map((item) => (
+              <article className={item.publishable ? 'campaign-result-item' : 'campaign-result-item suppressed'} key={`${item.title}-${item.externalItemId || item.blockedReason}`}>
+                <div>
+                  <strong>{item.title}</strong>
+                  <span>{formatVerification(item.verification)} • {item.externalItemId || 'no external id'}</span>
+                </div>
+                <div className="campaign-result-metrics">
+                  <span>{formatBytes(item.estimatedBytes)}</span>
+                  <small>{item.publishable ? 'ready for collection' : item.blockedReason}</small>
+                </div>
+              </article>
+            ))}
+          </div>
+        </>
+      ) : (
+        <EmptyState icon={<Archive />} text="No collection preview loaded." />
+      )}
     </section>
   );
 }
@@ -1535,6 +1942,8 @@ function Integrations({
   integrationDiagnostics,
   integrationItems,
   activityRollups,
+  requestSources,
+  requestSignals,
   pathMappings,
   unmappedItems,
   jobs,
@@ -1543,6 +1952,9 @@ function Integrations({
   onIntegrationUpdate,
   onIntegrationRefresh,
   onIntegrationSync,
+  onRequestSourceUpdate,
+  onRequestSourceSync,
+  onTautulliSync,
   onPathMappingSave,
   onPathMappingVerify,
   onPathMappingDelete,
@@ -1559,6 +1971,8 @@ function Integrations({
   integrationDiagnostics: Record<string, IntegrationDiagnostics | null>;
   integrationItems: MediaServerItem[];
   activityRollups: ActivityRollup[];
+  requestSources: RequestSource[];
+  requestSignals: RequestSignal[];
   pathMappings: PathMapping[];
   unmappedItems: MediaServerItem[];
   jobs: Job[];
@@ -1567,6 +1981,9 @@ function Integrations({
   onIntegrationUpdate: (integration: string, setting: IntegrationSettingInput) => void;
   onIntegrationRefresh: (id: string) => void;
   onIntegrationSync: (id: string) => void;
+  onRequestSourceUpdate: (id: string, source: RequestSourceInput) => void;
+  onRequestSourceSync: (id: string) => void;
+  onTautulliSync: () => void;
   onPathMappingSave: (mapping: Partial<PathMapping> & Pick<PathMapping, 'serverPathPrefix' | 'localPathPrefix'>) => void;
   onPathMappingVerify: (id: string) => void;
   onPathMappingDelete: (id: string) => void;
@@ -1575,6 +1992,7 @@ function Integrations({
   busy: boolean;
 }) {
   const mediaServers = integrations.filter((integration) => integration.kind === 'media_server');
+  const activityTargets = integrations.filter((integration) => integration.kind === 'activity_analytics');
   const activeSyncJobs = jobs.filter((job) => isActiveJob(job) && job.kind.endsWith('_sync'));
   return (
     <section className="view-grid">
@@ -1604,6 +2022,18 @@ function Integrations({
           );
         })}
       </div>
+      <StewardshipSignalsPanel
+        requestSources={requestSources}
+        requestSignals={requestSignals}
+        activityTargets={activityTargets}
+        settings={integrationSettings}
+        activeJobs={activeSyncJobs}
+        busy={busy}
+        onRequestSourceUpdate={onRequestSourceUpdate}
+        onRequestSourceSync={onRequestSourceSync}
+        onIntegrationUpdate={onIntegrationUpdate}
+        onTautulliSync={onTautulliSync}
+      />
       <PathMappingWorkbench
         integrations={mediaServers}
         mappings={pathMappings}
@@ -1649,6 +2079,129 @@ function Integrations({
         </table>
       </section>
       <ProviderSettingsPanel settings={providerSettings} busy={busy} onUpdate={onProviderUpdate} />
+    </section>
+  );
+}
+
+function StewardshipSignalsPanel({
+  requestSources,
+  requestSignals,
+  activityTargets,
+  settings,
+  activeJobs,
+  busy,
+  onRequestSourceUpdate,
+  onRequestSourceSync,
+  onIntegrationUpdate,
+  onTautulliSync,
+}: {
+  requestSources: RequestSource[];
+  requestSignals: RequestSignal[];
+  activityTargets: Integration[];
+  settings: IntegrationSetting[];
+  activeJobs: Job[];
+  busy: boolean;
+  onRequestSourceUpdate: (id: string, source: RequestSourceInput) => void;
+  onRequestSourceSync: (id: string) => void;
+  onIntegrationUpdate: (integration: string, setting: IntegrationSettingInput) => void;
+  onTautulliSync: () => void;
+}) {
+  const seerr = requestSources.find((source) => source.id === 'seerr');
+  const tautulli = activityTargets.find((target) => target.id === 'tautulli');
+  const tautulliSetting = settings.find((setting) => setting.integration === 'tautulli');
+  const tautulliJob = activeJobs.find((job) => job.kind === 'tautulli_sync');
+  const [seerrURL, setSeerrURL] = useState(seerr?.baseUrl || '');
+  const [seerrKey, setSeerrKey] = useState('');
+  const [tautulliURL, setTautulliURL] = useState(tautulliSetting?.baseUrl || '');
+  const [tautulliKey, setTautulliKey] = useState('');
+
+  useEffect(() => {
+    setSeerrURL(seerr?.baseUrl || '');
+    setSeerrKey('');
+  }, [seerr?.baseUrl, seerr?.apiKeyConfigured]);
+
+  useEffect(() => {
+    setTautulliURL(tautulliSetting?.baseUrl || '');
+    setTautulliKey('');
+  }, [tautulliSetting?.baseUrl, tautulliSetting?.apiKeyConfigured]);
+
+  return (
+    <section className="signals-panel">
+      <div className="panel-heading">
+        <div>
+          <h2>Stewardship Signals</h2>
+          <p>request intent and external activity enrich suggestions without deleting media</p>
+        </div>
+        <span className="status-pill">{requestSignals.length} requests</span>
+      </div>
+      <div className="signals-columns">
+        <form className="signal-source-card" onSubmit={(event) => {
+          event.preventDefault();
+          onRequestSourceUpdate('seerr', { kind: 'seerr', name: 'Seerr', baseUrl: seerrURL, apiKey: seerrKey || undefined, enabled: true });
+        }}>
+          <div className="panel-heading">
+            <h2>Seerr</h2>
+            <span>{seerr?.apiKeyConfigured ? `key ...${seerr.apiKeyLast4 || ''}` : 'not connected'}</span>
+          </div>
+          <label>
+            URL
+            <input value={seerrURL} onChange={(event) => setSeerrURL(event.target.value)} placeholder="http://jellyseerr:5055" />
+          </label>
+          <label>
+            API key
+            <input value={seerrKey} onChange={(event) => setSeerrKey(event.target.value)} type="password" placeholder={seerr?.apiKeyConfigured ? `Configured ...${seerr.apiKeyLast4 || ''}` : 'Paste key'} />
+          </label>
+          <div className="button-row">
+            <button className="secondary-button" type="submit" disabled={busy || !seerrURL.trim()}>
+              <Save size={16} />
+              Save
+            </button>
+            <button className="primary-button" type="button" disabled={busy || !seerr?.apiKeyConfigured} onClick={() => onRequestSourceSync('seerr')}>
+              <Database size={16} />
+              Sync requests
+            </button>
+          </div>
+        </form>
+        <form className="signal-source-card" onSubmit={(event) => {
+          event.preventDefault();
+          onIntegrationUpdate('tautulli', { baseUrl: tautulliURL, apiKey: tautulliKey || undefined, autoSyncEnabled: false });
+        }}>
+          <div className="panel-heading">
+            <h2>{tautulli?.name || 'Tautulli'}</h2>
+            <span>{tautulli?.status || 'not_configured'}</span>
+          </div>
+          <label>
+            URL
+            <input value={tautulliURL} onChange={(event) => setTautulliURL(event.target.value)} placeholder="http://tautulli:8181" />
+          </label>
+          <label>
+            API key
+            <input value={tautulliKey} onChange={(event) => setTautulliKey(event.target.value)} type="password" placeholder={tautulliSetting?.apiKeyConfigured ? `Configured ...${tautulliSetting.apiKeyLast4 || ''}` : 'Paste key'} />
+          </label>
+          <div className="button-row">
+            <button className="secondary-button" type="submit" disabled={busy || !tautulliURL.trim()}>
+              <Save size={16} />
+              Save
+            </button>
+            <button className="primary-button" type="button" disabled={busy || !tautulliSetting?.apiKeyConfigured} onClick={onTautulliSync}>
+              <Activity size={16} />
+              {tautulliJob ? 'Syncing' : 'Sync activity'}
+            </button>
+          </div>
+        </form>
+      </div>
+      <div className="request-signal-list">
+        {requestSignals.slice(0, 8).map((signal) => (
+          <div className="compact-row" key={`${signal.sourceId}-${signal.externalRequestId}`}>
+            <div>
+              <strong>{signal.title || signal.externalMediaId || signal.externalRequestId}</strong>
+              <span>{signal.mediaType} • {signal.status} • {signal.availability} • {signal.requestedBy || 'unknown requester'}</span>
+            </div>
+            <span className="status-pill">{signal.providerIds.tmdb || signal.providerIds.tvdb || signal.providerIds.imdb || 'no id'}</span>
+          </div>
+        ))}
+        {requestSignals.length === 0 && <EmptyState icon={<Archive />} text="No request signals imported." />}
+      </div>
     </section>
   );
 }

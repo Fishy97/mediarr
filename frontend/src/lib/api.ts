@@ -9,6 +9,7 @@ import type {
   CampaignResult,
   CampaignRun,
   CampaignRunResponse,
+  CampaignTemplate,
   CatalogCorrectionInput,
   CatalogItem,
   Integration,
@@ -25,13 +26,22 @@ import type {
   ProviderHealth,
   ProviderSetting,
   ProviderSettingInput,
+  ProtectionRequest,
+  PublicationInput,
+  PublicationPlan,
   Recommendation,
   RecommendationEvidence,
+  RequestSignal,
+  RequestSource,
+  RequestSourceInput,
   ScanResult,
   SetupStatus,
   PathMappingVerification,
+  StorageLedger,
+  StewardshipNotification,
   SupportBundle,
   SupportBundleResult,
+  WhatIfSimulation,
 } from '../types';
 
 type Envelope<T> = { data: T };
@@ -170,6 +180,9 @@ export const api = {
   async syncIntegration(id: string): Promise<IntegrationSyncJob> {
     return (await request<Envelope<IntegrationSyncJob>>(`/api/v1/integrations/${encodeURIComponent(id)}/sync`, { method: 'POST' })).data;
   },
+  async syncTautulli(): Promise<Job> {
+    return (await request<Envelope<Job>>('/api/v1/integrations/tautulli/sync', { method: 'POST' })).data;
+  },
   async integrationSyncStatus(id: string): Promise<IntegrationSyncJob> {
     return (await request<Envelope<IntegrationSyncJob>>(`/api/v1/integrations/${encodeURIComponent(id)}/sync`)).data;
   },
@@ -224,6 +237,32 @@ export const api = {
     const suffix = params.toString() ? `?${params.toString()}` : '';
     return (await request<Envelope<ActivityRollup[]>>(`/api/v1/activity/rollups${suffix}`)).data;
   },
+  async requestSources(): Promise<RequestSource[]> {
+    return (await request<Envelope<RequestSource[] | null>>('/api/v1/request-sources')).data ?? [];
+  },
+  async updateRequestSource(id: string, source: RequestSourceInput): Promise<RequestSource> {
+    return (await request<Envelope<RequestSource>>(`/api/v1/request-sources/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(source),
+    })).data;
+  },
+  async syncRequestSource(id: string): Promise<{ sourceId: string; imported: number }> {
+    return (await request<Envelope<{ sourceId: string; imported: number }>>(`/api/v1/request-sources/${encodeURIComponent(id)}/sync`, { method: 'POST' })).data;
+  },
+  async requestSignals(sourceId?: string): Promise<RequestSignal[]> {
+    const params = new URLSearchParams();
+    if (sourceId) {
+      params.set('sourceId', sourceId);
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return (await request<Envelope<RequestSignal[] | null>>(`/api/v1/request-signals${suffix}`)).data ?? [];
+  },
+  async campaignTemplates(): Promise<CampaignTemplate[]> {
+    return (await request<Envelope<CampaignTemplate[]>>('/api/v1/campaign-templates')).data;
+  },
+  async createCampaignFromTemplate(id: string): Promise<Campaign> {
+    return (await request<Envelope<Campaign>>(`/api/v1/campaign-templates/${encodeURIComponent(id)}/create`, { method: 'POST' })).data;
+  },
   async campaigns(): Promise<Campaign[]> {
     return (await request<Envelope<Campaign[] | null>>('/api/v1/campaigns')).data ?? [];
   },
@@ -245,11 +284,62 @@ export const api = {
   async simulateCampaign(id: string): Promise<CampaignResult> {
     return (await request<Envelope<CampaignResult>>(`/api/v1/campaigns/${encodeURIComponent(id)}/simulate`, { method: 'POST' })).data;
   },
+  async whatIfCampaign(id: string): Promise<WhatIfSimulation> {
+    return (await request<Envelope<WhatIfSimulation>>(`/api/v1/campaigns/${encodeURIComponent(id)}/what-if`, { method: 'POST' })).data;
+  },
   async runCampaign(id: string): Promise<CampaignRunResponse> {
     return (await request<Envelope<CampaignRunResponse>>(`/api/v1/campaigns/${encodeURIComponent(id)}/run`, { method: 'POST' })).data;
   },
+  async publishCampaignPreview(id: string, input: PublicationInput): Promise<PublicationPlan> {
+    return (await request<Envelope<PublicationPlan>>(`/api/v1/campaigns/${encodeURIComponent(id)}/publish-preview`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })).data;
+  },
+  async publishCampaignCollection(id: string, input: PublicationInput): Promise<PublicationPlan> {
+    return (await request<Envelope<PublicationPlan>>(`/api/v1/campaigns/${encodeURIComponent(id)}/publish`, {
+      method: 'POST',
+      body: JSON.stringify({ ...input, confirmPublish: true }),
+    })).data;
+  },
   async campaignRuns(id: string): Promise<CampaignRun[]> {
     return (await request<Envelope<CampaignRun[]>>(`/api/v1/campaigns/${encodeURIComponent(id)}/runs`)).data;
+  },
+  async storageLedger(): Promise<StorageLedger> {
+    return (await request<Envelope<StorageLedger>>('/api/v1/storage-ledger')).data;
+  },
+  async notifications(includeRead = false): Promise<StewardshipNotification[]> {
+    const suffix = includeRead ? '?includeRead=true' : '';
+    return (await request<Envelope<StewardshipNotification[] | null>>(`/api/v1/notifications${suffix}`)).data ?? [];
+  },
+  async markNotificationRead(id: string): Promise<StewardshipNotification> {
+    return (await request<Envelope<StewardshipNotification>>(`/api/v1/notifications/${encodeURIComponent(id)}/read`, { method: 'POST' })).data;
+  },
+  async protectionRequests(status?: string): Promise<ProtectionRequest[]> {
+    const params = new URLSearchParams();
+    if (status) {
+      params.set('status', status);
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return (await request<Envelope<ProtectionRequest[] | null>>(`/api/v1/protection-requests${suffix}`)).data ?? [];
+  },
+  async createProtectionRequest(protectionRequest: Omit<ProtectionRequest, 'id' | 'status' | 'createdAt' | 'decidedAt'>): Promise<ProtectionRequest> {
+    return (await request<Envelope<ProtectionRequest>>('/api/v1/protection-requests', {
+      method: 'POST',
+      body: JSON.stringify(protectionRequest),
+    })).data;
+  },
+  async approveProtectionRequest(id: string, decisionBy: string, note: string): Promise<ProtectionRequest> {
+    return (await request<Envelope<ProtectionRequest>>(`/api/v1/protection-requests/${encodeURIComponent(id)}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ decisionBy, note }),
+    })).data;
+  },
+  async declineProtectionRequest(id: string, decisionBy: string, note: string): Promise<ProtectionRequest> {
+    return (await request<Envelope<ProtectionRequest>>(`/api/v1/protection-requests/${encodeURIComponent(id)}/decline`, {
+      method: 'POST',
+      body: JSON.stringify({ decisionBy, note }),
+    })).data;
   },
   async pathMappings(): Promise<PathMapping[]> {
     return (await request<Envelope<PathMapping[]>>('/api/v1/path-mappings')).data;

@@ -124,6 +124,61 @@ describe('api auth helpers', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/v1/path-mappings/map_1/verify', expect.objectContaining({ method: 'POST' }));
   });
 
+  test('stewardship advantage endpoints expose request analytics and safety workflows', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ data: [{ id: 'seerr', kind: 'seerr', name: 'Jellyseerr', apiKeyConfigured: true }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'seerr', kind: 'seerr', name: 'Jellyseerr', apiKeyConfigured: true } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { sourceId: 'seerr', imported: 2 } }))
+      .mockResolvedValueOnce(jsonResponse({ data: [{ sourceId: 'seerr', title: 'Arrival', providerIds: { tmdb: '329865' } }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'job_tautulli', targetId: 'tautulli', status: 'queued' } }))
+      .mockResolvedValueOnce(jsonResponse({ data: [{ id: 'cold-movies', name: 'Cold Movies', campaign: { name: 'Cold Movies', rules: [] } }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'campaign_template_cold_movies', name: 'Cold Movies' } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { campaigns: 1, matched: 1, estimatedBytes: 42000000000, requestConflicts: 1 } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'pub_1', campaignId: 'campaign_template_cold_movies', status: 'preview', dryRun: true, publishableItems: 1, blockedItems: 0, items: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { locallyVerifiedBytes: 42000000000, totalEstimatedBytes: 42000000000 } }))
+      .mockResolvedValueOnce(jsonResponse({ data: [{ id: 'ntf_1', title: 'Sync complete', level: 'info', read: false }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'ntf_1', read: true } }))
+      .mockResolvedValueOnce(jsonResponse({ data: [{ id: 'prt_1', title: 'Arrival', requestedBy: 'alex', status: 'pending' }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'prt_2', title: 'Arrival', requestedBy: 'alex', status: 'pending' } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'prt_2', status: 'approved' } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'prt_2', status: 'declined' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.requestSources()).resolves.toHaveLength(1);
+    await expect(api.updateRequestSource('seerr', { kind: 'seerr', name: 'Jellyseerr', apiKey: 'secret' })).resolves.toMatchObject({ id: 'seerr' });
+    await expect(api.syncRequestSource('seerr')).resolves.toMatchObject({ imported: 2 });
+    await expect(api.requestSignals('seerr')).resolves.toHaveLength(1);
+    await expect(api.syncTautulli()).resolves.toMatchObject({ id: 'job_tautulli' });
+    await expect(api.campaignTemplates()).resolves.toHaveLength(1);
+    await expect(api.createCampaignFromTemplate('cold-movies')).resolves.toMatchObject({ id: 'campaign_template_cold_movies' });
+    await expect(api.whatIfCampaign('campaign_template_cold_movies')).resolves.toMatchObject({ requestConflicts: 1 });
+    await expect(api.publishCampaignPreview('campaign_template_cold_movies', { serverId: 'jellyfin', collectionTitle: 'Leaving Soon' })).resolves.toMatchObject({ status: 'preview' });
+    await expect(api.storageLedger()).resolves.toMatchObject({ locallyVerifiedBytes: 42000000000 });
+    await expect(api.notifications()).resolves.toHaveLength(1);
+    await expect(api.markNotificationRead('ntf_1')).resolves.toMatchObject({ read: true });
+    await expect(api.protectionRequests()).resolves.toHaveLength(1);
+    await expect(api.createProtectionRequest({ title: 'Arrival', requestedBy: 'alex' })).resolves.toMatchObject({ id: 'prt_2' });
+    await expect(api.approveProtectionRequest('prt_2', 'admin', 'family favorite')).resolves.toMatchObject({ status: 'approved' });
+    await expect(api.declineProtectionRequest('prt_2', 'admin', 'not needed')).resolves.toMatchObject({ status: 'declined' });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/request-sources', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/request-sources/seerr', expect.objectContaining({ method: 'PUT' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/v1/request-sources/seerr/sync', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/v1/request-signals?sourceId=seerr', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/v1/integrations/tautulli/sync', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/v1/campaign-templates', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/v1/campaign-templates/cold-movies/create', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(8, '/api/v1/campaigns/campaign_template_cold_movies/what-if', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(9, '/api/v1/campaigns/campaign_template_cold_movies/publish-preview', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(10, '/api/v1/storage-ledger', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(11, '/api/v1/notifications', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(12, '/api/v1/notifications/ntf_1/read', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(13, '/api/v1/protection-requests', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(14, '/api/v1/protection-requests', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(15, '/api/v1/protection-requests/prt_2/approve', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(16, '/api/v1/protection-requests/prt_2/decline', expect.objectContaining({ method: 'POST' }));
+  });
+
   test('jobs endpoints expose active background progress', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ data: [{ id: 'job_1', kind: 'filesystem_scan', status: 'running', phase: 'processing' }] }))
