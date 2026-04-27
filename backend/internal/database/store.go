@@ -16,6 +16,7 @@ import (
 	"github.com/Fishy97/mediarr/backend/internal/catalog"
 	"github.com/Fishy97/mediarr/backend/internal/filescan"
 	"github.com/Fishy97/mediarr/backend/internal/recommendations"
+	"github.com/Fishy97/mediarr/backend/internal/stewardship"
 
 	_ "modernc.org/sqlite"
 )
@@ -595,6 +596,84 @@ func (store *Store) migrate() error {
 			error TEXT NOT NULL DEFAULT '',
 			started_at TEXT NOT NULL,
 			completed_at TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS request_sources (
+			id TEXT PRIMARY KEY,
+			kind TEXT NOT NULL,
+			name TEXT NOT NULL,
+			base_url TEXT NOT NULL DEFAULT '',
+			api_key TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			last_synced_at TEXT,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS media_request_signals (
+			source_id TEXT NOT NULL,
+			external_request_id TEXT NOT NULL,
+			media_type TEXT NOT NULL,
+			external_media_id TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT '',
+			availability TEXT NOT NULL DEFAULT '',
+			requested_by TEXT NOT NULL DEFAULT '',
+			provider_ids TEXT NOT NULL DEFAULT '{}',
+			estimated_bytes INTEGER NOT NULL DEFAULT 0,
+			requested_at TEXT,
+			approved_at TEXT,
+			available_at TEXT,
+			updated_at TEXT,
+			PRIMARY KEY (source_id, external_request_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS tautulli_sync_jobs (
+			id TEXT PRIMARY KEY,
+			status TEXT NOT NULL,
+			items_imported INTEGER NOT NULL DEFAULT 0,
+			cursor TEXT NOT NULL DEFAULT '',
+			error TEXT NOT NULL DEFAULT '',
+			started_at TEXT NOT NULL,
+			completed_at TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS collection_publications (
+			id TEXT PRIMARY KEY,
+			campaign_id TEXT NOT NULL,
+			server_id TEXT NOT NULL,
+			collection_title TEXT NOT NULL,
+			dry_run INTEGER NOT NULL DEFAULT 1,
+			status TEXT NOT NULL,
+			publishable_items INTEGER NOT NULL DEFAULT 0,
+			blocked_items INTEGER NOT NULL DEFAULT 0,
+			publishable_estimated_bytes INTEGER NOT NULL DEFAULT 0,
+			blocked_estimated_bytes INTEGER NOT NULL DEFAULT 0,
+			items_json TEXT NOT NULL DEFAULT '[]',
+			error TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			published_at TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS notifications (
+			id TEXT PRIMARY KEY,
+			level TEXT NOT NULL,
+			title TEXT NOT NULL,
+			body TEXT NOT NULL DEFAULT '',
+			event_type TEXT NOT NULL DEFAULT '',
+			fields TEXT NOT NULL DEFAULT '{}',
+			read INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			read_at TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS protection_requests (
+			id TEXT PRIMARY KEY,
+			recommendation_id TEXT NOT NULL DEFAULT '',
+			server_id TEXT NOT NULL DEFAULT '',
+			external_item_id TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL,
+			path TEXT NOT NULL DEFAULT '',
+			reason TEXT NOT NULL DEFAULT '',
+			requested_by TEXT NOT NULL,
+			status TEXT NOT NULL,
+			decision_by TEXT NOT NULL DEFAULT '',
+			decision_note TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			decided_at TEXT
 		)`,
 	}
 	for _, statement := range statements {
@@ -2719,6 +2798,646 @@ func (store *Store) ListIntegrationSettingSecrets() ([]IntegrationSetting, error
 	return settings, rows.Err()
 }
 
+func (store *Store) UpsertRequestSource(input stewardship.RequestSourceInput) (stewardship.RequestSource, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.RequestSource{}, errors.New("nil database store")
+	}
+	kind := strings.ToLower(strings.TrimSpace(input.Kind))
+	if kind == "" {
+		kind = "seerr"
+	}
+	id := kind
+	if kind != "seerr" {
+		return stewardship.RequestSource{}, errors.New("unknown request source kind")
+	}
+	current := stewardship.RequestSource{ID: id, Kind: kind, Name: "Seerr", Enabled: true}
+	var lastSyncedAt sql.NullString
+	var updatedAtRaw string
+	err := store.DB.QueryRow(`SELECT id, kind, name, base_url, api_key, enabled, last_synced_at, updated_at
+		FROM request_sources WHERE id = ?`, id).Scan(
+		&current.ID,
+		&current.Kind,
+		&current.Name,
+		&current.BaseURL,
+		&current.APIKey,
+		&current.Enabled,
+		&lastSyncedAt,
+		&updatedAtRaw,
+	)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return stewardship.RequestSource{}, err
+	}
+	current.LastSyncedAt = parseSQLTime(lastSyncedAt)
+
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		name = current.Name
+	}
+	if name == "" {
+		name = "Seerr"
+	}
+	baseURL := strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
+	if baseURL == "" {
+		baseURL = current.BaseURL
+	}
+	apiKey := current.APIKey
+	if input.ClearAPIKey {
+		apiKey = ""
+	} else if strings.TrimSpace(input.APIKey) != "" {
+		apiKey = strings.TrimSpace(input.APIKey)
+	}
+	enabled := current.Enabled
+	if input.Enabled != nil {
+		enabled = *input.Enabled
+	}
+	updatedAt := time.Now().UTC()
+	_, err = store.DB.Exec(`INSERT INTO request_sources (
+			id, kind, name, base_url, api_key, enabled, last_synced_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			kind = excluded.kind,
+			name = excluded.name,
+			base_url = excluded.base_url,
+			api_key = excluded.api_key,
+			enabled = excluded.enabled,
+			updated_at = excluded.updated_at`,
+		id,
+		kind,
+		name,
+		baseURL,
+		apiKey,
+		boolInt(enabled),
+		formatOptionalTime(current.LastSyncedAt),
+		updatedAt.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return stewardship.RequestSource{}, err
+	}
+	return redactedRequestSource(stewardship.RequestSource{ID: id, Kind: kind, Name: name, BaseURL: baseURL, APIKey: apiKey, Enabled: enabled, LastSyncedAt: current.LastSyncedAt, UpdatedAt: updatedAt}), nil
+}
+
+func (store *Store) ListRequestSources() ([]stewardship.RequestSource, error) {
+	sources, err := store.listRequestSources(false)
+	if err != nil {
+		return nil, err
+	}
+	for index := range sources {
+		sources[index] = redactedRequestSource(sources[index])
+	}
+	return sources, nil
+}
+
+func (store *Store) ListRequestSourceSecrets() ([]stewardship.RequestSource, error) {
+	return store.listRequestSources(true)
+}
+
+func (store *Store) listRequestSources(includeSecrets bool) ([]stewardship.RequestSource, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	rows, err := store.DB.Query(`SELECT id, kind, name, base_url, api_key, enabled, last_synced_at, updated_at
+		FROM request_sources ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	sources := []stewardship.RequestSource{}
+	for rows.Next() {
+		var source stewardship.RequestSource
+		var lastSyncedAt sql.NullString
+		var updatedAtRaw string
+		if err := rows.Scan(&source.ID, &source.Kind, &source.Name, &source.BaseURL, &source.APIKey, &source.Enabled, &lastSyncedAt, &updatedAtRaw); err != nil {
+			return nil, err
+		}
+		source.LastSyncedAt = parseSQLTime(lastSyncedAt)
+		source.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAtRaw)
+		source.APIKeyConfigured = strings.TrimSpace(source.APIKey) != ""
+		source.APIKeyLast4 = last4(source.APIKey)
+		if !includeSecrets {
+			source.APIKey = ""
+		}
+		sources = append(sources, source)
+	}
+	return sources, rows.Err()
+}
+
+func (store *Store) ReplaceRequestSignals(sourceID string, signals []stewardship.RequestSignal) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return errors.New("request source id is required")
+	}
+	tx, err := store.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM media_request_signals WHERE source_id = ?`, sourceID); err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(`INSERT INTO media_request_signals (
+			source_id, external_request_id, media_type, external_media_id, title, status, availability,
+			requested_by, provider_ids, estimated_bytes, requested_at, approved_at, available_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	now := time.Now().UTC()
+	for _, signal := range signals {
+		signal.SourceID = defaultString(signal.SourceID, sourceID)
+		if strings.TrimSpace(signal.ExternalRequestID) == "" {
+			continue
+		}
+		if signal.ProviderIDs == nil {
+			signal.ProviderIDs = map[string]string{}
+		}
+		providerIDs, err := json.Marshal(signal.ProviderIDs)
+		if err != nil {
+			return err
+		}
+		if signal.UpdatedAt.IsZero() {
+			signal.UpdatedAt = now
+		}
+		if _, err := stmt.Exec(
+			signal.SourceID,
+			strings.TrimSpace(signal.ExternalRequestID),
+			strings.TrimSpace(signal.MediaType),
+			strings.TrimSpace(signal.ExternalMediaID),
+			strings.TrimSpace(signal.Title),
+			strings.TrimSpace(signal.Status),
+			strings.TrimSpace(signal.Availability),
+			strings.TrimSpace(signal.RequestedBy),
+			string(providerIDs),
+			signal.EstimatedBytes,
+			formatOptionalTime(signal.RequestedAt),
+			formatOptionalTime(signal.ApprovedAt),
+			formatOptionalTime(signal.AvailableAt),
+			formatOptionalTime(signal.UpdatedAt),
+		); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`UPDATE request_sources SET last_synced_at = ?, updated_at = ? WHERE id = ?`,
+		now.Format(time.RFC3339Nano),
+		now.Format(time.RFC3339Nano),
+		sourceID,
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (store *Store) ListRequestSignals(sourceID string) ([]stewardship.RequestSignal, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	query := `SELECT source_id, external_request_id, media_type, external_media_id, title, status, availability,
+			requested_by, provider_ids, estimated_bytes, requested_at, approved_at, available_at, updated_at
+		FROM media_request_signals`
+	args := []any{}
+	if strings.TrimSpace(sourceID) != "" {
+		query += ` WHERE source_id = ?`
+		args = append(args, strings.TrimSpace(sourceID))
+	}
+	query += ` ORDER BY source_id, requested_at DESC, external_request_id`
+	rows, err := store.DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	signals := []stewardship.RequestSignal{}
+	for rows.Next() {
+		var signal stewardship.RequestSignal
+		var providers string
+		var requestedAt sql.NullString
+		var approvedAt sql.NullString
+		var availableAt sql.NullString
+		var updatedAt sql.NullString
+		if err := rows.Scan(
+			&signal.SourceID,
+			&signal.ExternalRequestID,
+			&signal.MediaType,
+			&signal.ExternalMediaID,
+			&signal.Title,
+			&signal.Status,
+			&signal.Availability,
+			&signal.RequestedBy,
+			&providers,
+			&signal.EstimatedBytes,
+			&requestedAt,
+			&approvedAt,
+			&availableAt,
+			&updatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(providers), &signal.ProviderIDs); err != nil {
+			return nil, err
+		}
+		if signal.ProviderIDs == nil {
+			signal.ProviderIDs = map[string]string{}
+		}
+		signal.RequestedAt = parseSQLTime(requestedAt)
+		signal.ApprovedAt = parseSQLTime(approvedAt)
+		signal.AvailableAt = parseSQLTime(availableAt)
+		signal.UpdatedAt = parseSQLTime(updatedAt)
+		signals = append(signals, signal)
+	}
+	return signals, rows.Err()
+}
+
+func (store *Store) RecordTautulliSyncJob(job stewardship.TautulliSyncJob) error {
+	if store == nil || store.DB == nil {
+		return errors.New("nil database store")
+	}
+	if strings.TrimSpace(job.ID) == "" {
+		job.ID = randomID("tt")
+	}
+	if strings.TrimSpace(job.Status) == "" {
+		job.Status = "completed"
+	}
+	if job.StartedAt.IsZero() {
+		job.StartedAt = time.Now().UTC()
+	}
+	_, err := store.DB.Exec(`INSERT INTO tautulli_sync_jobs (
+			id, status, items_imported, cursor, error, started_at, completed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		job.ID,
+		job.Status,
+		job.ItemsImported,
+		strings.TrimSpace(job.Cursor),
+		strings.TrimSpace(job.Error),
+		job.StartedAt.UTC().Format(time.RFC3339Nano),
+		formatOptionalTime(job.CompletedAt),
+	)
+	return err
+}
+
+func (store *Store) LatestTautulliSyncJob() (stewardship.TautulliSyncJob, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.TautulliSyncJob{}, errors.New("nil database store")
+	}
+	var job stewardship.TautulliSyncJob
+	var startedAt string
+	var completedAt sql.NullString
+	err := store.DB.QueryRow(`SELECT id, status, items_imported, cursor, error, started_at, completed_at
+		FROM tautulli_sync_jobs ORDER BY started_at DESC LIMIT 1`).Scan(
+		&job.ID,
+		&job.Status,
+		&job.ItemsImported,
+		&job.Cursor,
+		&job.Error,
+		&startedAt,
+		&completedAt,
+	)
+	if err != nil {
+		return stewardship.TautulliSyncJob{}, err
+	}
+	job.StartedAt, _ = time.Parse(time.RFC3339Nano, startedAt)
+	job.CompletedAt = parseSQLTime(completedAt)
+	return job, nil
+}
+
+func (store *Store) RecordCollectionPublication(plan stewardship.PublicationPlan) (stewardship.PublicationPlan, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.PublicationPlan{}, errors.New("nil database store")
+	}
+	if strings.TrimSpace(plan.ID) == "" {
+		plan.ID = randomID("pub")
+	}
+	if strings.TrimSpace(plan.Status) == "" {
+		plan.Status = "preview"
+	}
+	if plan.CreatedAt.IsZero() {
+		plan.CreatedAt = time.Now().UTC()
+	}
+	items, err := json.Marshal(plan.Items)
+	if err != nil {
+		return stewardship.PublicationPlan{}, err
+	}
+	_, err = store.DB.Exec(`INSERT INTO collection_publications (
+			id, campaign_id, server_id, collection_title, dry_run, status, publishable_items, blocked_items,
+			publishable_estimated_bytes, blocked_estimated_bytes, items_json, error, created_at, published_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			status = excluded.status,
+			publishable_items = excluded.publishable_items,
+			blocked_items = excluded.blocked_items,
+			publishable_estimated_bytes = excluded.publishable_estimated_bytes,
+			blocked_estimated_bytes = excluded.blocked_estimated_bytes,
+			items_json = excluded.items_json,
+			error = excluded.error,
+			published_at = excluded.published_at`,
+		plan.ID,
+		strings.TrimSpace(plan.CampaignID),
+		strings.TrimSpace(plan.ServerID),
+		strings.TrimSpace(plan.CollectionTitle),
+		boolInt(plan.DryRun),
+		strings.TrimSpace(plan.Status),
+		plan.PublishableItems,
+		plan.BlockedItems,
+		plan.PublishableEstimatedBytes,
+		plan.BlockedEstimatedBytes,
+		string(items),
+		strings.TrimSpace(plan.Error),
+		plan.CreatedAt.UTC().Format(time.RFC3339Nano),
+		formatOptionalTime(plan.PublishedAt),
+	)
+	if err != nil {
+		return stewardship.PublicationPlan{}, err
+	}
+	return store.GetCollectionPublication(plan.ID)
+}
+
+func (store *Store) MarkCollectionPublicationPublished(id string, status string, errText string) (stewardship.PublicationPlan, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.PublicationPlan{}, errors.New("nil database store")
+	}
+	status = strings.TrimSpace(status)
+	if status == "" {
+		status = "published"
+	}
+	var publishedAt any = nil
+	if status == "published" {
+		publishedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	_, err := store.DB.Exec(`UPDATE collection_publications SET status = ?, error = ?, published_at = ? WHERE id = ?`,
+		status,
+		strings.TrimSpace(errText),
+		publishedAt,
+		strings.TrimSpace(id),
+	)
+	if err != nil {
+		return stewardship.PublicationPlan{}, err
+	}
+	return store.GetCollectionPublication(id)
+}
+
+func (store *Store) GetCollectionPublication(id string) (stewardship.PublicationPlan, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.PublicationPlan{}, errors.New("nil database store")
+	}
+	return scanCollectionPublication(store.DB.QueryRow(`SELECT id, campaign_id, server_id, collection_title, dry_run, status,
+			publishable_items, blocked_items, publishable_estimated_bytes, blocked_estimated_bytes, items_json, error, created_at, published_at
+		FROM collection_publications WHERE id = ?`, strings.TrimSpace(id)))
+}
+
+func (store *Store) ListCollectionPublications(campaignID string) ([]stewardship.PublicationPlan, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	query := `SELECT id, campaign_id, server_id, collection_title, dry_run, status,
+			publishable_items, blocked_items, publishable_estimated_bytes, blocked_estimated_bytes, items_json, error, created_at, published_at
+		FROM collection_publications`
+	args := []any{}
+	if strings.TrimSpace(campaignID) != "" {
+		query += ` WHERE campaign_id = ?`
+		args = append(args, strings.TrimSpace(campaignID))
+	}
+	query += ` ORDER BY created_at DESC`
+	rows, err := store.DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	plans := []stewardship.PublicationPlan{}
+	for rows.Next() {
+		plan, err := scanCollectionPublication(rows)
+		if err != nil {
+			return nil, err
+		}
+		plans = append(plans, plan)
+	}
+	return plans, rows.Err()
+}
+
+func (store *Store) CreateNotification(notification stewardship.Notification) (stewardship.Notification, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.Notification{}, errors.New("nil database store")
+	}
+	notification = notification.WithDefaults()
+	if strings.TrimSpace(notification.Title) == "" {
+		return stewardship.Notification{}, errors.New("notification title is required")
+	}
+	fields, err := json.Marshal(notification.Fields)
+	if err != nil {
+		return stewardship.Notification{}, err
+	}
+	_, err = store.DB.Exec(`INSERT INTO notifications (
+			id, level, title, body, event_type, fields, read, created_at, read_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		notification.ID,
+		notification.Level,
+		strings.TrimSpace(notification.Title),
+		strings.TrimSpace(notification.Body),
+		strings.TrimSpace(notification.EventType),
+		string(fields),
+		boolInt(notification.Read),
+		notification.CreatedAt.UTC().Format(time.RFC3339Nano),
+		formatOptionalTime(notification.ReadAt),
+	)
+	if err != nil {
+		return stewardship.Notification{}, err
+	}
+	return notification, nil
+}
+
+func (store *Store) MarkNotificationRead(id string) (stewardship.Notification, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.Notification{}, errors.New("nil database store")
+	}
+	now := time.Now().UTC()
+	_, err := store.DB.Exec(`UPDATE notifications SET read = 1, read_at = ? WHERE id = ?`, now.Format(time.RFC3339Nano), strings.TrimSpace(id))
+	if err != nil {
+		return stewardship.Notification{}, err
+	}
+	return store.GetNotification(id)
+}
+
+func (store *Store) GetNotification(id string) (stewardship.Notification, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.Notification{}, errors.New("nil database store")
+	}
+	return scanNotification(store.DB.QueryRow(`SELECT id, level, title, body, event_type, fields, read, created_at, read_at
+		FROM notifications WHERE id = ?`, strings.TrimSpace(id)))
+}
+
+func (store *Store) ListNotifications(includeRead bool, limit int) ([]stewardship.Notification, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	query := `SELECT id, level, title, body, event_type, fields, read, created_at, read_at FROM notifications`
+	args := []any{}
+	if !includeRead {
+		query += ` WHERE read = 0`
+	}
+	query += ` ORDER BY created_at DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := store.DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	notifications := []stewardship.Notification{}
+	for rows.Next() {
+		notification, err := scanNotification(rows)
+		if err != nil {
+			return nil, err
+		}
+		notifications = append(notifications, notification)
+	}
+	return notifications, rows.Err()
+}
+
+func (store *Store) CreateProtectionRequest(request stewardship.ProtectionRequest) (stewardship.ProtectionRequest, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.ProtectionRequest{}, errors.New("nil database store")
+	}
+	request = request.WithDefaults()
+	if strings.TrimSpace(request.Title) == "" {
+		return stewardship.ProtectionRequest{}, errors.New("protection request title is required")
+	}
+	if strings.TrimSpace(request.RequestedBy) == "" {
+		return stewardship.ProtectionRequest{}, errors.New("requested by is required")
+	}
+	_, err := store.DB.Exec(`INSERT INTO protection_requests (
+			id, recommendation_id, server_id, external_item_id, title, path, reason, requested_by,
+			status, decision_by, decision_note, created_at, decided_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		request.ID,
+		strings.TrimSpace(request.RecommendationID),
+		strings.TrimSpace(request.ServerID),
+		strings.TrimSpace(request.ExternalItemID),
+		strings.TrimSpace(request.Title),
+		strings.TrimSpace(request.Path),
+		strings.TrimSpace(request.Reason),
+		strings.TrimSpace(request.RequestedBy),
+		request.Status,
+		strings.TrimSpace(request.DecisionBy),
+		strings.TrimSpace(request.DecisionNote),
+		request.CreatedAt.UTC().Format(time.RFC3339Nano),
+		formatOptionalTime(request.DecidedAt),
+	)
+	if err != nil {
+		return stewardship.ProtectionRequest{}, err
+	}
+	return request, nil
+}
+
+func (store *Store) DecideProtectionRequest(id string, approve bool, decisionBy string, note string) (stewardship.ProtectionRequest, error) {
+	request, err := store.GetProtectionRequest(id)
+	if err != nil {
+		return stewardship.ProtectionRequest{}, err
+	}
+	if approve {
+		request, err = request.Approve(decisionBy, note)
+	} else {
+		request, err = request.Decline(decisionBy, note)
+	}
+	if err != nil {
+		return stewardship.ProtectionRequest{}, err
+	}
+	_, err = store.DB.Exec(`UPDATE protection_requests SET status = ?, decision_by = ?, decision_note = ?, decided_at = ? WHERE id = ?`,
+		request.Status,
+		request.DecisionBy,
+		request.DecisionNote,
+		formatOptionalTime(request.DecidedAt),
+		request.ID,
+	)
+	if err != nil {
+		return stewardship.ProtectionRequest{}, err
+	}
+	if approve && request.RecommendationID != "" {
+		_ = store.SetRecommendationState(request.RecommendationID, recommendations.StateProtected)
+	}
+	return request, nil
+}
+
+func (store *Store) GetProtectionRequest(id string) (stewardship.ProtectionRequest, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.ProtectionRequest{}, errors.New("nil database store")
+	}
+	return scanProtectionRequest(store.DB.QueryRow(`SELECT id, recommendation_id, server_id, external_item_id, title, path, reason, requested_by,
+			status, decision_by, decision_note, created_at, decided_at
+		FROM protection_requests WHERE id = ?`, strings.TrimSpace(id)))
+}
+
+func (store *Store) ListProtectionRequests(status string) ([]stewardship.ProtectionRequest, error) {
+	if store == nil || store.DB == nil {
+		return nil, errors.New("nil database store")
+	}
+	query := `SELECT id, recommendation_id, server_id, external_item_id, title, path, reason, requested_by,
+			status, decision_by, decision_note, created_at, decided_at
+		FROM protection_requests`
+	args := []any{}
+	if strings.TrimSpace(status) != "" {
+		query += ` WHERE status = ?`
+		args = append(args, strings.TrimSpace(status))
+	}
+	query += ` ORDER BY created_at DESC`
+	rows, err := store.DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	requests := []stewardship.ProtectionRequest{}
+	for rows.Next() {
+		request, err := scanProtectionRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		requests = append(requests, request)
+	}
+	return requests, rows.Err()
+}
+
+func (store *Store) StorageLedger() (stewardship.StorageLedger, error) {
+	if store == nil || store.DB == nil {
+		return stewardship.StorageLedger{}, errors.New("nil database store")
+	}
+	rows, err := store.DB.Query(`SELECT id, action, state, title, explanation, space_saved_bytes, confidence, source, affected_paths, destructive,
+			ai_rationale, ai_tags, ai_confidence, ai_source,
+			server_id, external_item_id, last_played_at, play_count, unique_users, favorite_count, verification, evidence
+		FROM recommendations
+		ORDER BY space_saved_bytes DESC, id`)
+	if err != nil {
+		return stewardship.StorageLedger{}, err
+	}
+	defer rows.Close()
+	ledgerRecs := []stewardship.LedgerRecommendation{}
+	for rows.Next() {
+		rec, err := scanRecommendation(rows)
+		if err != nil {
+			return stewardship.StorageLedger{}, err
+		}
+		evidence := recommendations.BuildEvidence(rec)
+		ledgerRecs = append(ledgerRecs, stewardship.LedgerRecommendation{
+			ID:             rec.ID,
+			State:          string(rec.State),
+			EstimatedBytes: evidence.Storage.EstimatedSavingsBytes,
+			VerifiedBytes:  evidence.Storage.VerifiedSavingsBytes,
+			Verification:   evidence.Storage.Verification,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return stewardship.StorageLedger{}, err
+	}
+	signals, err := store.ListRequestSignals("")
+	if err != nil {
+		return stewardship.StorageLedger{}, err
+	}
+	return stewardship.BuildStorageLedger(stewardship.LedgerInput{Recommendations: ledgerRecs, RequestSignals: signals}), nil
+}
+
 func (store *Store) UpsertCatalogCorrection(mediaFileID string, input CatalogCorrectionInput) (CatalogCorrection, error) {
 	if store == nil || store.DB == nil {
 		return CatalogCorrection{}, errors.New("nil database store")
@@ -2821,6 +3540,13 @@ func redactedIntegrationSetting(integration string, baseURL string, apiKey strin
 		AutoSyncIntervalMinutes: normalizeAutoSyncIntervalMinutes(autoSyncIntervalMinutes),
 		UpdatedAt:               updatedAt,
 	}
+}
+
+func redactedRequestSource(source stewardship.RequestSource) stewardship.RequestSource {
+	source.APIKeyConfigured = strings.TrimSpace(source.APIKey) != ""
+	source.APIKeyLast4 = last4(source.APIKey)
+	source.APIKey = ""
+	return source
 }
 
 func defaultAutoSyncIntervalMinutes() int {
@@ -3000,6 +3726,18 @@ type campaignRunScanner interface {
 	Scan(dest ...any) error
 }
 
+type collectionPublicationScanner interface {
+	Scan(dest ...any) error
+}
+
+type notificationScanner interface {
+	Scan(dest ...any) error
+}
+
+type protectionRequestScanner interface {
+	Scan(dest ...any) error
+}
+
 func recommendationStates(tx *sql.Tx) (map[string]recommendations.State, error) {
 	rows, err := tx.Query(`SELECT id, state FROM recommendations`)
 	if err != nil {
@@ -3093,6 +3831,99 @@ func scanCampaignRun(scanner campaignRunScanner) (campaigns.Run, error) {
 	run.StartedAt, _ = time.Parse(time.RFC3339Nano, startedAt)
 	run.CompletedAt = parseSQLTime(completedAt)
 	return run, nil
+}
+
+func scanCollectionPublication(scanner collectionPublicationScanner) (stewardship.PublicationPlan, error) {
+	var plan stewardship.PublicationPlan
+	var dryRun int
+	var items string
+	var createdAt string
+	var publishedAt sql.NullString
+	if err := scanner.Scan(
+		&plan.ID,
+		&plan.CampaignID,
+		&plan.ServerID,
+		&plan.CollectionTitle,
+		&dryRun,
+		&plan.Status,
+		&plan.PublishableItems,
+		&plan.BlockedItems,
+		&plan.PublishableEstimatedBytes,
+		&plan.BlockedEstimatedBytes,
+		&items,
+		&plan.Error,
+		&createdAt,
+		&publishedAt,
+	); err != nil {
+		return stewardship.PublicationPlan{}, err
+	}
+	plan.DryRun = dryRun == 1
+	if items == "" {
+		items = "[]"
+	}
+	if err := json.Unmarshal([]byte(items), &plan.Items); err != nil {
+		return stewardship.PublicationPlan{}, err
+	}
+	plan.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	plan.PublishedAt = parseSQLTime(publishedAt)
+	return plan, nil
+}
+
+func scanNotification(scanner notificationScanner) (stewardship.Notification, error) {
+	var notification stewardship.Notification
+	var fields string
+	var read int
+	var createdAt string
+	var readAt sql.NullString
+	if err := scanner.Scan(
+		&notification.ID,
+		&notification.Level,
+		&notification.Title,
+		&notification.Body,
+		&notification.EventType,
+		&fields,
+		&read,
+		&createdAt,
+		&readAt,
+	); err != nil {
+		return stewardship.Notification{}, err
+	}
+	notification.Read = read == 1
+	if fields == "" {
+		fields = "{}"
+	}
+	if err := json.Unmarshal([]byte(fields), &notification.Fields); err != nil {
+		return stewardship.Notification{}, err
+	}
+	notification.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	notification.ReadAt = parseSQLTime(readAt)
+	return notification, nil
+}
+
+func scanProtectionRequest(scanner protectionRequestScanner) (stewardship.ProtectionRequest, error) {
+	var request stewardship.ProtectionRequest
+	var createdAt string
+	var decidedAt sql.NullString
+	if err := scanner.Scan(
+		&request.ID,
+		&request.RecommendationID,
+		&request.ServerID,
+		&request.ExternalItemID,
+		&request.Title,
+		&request.Path,
+		&request.Reason,
+		&request.RequestedBy,
+		&request.Status,
+		&request.DecisionBy,
+		&request.DecisionNote,
+		&createdAt,
+		&decidedAt,
+	); err != nil {
+		return stewardship.ProtectionRequest{}, err
+	}
+	request.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	request.DecidedAt = parseSQLTime(decidedAt)
+	return request, nil
 }
 
 func scanRecommendation(scanner recommendationScanner) (recommendations.Recommendation, error) {

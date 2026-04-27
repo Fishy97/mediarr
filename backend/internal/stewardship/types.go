@@ -82,6 +82,16 @@ type TautulliPlay struct {
 	PercentComplete int       `json:"percentComplete,omitempty"`
 }
 
+type TautulliSyncJob struct {
+	ID            string    `json:"id"`
+	Status        string    `json:"status"`
+	ItemsImported int       `json:"itemsImported"`
+	Cursor        string    `json:"cursor,omitempty"`
+	Error         string    `json:"error,omitempty"`
+	StartedAt     time.Time `json:"startedAt"`
+	CompletedAt   time.Time `json:"completedAt,omitempty"`
+}
+
 type LedgerRecommendation struct {
 	ID             string `json:"id"`
 	State          string `json:"state"`
