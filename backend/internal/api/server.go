@@ -2418,7 +2418,7 @@ func (server *Server) supportBundlesHandler(w http.ResponseWriter, r *http.Reque
 			Store:     server.store,
 			OutputDir: filepath.Join(server.configDir, "support"),
 			Service:   "mediarr",
-			Version:   "1.5.0",
+			Version:   "1.6.0",
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)

@@ -34,20 +34,36 @@ All API routes are rooted at `/api/v1`.
 | PUT | `/campaigns/{id}` | Update one campaign definition |
 | DELETE | `/campaigns/{id}` | Delete the campaign definition and run history without deleting media |
 | POST | `/campaigns/{id}/simulate` | Evaluate a campaign against imported media-server activity without changing recommendations |
+| POST | `/campaigns/{id}/what-if` | Evaluate a campaign and include request/protection conflicts plus unmapped blockers |
 | POST | `/campaigns/{id}/run` | Record a campaign run and create suggest-only campaign recommendations |
+| POST | `/campaigns/{id}/publish-preview` | Create a dry-run Leaving Soon collection publication plan from verified campaign matches |
+| POST | `/campaigns/{id}/publish` | Publish a verified collection plan; requires `confirmPublish: true` and does not delete media |
 | GET | `/campaigns/{id}/runs` | Campaign run history |
+| GET | `/campaign-templates` | Built-in stewardship campaign templates |
+| POST | `/campaign-templates/{id}/create` | Create an editable campaign from a built-in template |
 | GET | `/providers` | Metadata provider health and attribution |
 | GET | `/provider-settings` | Redacted provider credential and base URL settings |
 | PUT | `/provider-settings/{provider}` | Update provider base URL, API key, or clear stored key |
-| GET | `/integration-settings` | Redacted Jellyfin, Plex, and Emby connection settings |
-| PUT | `/integration-settings/{id}` | Update media-server base URL, API key/token, auto-sync settings, or clear stored key |
+| GET | `/integration-settings` | Redacted Jellyfin, Plex, Emby, and Tautulli connection settings |
+| PUT | `/integration-settings/{id}` | Update media-server or analytics base URL, API key/token, auto-sync settings, or clear stored key |
 | GET | `/integrations` | Media-server and AI integration status |
 | POST | `/integrations/{id}/refresh` | Request a Jellyfin, Plex, or Emby library refresh |
-| POST | `/integrations/{id}/sync` | Queue a background Jellyfin, Plex, or Emby inventory/activity sync job |
-| GET | `/integrations/{id}/sync` | Active or latest media-server sync job |
+| POST | `/integrations/{id}/sync` | Queue a background Jellyfin, Plex, Emby, or Tautulli sync job |
+| GET | `/integrations/{id}/sync` | Active or latest media-server or Tautulli sync job |
 | GET | `/integrations/{id}/diagnostics` | Imported inventory/activity proof summary, warnings, storage verification, and top suggestions |
 | GET | `/integrations/{id}/items` | Imported media-server items; supports `?unmapped=true` |
 | GET | `/activity/rollups` | Normalized media activity rollups; supports `?serverId=` |
+| GET | `/request-sources` | Redacted request-source settings |
+| PUT | `/request-sources/{id}` | Update Seerr-compatible request source URL, API key, and enabled state |
+| POST | `/request-sources/{id}/sync` | Import Seerr-compatible request signals |
+| GET | `/request-signals` | Imported request signals; supports `?sourceId=` |
+| GET | `/storage-ledger` | Storage ledger separating verified savings, estimates, blocked bytes, protected bytes, accepted manual bytes, and requested media |
+| GET | `/notifications` | Unread stewardship notifications; supports `?includeRead=true` |
+| POST | `/notifications/{id}/read` | Mark a stewardship notification read |
+| GET | `/protection-requests` | Protection requests; supports `?status=` |
+| POST | `/protection-requests` | Create a protection request |
+| POST | `/protection-requests/{id}/approve` | Approve a protection request and protect the linked recommendation when present |
+| POST | `/protection-requests/{id}/decline` | Decline a protection request |
 | GET | `/path-mappings` | Path prefix mappings used to resolve server paths to Mediarr paths |
 | GET | `/path-mappings/unmapped` | Imported server items that still lack usable local path evidence; supports `?serverId=` |
 | POST | `/path-mappings` | Create a path mapping |
@@ -82,6 +98,20 @@ Storage certainty labels have fixed meanings:
 Recommendation actions are suggest-only. `accept-manual` records that an administrator accepted the suggestion for manual action; it does not delete, move, quarantine, or overwrite media files.
 
 Campaign actions are also suggest-only. Campaign simulation returns matched items, suppressed items, estimated savings, verified savings, and confidence ranges without writing recommendations. Campaign runs create recommendations with action `review_campaign_match`, source `campaign:{id}`, `destructive=false`, and evidence fields such as `campaignId`, `campaignName`, `campaignRunId`, `matchedRules`, `estimatedSavingsBytes`, and `verifiedSavingsBytes`. Re-running a campaign replaces only open recommendations from the same campaign source and preserves ignored, protected, and accepted-for-manual decisions.
+
+Campaign what-if responses add the operational conflicts an admin needs before acting: `requestConflicts`, `protectionConflicts`, and `blockedUnmapped` counts, plus estimated and verified bytes. Publication preview responses are dry-runs by default and include every candidate with `publishable` and `blockedReason`. The publish endpoint requires `confirmPublish: true`; it creates a collection for verified items and still performs no delete, unmonitor, move, or quarantine action.
+
+Request-source sync is read-only. Seerr-compatible imports store normalized request state, availability, requester, provider IDs, and timestamps. Tautulli sync is also read-only; it enriches Plex rollups after Plex inventory has been imported. Raw provider payloads are not stored by default.
+
+The storage ledger intentionally separates trustworthy reclaimable space from estimates:
+
+- `locallyVerifiedBytes`: Mediarr found the file on a read-only mount and confirmed size.
+- `mappedEstimateBytes`: the server path maps to a Mediarr-visible prefix but local size still needs confirmation.
+- `serverReportedBytes`: the media server reported size, with no local proof yet.
+- `blockedUnmappedBytes`: path evidence is missing and the item should not be treated as cleanup-ready.
+- `protectedBytes`: protected media removed from the open queue.
+- `acceptedManualBytes`: suggestions accepted for human action.
+- `requestedMediaBytes`: imported request signals, used as context rather than cleanup savings.
 
 Provider and media-server API calls use bounded retry behavior for `429` and `5xx` responses. `Retry-After` is honored when present, capped to avoid wedging background jobs indefinitely.
 

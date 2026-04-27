@@ -19,6 +19,10 @@ Use this checklist before tagging a public Mediarr release.
 - CI has a dedicated no-delete safety job
 - recommendation evidence, protect, and accept-manual routes work
 - integration diagnostics route and in-app ingestion proof panel work after media-server sync
+- Seerr-compatible request source settings, sync, and request-signal list routes work
+- Tautulli settings and sync enrich Plex activity after Plex inventory exists
+- campaign templates, what-if simulation, Leaving Soon publication preview, and publish validation routes work
+- storage ledger, notification read, and protection request approve/decline routes work
 - path mapping unmapped and verify routes work
 - support bundle creation, listing, and download work from the UI and API, and redaction/path-safety tests prove provider/media-server API keys are excluded
 - background job cancel, retry, and stale recovery routes work
